@@ -1,0 +1,57 @@
+# --- 凭据 / 密钥：一律不入库（硬规矩，门禁见 tools/scan_secrets.py）---
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.pass
+*nats*pass*
+*credentials*.txt
+*_token*
+*token*.json
+id_rsa*
+id_ed25519*
+.ssh/
+
+# --- 运行时 / 缓存 ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+node_modules/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+*.log
+logs/
+*.sqlite
+*.db
+
+# --- 备份 / 临时 ---
+*.bak
+*.bak-*
+*.bak_*
+*.tmp
+*.swp
+*~
+
+# --- 大文件 / 模型权重：不进 git ---
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.whl
+*.bin
+*.gguf
+*.safetensors
+*.onnx
+*.mp4
+*.mov
