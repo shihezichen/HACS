@@ -12,7 +12,8 @@ a2a_svc.py —— A2A 服务端点（每个成员节点自己监听，统一端�
 
 用法：
     python a2a_svc.py --host <tailnet-ip> --port 9920 \
-        --config <deploy-dir>/agents.json --peers <deploy-dir>/peers.json
+        --config <agents.json 路径> --peers <peers.json 路径>
+    # 本文件内**零硬编码路径**：路径一律来自命令行参数或环境变量。
 """
 
 import argparse
@@ -82,7 +83,7 @@ CTX_SOFT_RATIO = 0.75             # 软阈值：过线先做语义压缩
 CTX_HARD_RATIO = 0.85             # 硬阈值：压缩后仍过线则换新 session 接力
 CTX_MIN_TOKENS_FLOOR = 8000       # 上下文太小时不折腾（小会话无需自愈）
 # 注意（脱敏）：本仓版本不内置任何绝对路径 —— 必须由部署方用环境变量给出
-# OpenClaw 会话档案路径（如 A2A_SESSIONS_JSON=<deploy-dir>/sessions.json）。
+# OpenClaw 会话档案路径（如 A2A_SESSIONS_JSON=<该节点的 sessions.json 路径>）。
 # 未配置时读取会失败并被降级处理：不压缩、照常续跑，不报错、不阻塞。
 SESSIONS_JSON_PATH = os.environ.get("A2A_SESSIONS_JSON", "")
 CTX_COMPACT_PROMPT = (

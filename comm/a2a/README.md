@@ -6,7 +6,9 @@
 | 文件 | 说明 |
 |---|---|
 | `a2a_svc.py` | A2A 端点服务（纯标准库，零 pip 依赖，语法兼容 Python 3.9） |
-| `README.md` | 本文件：设计要点 / 配置 / 部署 / 与生产版的差异 |
+| `restart_a2a.py` | Windows 侧启动件：按 `a2a.env` 分离拉起服务、并保留原命令行重启 |
+| `a2a.env.example` | 运行配置模板（主机/端口/各配置路径集中于此） |
+| `README.md` | 本文件：设计要点 / 配置 / 部署 / 运行注意 |
 
 ## 本仓这一版是什么
 
@@ -50,6 +52,8 @@
 | 变量 | 必需 | 说明 |
 |---|---|---|
 | `A2A_SESSIONS_JSON` | 自愈需要 | 会话档案（OpenClaw `sessions.json`）路径。**不留默认值**：不给则自愈静默降级 |
+| `A2A_HOST` / `A2A_PORT` | 否（本仓启动件用） | 监听地址与端口，供启动件读取后转成命令行参数 |
+| `A2A_SVC_SCRIPT` / `A2A_AGENTS_JSON` / `A2A_PEERS_JSON` / `A2A_PYTHONW` | 否（本仓启动件用） | Windows 启动件用的各文件位置 |
 | `A2A_ALLOW_ANON` | 否 | `1` 跳过鉴权，**仅限本地调试** |
 
 ## 部署
@@ -62,18 +66,58 @@ python3 a2a_svc.py --host <tailnet-ip> --port 9920 \
 - 默认绑 `127.0.0.1`；生产传 tailnet 的 `100.x` 地址，**绝不绑 `0.0.0.0`**。
 - `agents.json` 只配**本机承载**的 agent，未配置的 `agent_id` 一律 404 `unknown_agent`。
 - 对外公布的 host/port 取 `agents.json` 的 `host`/`port`，可用 `--advertise-host/--advertise-port` 覆盖。
-- systemd 最小件见 `deploy/`，启动件里加 `Environment=A2A_SESSIONS_JSON=...`。
+- systemd 最小件见 `deploy/`；unit 的 `[Service]` 段加一行
+  `Environment=A2A_SESSIONS_JSON=/root/.openclaw/agents/main/sessions/sessions.json`（路径按本机改）。
 
-## 与生产版的差异（仅脱敏，逻辑零改动）
+### 部署后自检（三条，逐项读回，别只看服务 active）
 
-1. 文档示例里的真实 tailnet IP → `<tailnet-ip>`；
-2. `SESSIONS_JSON_PATH` 不再内置绝对路径，改由 `A2A_SESSIONS_JSON` 提供；
-3. 读取 backend key 的局部变量改名（避开密钥扫描门禁对「字面量赋值」的误判）。
+```bash
+# ① 版本：应回本文件对应的 VERSION
+curl -s http://<本机 tailnet IP>:9920/healthz
+
+# ② 自愈链路：档案路径可达、会话键形态对得上
+python3 -c "import json;d=json.load(open('<sessions.json 路径>'));\
+print(len([k for k in d if ':a2a:' in k]),'a2a 会话')"
+
+# ③ 真调用（带 session_id，要求首轮 DONE）：看响应里的 loop_stop=done
+curl -s -X POST http://<本机 tailnet IP>:9920/a2a/<agent_id>/messages \
+  -H "Authorization: Bearer $(cat <client-token 路径>)" \
+  -H 'Content-Type: application/json; charset=utf-8' \
+  --data-binary '{"text":"只回一句 ok，末尾单独一行写 DONE。","session_id":"selftest","timeout_s":120}'
+```
+
+日志里对应出现 `task_loop 命中 DONE：round=1`；把 `timeout_s` 压到几秒则会看到
+`task_loop 预算耗尽：round=N` —— 后者正是**续跑多轮路径**生效的证据。
+
+## 零硬编码路径（2026-09-23 起的硬口径）
+
+`a2a_svc.py` 与 `restart_a2a.py` 里**不出现任何绝对路径**：主机、端口、`agents.json`、
+`peers.json`、会话档案、解释器全部由**启动件**注入，同一份代码可直接拷到任意节点。因此：
+
+- 换机 / 换账号 / 换目录：只改启动件，不动代码；
+- 会话档案路径由 `A2A_SESSIONS_JSON` 提供，**代码内不留默认值**（不给则自愈静默降级，不报错）。
+
+启动件按平台二选一：
+
+| 平台 | 启动件 | 路径写在哪 |
+|---|---|---|
+| Windows | `restart_a2a.py` + 同目录 `a2a.env` | `a2a.env` 里各 `A2A_*` 键 |
+| Linux | systemd unit | `[Service]` 段的 `Environment=`（或 `EnvironmentFile=`） |
+
+## 与生产版的关系
+
+2026-09-23 起，团队四个节点（thinkbook / lobster / top001 / quantum）已全部替换为本仓这一版，
+仓内文件即生产件。除文档示例里的 tailnet IP 用 `<...>` 占位、以及读取 backend key 的局部变量改名
+（避开密钥扫描门禁对「字面量赋值」的误判）外，与线上运行文件**内容一致**。
 
 ## 运行注意
 
 - **节点间版本要对齐**：不同版本混跑会出现「同一团队里 A 节点续跑、B 节点不续跑」的行为差；
   升级时逐节点替换并读回 `/healthz` 的 `version` 字段确认。
+- **unit 名各节点不同**：lobster / top001 是 `a2a-svc.service`，quantum 是 `agent-team-a2a.service`，
+  thinkbook 没有 systemd（走 `restart_a2a.py`）。升级脚本别按统一 unit 名写死。
+- 自愈水位窗口取自各节点 `sessions.json` 的 `contextTokens`，**各节点窗口大小不同**（128k / 200k / 1M 都见过）；
+  阈值是比例，无需按节点调参。
 - `/healthz` 与 Agent Card 无需鉴权；`/agents` 与 `/a2a/<id>/messages` 需 Bearer。
 
 ## 门禁回显
