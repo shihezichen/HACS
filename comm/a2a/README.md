@@ -29,8 +29,21 @@
 
 ### 2) 上下文自愈（方案乙·甲水位）
 
-续跑会让同一会话上下文越滚越大。每轮续跑前读该会话水位（`totalTokens / contextTokens`，读
-`A2A_SESSIONS_JSON` 指向的会话档案）：
+续跑会让同一会话上下文越滚越大。每轮续跑前读该会话水位，**水位来源按后端分派** —— 同一台机器
+上可能同时挂着 OpenClaw 与 Hermes 两种 agent，两者的会话落库位置完全不同：
+
+| 后端 | 判定依据 | 水位来源 | 会话键 |
+|---|---|---|---|
+| OpenClaw | backend 端口 `18789`，或 URL/模型名含 `openclaw` | `A2A_SESSIONS_JSON` 指向的会话档案（只读 JSON） | `agent:main:openai-user:a2a:<caller>:<sid>` |
+| Hermes | backend 端口 `8642`，或 URL/模型名含 `hermes` | `A2A_HERMES_STATE_DB` 指向的 `state.db`（**只读** SQLite） | `a2a:<caller>:<sid>` |
+| 其他 | 都判不出、且没配 OpenClaw 档案 | 无 → 静默降级 | — |
+
+Hermes 侧口径：取 `messages` 表 `active=1` 的 `content + tool_calls + reasoning_content`，按 Hermes
+自身的 token 粗估公式累加；窗口查其模型元数据表（`A2A_HERMES_AGENT_DIR`，缺则退回内置常量表）。
+Hermes 的会话隔离**不认 OpenAI `user` 字段**，须改注入 `X-Hermes-Session-Key` / `X-Hermes-Session-Id`
+请求头（OpenClaw 侧仍用 `user` 字段）。
+
+水位阈值一律按比例，与后端无关：
 
 | 水位 | 动作 |
 |---|---|
@@ -51,7 +64,9 @@
 
 | 变量 | 必需 | 说明 |
 |---|---|---|
-| `A2A_SESSIONS_JSON` | 自愈需要 | 会话档案（OpenClaw `sessions.json`）路径。**不留默认值**：不给则自愈静默降级 |
+| `A2A_SESSIONS_JSON` | 自愈需要（OpenClaw 后端） | 会话档案（OpenClaw `sessions.json`）路径。**不留默认值**：不给则自愈静默降级 |
+| `A2A_HERMES_STATE_DB` | 自愈需要（Hermes 后端） | Hermes `state.db` 路径，**只读**打开。不给则 Hermes 侧自愈静默降级 |
+| `A2A_HERMES_AGENT_DIR` | 否 | Hermes 安装目录，用于读模型窗口表；不给则退回内置常量表 |
 | `A2A_HOST` / `A2A_PORT` | 否（本仓启动件用） | 监听地址与端口，供启动件读取后转成命令行参数 |
 | `A2A_SVC_SCRIPT` / `A2A_AGENTS_JSON` / `A2A_PEERS_JSON` / `A2A_PYTHONW` | 否（本仓启动件用） | Windows 启动件用的各文件位置 |
 | `A2A_ALLOW_ANON` | 否 | `1` 跳过鉴权，**仅限本地调试** |
@@ -118,6 +133,10 @@ curl -s -X POST http://<本机 tailnet IP>:9920/a2a/<agent_id>/messages \
   thinkbook 没有 systemd（走 `restart_a2a.py`）。升级脚本别按统一 unit 名写死。
 - 自愈水位窗口取自各节点 `sessions.json` 的 `contextTokens`，**各节点窗口大小不同**（128k / 200k / 1M 都见过）；
   阈值是比例，无需按节点调参。
+- **后端类型不能只认端口**：各机 OpenClaw 网关端口并不统一（thinkbook `18789`、lobster `19805`…），
+  只认端口会把后者误判成「其他」而把自愈整个关掉。判定顺序为 端口 → URL/模型名关键词 → 会话档案兜底。
+- **同机多后端共存**时（如 thinkbook 同时挂 Hermes 与 OpenClaw agent），必须按 agent 逐个分派，
+  不能拿一份水位广播给所有 agent。
 - `/healthz` 与 Agent Card 无需鉴权；`/agents` 与 `/a2a/<id>/messages` 需 Bearer。
 
 ## 门禁回显
