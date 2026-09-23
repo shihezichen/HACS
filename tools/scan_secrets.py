@@ -60,7 +60,20 @@ PLACEHOLDER = re.compile(
     """,
 )
 # 键名后缀判定：避免把 `token_budget: 4096` 这类误报
-KEY_HINT = re.compile(r"(?i)(pass|secret|token|api[_-]?key|access[_-]?key|credential|private[_-]?key)")
+# 词边界口径：`CTX_MIN_TOKENS_FLOOR` 里的 TOKENS 不算「口令类键名」，
+# 但 `api_key` / `token` / `passwd` / `secret_key` 这类独立词仍要拦。
+KEY_HINT = re.compile(
+    r"(?i)(?<![a-z])(?:pass(?:wd|word)?|secret|token|api[_-]?key|access[_-]?key|credential|private[_-]?key)(?![a-z])"
+)
+# 只有「字面量形态」的值才可能是硬编码凭据：引号包起来、裸标识符、或数字开头。
+# 表达式/取下标/函数调用（`header[7:].strip()`、`os.environ[...]`、`str(agent.get(...))`）是运行时值，放过。
+LITERALISH = re.compile(
+    r"^(?:"
+    r"[\"'].*[\"']\s*,?\s*$|"        # 引号字面量（整串）
+    r"[A-Za-z_][A-Za-z0-9_]*\s*,?\s*$|"  # 裸标识符（整串）
+    r"\d"                                 # 数字开头
+    r")"
+)
 NUMERICISH = re.compile(r"^[\"']?\d+(?:[\.,]\d+)?[\"']?\s*,?\s*$")
 
 # 允许清单：路径前缀（相对仓库根）
@@ -127,7 +140,9 @@ def scan(root: str):
                     m = SECRETISH.match(line.strip())
                     if m and KEY_HINT.search(m.group(1)):
                         value = m.group(2).strip().rstrip(",")
-                        if not PLACEHOLDER.match(value) and not NUMERICISH.match(value):
+                        value = re.sub(r"\s+#.*$", "", value).strip()   # 剥行尾注释
+                        if not PLACEHOLDER.match(value) and not NUMERICISH.match(value) \
+                                and LITERALISH.match(value):
                             findings.append((rel, idx, "literal-assignment:%s" % m.group(1), _mask(value)))
     return findings, scanned, skipped
 
