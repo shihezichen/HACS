@@ -41,8 +41,19 @@ def load_env(path):
 
 
 def ps(cmd):
-    return subprocess.run(["powershell", "-NoProfile", "-Command", cmd],
-                          capture_output=True, text=True).stdout.strip()
+    """跑 PowerShell 取文本输出。
+
+    Windows PowerShell 5.1 的 stdout 是系统 ANSI（中文机 = GBK），
+    中文路径/命令行直接用 text=True 会抛 UnicodeDecodeError —— 先按 UTF-8 试，失败退 GBK。
+    """
+    raw = subprocess.run(["powershell", "-NoProfile", "-Command", cmd],
+                         capture_output=True).stdout
+    for enc in ("utf-8", "gbk"):
+        try:
+            return raw.decode(enc).strip()
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", "replace").strip()
 
 
 def find_pid(port):
