@@ -693,6 +693,42 @@ class A2AHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "node": Runtime.node_id, "agents": listing}, peer)
             return
 
+        # /ctx-usage/<agent_id>?session_id=... —— 上下文水位真源（2026-09-24）
+        # 供群里「📚 上下文」那行由服务端渲染用（chat_svc 在别的机器上，读不到本机
+        # sessions.json，只能调这里）。返回该 session 的 (占用, 窗口, pct, text)。
+        # 鉴权与 /agents 同口径；读不到就回 ok=false + reason，绝不编造数字。
+        if len(parts) == 2 and parts[0] == "ctx-usage":
+            peer = self._auth_peer()
+            if peer is None:
+                self._send_json(401, {"ok": False, "error": "unauthorized"})
+                return
+            agent_id = parts[1]
+            cfg = Runtime.agents.get(agent_id)
+            if cfg is None:
+                self._send_json(404, {"ok": False, "error": "unknown_agent"})
+                return
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            session_id = (qs.get("session_id") or [""])[0].strip()
+            if not session_id:
+                self._send_json(400, {"ok": False, "error": "missing_session_id"})
+                return
+            usage = _read_ctx_usage(agent_id, session_id, cfg)
+            if usage is None:
+                self._send_json(200, {"ok": False, "reason": "no_usage",
+                                      "agent": agent_id, "session_id": session_id}, peer)
+                return
+            used, window = int(usage[0]), int(usage[1])
+            if window <= 0:
+                self._send_json(200, {"ok": False, "reason": "no_window"}, peer)
+                return
+            pct = int(round(100.0 * used / window))
+            self._send_json(200, {
+                "ok": True, "agent": agent_id, "session_id": session_id,
+                "used": used, "window": window, "pct": pct,
+                "text": "上下文：约 %dk/%dk (%d%%)" % (used // 1000, window // 1000, pct),
+            }, peer)
+            return
+
         # /a2a/<agent_id>/.well-known/agent-card.json —— 公开，不鉴权
         if len(parts) == 4 and parts[0] == "a2a" and parts[2] == ".well-known" \
                 and parts[3] == "agent-card.json":
