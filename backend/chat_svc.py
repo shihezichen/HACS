@@ -47,6 +47,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import view_auth  # noqa: E402  —— 账号 / 会话 / 角色 / 密级，与看板同一套口径
 
+# 上下文水位（服务端渲染，2026-09-24）：让「上下文：约 Xk/Yk (Z%)」由服务端按
+# 真源（OpenClaw sessions.json / Hermes state.db）渲染，绝不采信 Agent 手打的数字。
+try:
+    import ctx_watermark as _ctx_wm  # noqa: E402
+except Exception:  # noqa: BLE001 —— 缺这个模块只是不挂水位行，不影响主流程
+    _ctx_wm = None
+
 VERSION = "2.0"                          # 2.0 = 临时群（契约 §I）
 
 LOG = logging.getLogger("chat_svc")
@@ -1912,6 +1919,17 @@ class ChatDB(object):
     def _row_to_message(self, row: Sequence[Any]) -> Dict[str, Any]:
         (mid, sid, seq, author_type, author_id, kind, text, ref_table, ref_id,
          status, reply_to, run, meta, created_at) = row
+        meta = meta if isinstance(meta, dict) else {}
+        # ---- 上下文水位（服务端渲染，2026-09-24）----
+        # Agent 回复不再手打「📚 上下文：约 Xk/Yk (Z%)」那行；改由服务端
+        # 按真源（OpenClaw sessions.json / Hermes state.db）现读现挂到 meta.context。
+        # 口径：只对 agent 发言挂（人不挂）；读不到就不挂（绝不编造）。
+        # **不覆盖已有 meta.context** —— 落库时若不慎带了 error 标记则保留（见 _stamp_context）。
+        if author_type == "agent":
+            ctx = self._context_watermark(str(author_id), sid)
+            if ctx:
+                meta = dict(meta)
+                meta["context"] = ctx
         return {
             "message_id": mid,
             "session_id": sid,
@@ -1930,6 +1948,43 @@ class ChatDB(object):
             "meta": meta,
             "created_at": iso_bj(created_at),
         }
+
+    # ---- 上下文水位（服务端渲染，2026-09-24）----
+    def _agent_backend_cfg(self, member_id: str) -> Optional[Dict[str, Any]]:
+        """取某成员的 backend/model（用于判定水位数据源）。读 agents.json 原文缓存。"""
+        cache = getattr(self, "_backend_cache", None)
+        if cache is None:
+            cache = {}
+            self._backend_cache = cache
+        if not cache:
+            for path in (os.environ.get(ROSTER_ENV) or "").replace(";", ":").split(":"):
+                path = path.strip()
+                if not path:
+                    continue
+                try:
+                    with open(path, "r", encoding="utf-8") as handle:
+                        data = json.load(handle)
+                except Exception:  # noqa: BLE001
+                    continue
+                for member, spec in ((data.get("agents") or {}) if isinstance(data, dict) else {}).items():
+                    if member in cache:
+                        continue
+                    spec = spec if isinstance(spec, dict) else {}
+                    cache[member] = {"backend": str(spec.get("backend") or ""),
+                                     "model": str(spec.get("model") or "")}
+        return cache.get(member_id)
+
+    def _context_watermark(self, member_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+        """本群该成员本轮的上下文水位（真源读，不编造）。读不到返回 None。"""
+        if _ctx_wm is None or not member_id or not session_id:
+            return None
+        try:
+            cfg = self._agent_backend_cfg(member_id)
+            return _ctx_wm.read_watermark(caller=member_id, session_id="meet:" + session_id,
+                                          agent_cfg=cfg)
+        except Exception as exc:  # noqa: BLE001 —— 水位是增强，绝不允许拖墤主流程
+            LOG.debug("上下文水位渲染失败(%s)", scrubbed(exc))
+            return None
 
 
 # ---------------------------------------------------- #541 模型富化（任务判定 + 任务名抽象）

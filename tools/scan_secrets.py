@@ -52,8 +52,8 @@ PLACEHOLDER = re.compile(
     r"""(?xi)
     ^\s*$
     | ^\s*[\"']?\s*[\"']?\s*$                 # 空串
-    | \$\{[A-Z0-9_]+\}                        # ${ENV}
-    | \$\{?[A-Za-z_][A-Za-z0-9_]*\}?          # $VAR
+    | [\"']?\$\{[A-Z0-9_]+\}[\"']?            # ${ENV} 或 "${ENV}"
+    | [\"']?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?    # $VAR 或 "$VAR"
     | ^\s*[\"']?(?:<[^>]+>|xxx+|todo|fixme|changeme|placeholder|example|redacted|none|null|true|false|\*{3,})[\"']?\s*,?\s*$
     | os\.(?:environ|getenv)                  # 从环境读
     | getenv\(|environ\[
@@ -75,18 +75,22 @@ LITERALISH = re.compile(
     r")"
 )
 NUMERICISH = re.compile(r"^[\"']?\d+(?:[\.,]\d+)?[\"']?\s*,?\s*$")
+#: 值若本身就是「全大写常量名」（`token = A2A_TOKEN`），说明是源码里引用另一个变量，
+#: 不是硬编码凭据 —— 放过。真凭据通常带引号、或混合大小写/数字/符号。
+CONSTNAME = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
 
-# 允许清单：路径前缀（相对仓库根）
+# 允许清单：路径前缀（相对仓库根）或文件名后缀
 ALLOW_PATHS = (
     "tools/scan_secrets.py",   # 本文件自身含正则样本
-    ".env.example",            # 样板，只允许占位
+    ".env.example",            # 样板，只允许占位（按后缀匹配，`xxx.env.example` 也算）
     "docs/",
 )
 
 
 def _is_allowed(rel: str) -> bool:
     rel = rel.replace(os.sep, "/")
-    return any(rel == p or rel.startswith(p) for p in ALLOW_PATHS)
+    base = rel.rsplit("/", 1)[-1]
+    return any(rel == p or rel.startswith(p) or base.endswith(p) for p in ALLOW_PATHS)
 
 
 def _mask(hit: str) -> str:
@@ -142,7 +146,7 @@ def scan(root: str):
                         value = m.group(2).strip().rstrip(",")
                         value = re.sub(r"\s+#.*$", "", value).strip()   # 剥行尾注释
                         if not PLACEHOLDER.match(value) and not NUMERICISH.match(value) \
-                                and LITERALISH.match(value):
+                                and not CONSTNAME.match(value) and LITERALISH.match(value):
                             findings.append((rel, idx, "literal-assignment:%s" % m.group(1), _mask(value)))
     return findings, scanned, skipped
 
