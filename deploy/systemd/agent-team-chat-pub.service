@@ -1,0 +1,39 @@
+# /etc/systemd/system/agent-team-chat-pub.service
+# 人机对话台 · 公网入口实例（2026-09-22 随 webPortal 上线；chat.example.com）
+# 只绑回环：公网流量只能经 cloudflared 从 127.0.0.1 进来，这一层强制登录
+# （chat_svc._resolve_visitor 明确把 127.0.0.1 排除在 tailnet 免登录名单外）。
+# tailnet 那条路不受影响（另一个实例 9980 @<host> 照旧）。
+[Unit]
+Description=Agent Team Chat · 公网入口实例 (127.0.0.1:9980, chat.example.com)
+Documentation=file:<deploy-dir>/chat_svc.py
+After=network-online.target tailscaled.service agent-team-chat.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=<deploy-dir>
+ExecStart=/usr/bin/python3 <deploy-dir>/chat_svc.py \
+  --host 127.0.0.1 \
+  --port 9980 \
+  --log-level INFO
+EnvironmentFile=<deploy-dir>/pg.env
+Environment=CHAT_SESSION_KEY_FILE=<deploy-dir>/view-session.key
+Environment=CHAT_AGENTS_JSON=<deploy-dir>/agents.json
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

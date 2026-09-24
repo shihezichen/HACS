@@ -1,0 +1,26 @@
+tunnel: <tunnel-id>
+credentials-file: /root/.cloudflared/<tunnel-id>.json
+
+# 固定公网入口（2026-09-22 v1.5 webPortal 上线）：
+#   example.com       → 门户首页（webPortal 卡片墙，白板本尊在 /board）→ 127.0.0.1:9942
+#   board.example.com → 直接进看板（老地址不变，向后兼容）          → 127.0.0.1:9942
+#   chat.example.com  → 人机对话台/群聊（前端 ui/ 同源托管 + API）   → 127.0.0.1:9980（chat 公网实例）
+# ⚠️ 两条纪律：① 9942/9980 都只绑回环、强制登录，绝不能指向 tailnet 免登录实例（9941）；
+#              ② 开跑前由 preflight_9942.sh / preflight_9980.sh 把关。
+ingress:
+  - hostname: example.com
+    service: http://127.0.0.1:9942
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: false
+  - hostname: board.example.com
+    service: http://127.0.0.1:9942
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: false
+  - hostname: chat.example.com
+    service: http://127.0.0.1:9980
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: false
+  - service: http_status:404

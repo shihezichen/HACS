@@ -1,0 +1,93 @@
+{
+  "_说明": [
+    "这是**示例**，不是真数据：里面的 IP、路径、画像全是占位符，照抄进库没有意义。",
+    "真数据里会有节点公网 IP 与主人关键信息，那类东西 sensitivity 要写 sensitive、",
+    "audience 要点名到人，而且**不进 git**（放 <deploy-dir>/ 下，600 权限）。",
+    "用法：照着下面每条的 cli 字段执行一次 shared_content.py 即可；",
+    "没有 seed 导入子命令是有意的 —— 往共享库里灌数据这件事，应该有人一条条看着过。"
+  ],
+  "tasks": [
+    {
+      "task_id": "T-20260919-backup",
+      "title": "三台机器统一备份策略",
+      "owner": "hermes",
+      "ttl_hours": 48,
+      "note": "临时任务：几个 Agent 共用同一份背景，任务一结束就销毁",
+      "cli": "python shared_content.py task-add --task-id T-20260919-backup --title \"三台机器统一备份策略\" --owner hermes --ttl-hours 48 --dsn-file <deploy-dir>/pg.env"
+    }
+  ],
+  "contents": [
+    {
+      "scope": "task",
+      "task_id": "T-20260919-backup",
+      "kind": "note",
+      "title": "任务背景（示例）",
+      "body_file": "seed/bodies/backup-background.md",
+      "owner": "hermes",
+      "tags": ["backup", "task"],
+      "audience": ["all"],
+      "sensitivity": "internal",
+      "expires_in_days": 2,
+      "_为什么": "任务级：几个 Agent 做同一件事时共享的背景，任务结束即销毁",
+      "cli": "python shared_content.py put --scope task --task-id T-20260919-backup --kind note --title \"任务背景（示例）\" --body-file seed/bodies/backup-background.md --owner hermes --tags backup,task --expires-in-days 2"
+    },
+    {
+      "scope": "permanent",
+      "kind": "node",
+      "title": "集群节点公网 IP（示例）",
+      "body_file": "seed/bodies/node-ips.md",
+      "owner": "hermes",
+      "tags": ["node", "ip", "cluster"],
+      "audience": ["all"],
+      "sensitivity": "internal",
+      "review_in_days": 30,
+      "source_refs": ["entry:61"],
+      "_为什么": "永久级：一份共享，不让每台机器的 Agent 各存一份；IP 会变，所以设 30 天复审",
+      "cli": "python shared_content.py put --scope permanent --kind node --title \"集群节点公网 IP（示例）\" --body-file seed/bodies/node-ips.md --owner hermes --tags node,ip,cluster --review-in-days 30 --source-ref entry:61"
+    },
+    {
+      "scope": "permanent",
+      "kind": "agent",
+      "title": "各机安装的 Agent 类型（示例）",
+      "body_file": "seed/bodies/agents-per-node.md",
+      "owner": "hermes",
+      "tags": ["agent", "roster"],
+      "audience": ["all"],
+      "sensitivity": "internal",
+      "review_in_days": 14,
+      "cli": "python shared_content.py put --scope permanent --kind agent --title \"各机安装的 Agent 类型（示例）\" --body-file seed/bodies/agents-per-node.md --owner hermes --tags agent,roster --review-in-days 14"
+    },
+    {
+      "scope": "permanent",
+      "kind": "owner_profile",
+      "title": "主人画像（示例占位）",
+      "body_file": "seed/bodies/owner-profile.md",
+      "owner": "hermes",
+      "tags": ["owner"],
+      "audience": ["all"],
+      "sensitivity": "internal",
+      "review_in_days": 90,
+      "_为什么": "画像是长期口径（怎么汇报、看什么、忌讳什么），给全队看，所以 internal + all",
+      "cli": "python shared_content.py put --scope permanent --kind owner_profile --title \"主人画像（示例占位）\" --body-file seed/bodies/owner-profile.md --owner hermes --tags owner --review-in-days 90"
+    },
+    {
+      "scope": "permanent",
+      "kind": "owner_key_info",
+      "title": "主人关键信息（示例占位，真值不进 git）",
+      "body_file": "<deploy-dir>/owner-key-info.md",
+      "owner": "hermes",
+      "tags": ["owner", "key"],
+      "audience": ["hermes", "lobster"],
+      "sensitivity": "sensitive",
+      "review_in_days": 30,
+      "_为什么": "sensitive + 点名受众：没被点到的 Agent 走只读 API 会拿到 403；留痕里也只记'已变更'不记值",
+      "cli": "python shared_content.py put --scope permanent --kind owner_key_info --title \"主人关键信息\" --body-file <deploy-dir>/owner-key-info.md --owner hermes --tags owner,key --audience hermes,lobster --sensitivity sensitive --review-in-days 30"
+    }
+  ],
+  "_日常维护": [
+    "信息变了：update --id N --body-file 新文件 --by 你 --note \"改了什么\"（库会自动留痕）",
+    "不再适合共享：revoke --id N --by 你 --note 原因（默认列表与只读 API 不再返回）",
+    "要求彻底清正文：destroy --id N --by 你 --note 原因（行与痕迹保留，正文不留残）",
+    "每天一次：sweep 先演练、确认后 sweep --commit（任务结束/TTL 到点/过期的自动清）"
+  ]
+}

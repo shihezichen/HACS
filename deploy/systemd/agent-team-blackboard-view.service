@@ -1,0 +1,39 @@
+[Unit]
+Description=Agent-Team blackboard read-only view (port 9941)
+Documentation=file:<deploy-dir>/blackboard_view.py
+# 绑的是 tailnet 地址，必须等 tailscaled 把 100.x 挂上来再启动；
+# 起早了也没事，靠 Restart=always 重试绑定（与 a2a-svc.service 同一套口径）。
+After=network-online.target tailscaled.service agent-team-blackboard.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=<deploy-dir>
+# --host 换成本机 tailnet 的 100.x 地址；--upstream 指向黑板服务的 9940。
+# token 只从 --token-file 读进本进程内存，绝不会发给浏览器、也不会进日志。
+ExecStart=/usr/bin/python3 <deploy-dir>/blackboard_view.py \
+  --host <host> \
+  --port 9941 \
+  --upstream http://<host>:9940 \
+  --token-file <deploy-dir>/client-token \
+  --refresh-seconds 30
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+# 只读服务就按只读来收权限：整个文件系统只读挂载，不需要任何可写路径。
+# 若要用 --log-file 落盘，请加 ReadWritePaths=/var/log/agent-team。
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

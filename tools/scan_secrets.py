@@ -86,6 +86,11 @@ ALLOW_PATHS = (
     "docs/",
 )
 
+#: 测试夹具标记：文件里出现它，则跳过「路 2 赋值即口令」判定。
+#: 测试必须用真形态的假凭据（`TOKEN = "unit-test-token"`）才测得准，这类字面量无法与
+#: 真凭据自动区分，故要求文件显式声明；**路 1 指纹（真 token 前缀 / 私钥头 / 连接串）照扫不误**。
+FIXTURE_MARK = "hacs-test-fixtures"
+
 
 def _is_allowed(rel: str) -> bool:
     rel = rel.replace(os.sep, "/")
@@ -118,6 +123,7 @@ def scan(root: str):
                     continue
                 with open(full, "r", encoding="utf-8", errors="ignore") as fh:
                     lines = fh.read().splitlines()
+                fixture = any(FIXTURE_MARK in ln for ln in lines)
             except OSError:
                 skipped += 1
                 continue
@@ -141,6 +147,8 @@ def scan(root: str):
                         findings.append((rel, idx, label, _mask(m.group(0))))
                         break
                 else:
+                    if fixture:
+                        continue   # 测试夹具：跳过「赋值即口令」（假凭据），路 1 指纹已照扫
                     m = SECRETISH.match(line.strip())
                     if m and KEY_HINT.search(m.group(1)):
                         value = m.group(2).strip().rstrip(",")
