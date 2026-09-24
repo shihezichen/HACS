@@ -321,7 +321,8 @@
 
   /* #477：文字按钮改图标 —— .ico 统一成方形图标钮，尺寸与 .ghost 同高，
      无文字所以靠 title/aria-label 保留语义（鼠标悬停有提示、读屏器能念）。 */
-  .ghost.ico { padding: 0; width: 30px; min-width: 30px; text-align: center;
+  .ghost.ico { padding: 0; width: 38px; min-width: 38px; height: 34px; text-align: center;
+    font-size: 17px; line-height: 1;
                font-size: 15px; line-height: 1; overflow: hidden; }
   .ghost.ico:disabled { opacity: .45; }
   #send { padding: 0; width: 40px; min-width: 40px; text-align: center; font-size: 17px; line-height: 1; }
@@ -437,7 +438,7 @@
   <h1>团队群 · 试用台</h1>
   <span id="who">身份读取中…</span>
   <span class="spacer"></span>
-  <button class="ghost" id="newbtn">＋ 建群</button>
+  <button class="ghost ico" id="newbtn" title="建群（新建一个群）" aria-label="建群">＋</button>
 
   <button class="ghost ico" id="refresh" title="刷新群列表与聊天记录" aria-label="刷新">🔄</button>
 </header>
@@ -467,7 +468,7 @@
       <span class="title" id="gtitle">未选群</span>
       <span id="gmeta" class="pendo"></span>
       <span class="spacer"></span>
-      <button class="ghost ico" id="tgall" title="一键折叠本群所有主题组" aria-label="折叠/展开全部主题组">⏫</button>
+      <button class="ghost ico" id="tgall" title="一键折叠本群所有主题组" aria-label="折叠/展开全部主题组">⊟</button>
       <button class="ghost ico" id="closebtn" disabled title="宣布散会（关群，归档后不能再发言）" aria-label="散会">🚪</button>
     </div>
     <div id="pending"></div>
@@ -1497,8 +1498,10 @@ function tOpen(on) {
 }
 
 /* 任务清单抽屉已下线（2026-09-24 刚哥）：入口按钮与抽屉 DOM 一并移除，tOpen/tLoad 保留但不再有调用方 */
-$("tp-addbtn").onclick = tAdd;
-$("tp-title").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); tAdd(); } });
+// #562：任务清单抽屉已下线，这两个元素不存在。此处必须守卫 —— 裸写 $(..).onclick
+// 会在 null 上赋值抛 TypeError，把整段顶层脚本从这行起打断（TAB 绑定、轮询全部失效）。
+{ const _ab = $("tp-addbtn"); if (_ab) _ab.onclick = tAdd; }
+{ const _tt = $("tp-title"); if (_tt) _tt.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); tAdd(); } }); }
 
 // #347-0②：把任务清单抽屉的底边钉在输入区上沿 —— 输入区被拖高后抽屉不被压住。
 // 默认（64px）时结果与改动前完全一致，不改变既有布局。
@@ -2048,7 +2051,7 @@ function topicsAllSync() {
   const all = log.querySelectorAll(".tgrp").length;
   const closed = log.querySelectorAll(".tgrp.closed").length;
   const anyOpen = closed < all && all > 0;
-  b.textContent = anyOpen ? "⏫" : "⏬";        // 文字改图标：收起 / 展开（语义放 title/aria）
+  b.textContent = anyOpen ? "⊟" : "⊞";        // 图标=将要执行的动作：折叠全部 / 展开全部（语义放 title/aria）
   b.disabled = all === 0;
   b.title = anyOpen ? "折叠本群所有主题组" : "展开本群所有主题组";
   b.setAttribute("aria-label", b.title);        // 只剩图标：语义放 title + aria
