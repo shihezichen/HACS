@@ -80,8 +80,16 @@ REQ_SID = "teamd-req"
 _MEMBER_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")  # 成员名：字母数字._-
 
 DEFAULT_TIMEOUT_S = 120.0
-MAX_TIMEOUT_S = 300.0
+MAX_TIMEOUT_S = 600.0   # 调用方**声明**的上限，不再等于一个回合实际能用多久。
+                        # 2026-09-22: 300→600. 值守点名 hermes 的回合常>300s(带工具调用),
+                        # 300 上限会把整轮砍成 timeout, 群里表现为"它没回应"。
+                        # 2026-09-22 二改: 实际回合时长由 HARD_ROUND_CAP_S 兜底(取二者小值)。
 MIN_TIMEOUT_S = 0.1          # 下限只防 0/负数，方便自测跑短超时
+HARD_ROUND_CAP_S = 240.0     # 回合硬上限（秒）：单条 A2A 请求从进总线到**必须**回包。
+                             # 独立于 MAX_TIMEOUT_S(那是调用方声明的上限)，实际取 min(声明, 本值)。
+                             # 到点还没结果就回 error=timeout 并立刻放掉 worker，不许占坑干等。
+HARD_WALL_GRACE_S = 8.0      # 硬墙护栏：worker 最多多等这么久（a2a_svc 自己的 504 走 5s margin 先到，
+                             # 这条只兜「HTTP 层卡住/不返回」的底）
 DETAIL_MAX = 200             # 错误 detail 截断长度
 MAX_PAYLOAD_BYTES = 262144   # 单条 NATS 请求体上限 256 KiB
 
@@ -98,7 +106,9 @@ BUSY_RETRY_AFTER_MS = 2000
 DEFAULT_QUEUE_SIZE = 64         # 有界队列深度
 DEFAULT_INBOX_REPLAY_LIMIT = 20   # 一次离线补拉最多领几条
 INBOX_HTTP_TIMEOUT_S = 10.0       # 补拉的 HTTP 超时：短一点，别干等
-DEFAULT_WORKERS = 4             # worker 池大小（后端 LLM 并发能力有限，别开大）
+DEFAULT_WORKERS = 8             # worker 池大小。2026-09-22: 4→8（原来 4 个 worker 被
+                                # 卡死回合占满后，别的成员的请求只能排队/被 busy 拒收）。
+                                # 真实并发上限仍由 per_member_limit 按成员控制。
 DEFAULT_PER_MEMBER_LIMIT = 2    # 单成员在途上限（一个 agent 忙不该堵住别人，也不该自我雪崩）
 
 
@@ -354,6 +364,7 @@ class Config(object):
                       "enabled": self.enable_admin},
             "intervals": {"heartbeat_s": self.hb_interval, "ping_s": self.ping_interval},
             "timeout": {"default_s": DEFAULT_TIMEOUT_S, "max_s": MAX_TIMEOUT_S,
+                        "hard_cap_s": HARD_ROUND_CAP_S, "wall_grace_s": HARD_WALL_GRACE_S,
                         "a2a_margin_s": self.a2a_timeout_margin},
         }
 
@@ -581,6 +592,35 @@ class TeamDaemon(object):
                 raw = b""
             return exc.code, raw
 
+    def _call_a2a_hard_walled(self, member, text, session_id, timeout_s, caller):
+        # type: (str, str, Optional[str], float, str) -> Optional[Tuple[int, bytes]]
+        """给 _call_a2a 套一道「回合硬墙」：worker 最多等 timeout_s + HARD_WALL_GRACE_S。
+
+        到点还拿不到结果就返回 None —— 调用方立刻回 error=timeout、马上放掉 worker，
+        不占坑。被丢下的那个线程仍会卡在 socket 读上（读超时 = timeout_s + a2a_margin，
+        最多多活几秒），它不回包、不写日志，所以不会产生第二条回包。
+        """
+        box = {}  # type: Dict[str, Any]
+
+        def _run():
+            # type: () -> None
+            try:
+                box["res"] = self._call_a2a(member, text, session_id, timeout_s, caller)
+            except BaseException as exc:   # 交回主线程走原有异常分支
+                box["exc"] = exc
+
+        worker = threading.Thread(target=_run, name="teamd-a2a-%s" % member)
+        worker.daemon = True
+        worker.start()
+        worker.join(timeout_s + HARD_WALL_GRACE_S)
+        if worker.is_alive():
+            log("req.hard_wall", member=member, frm=(caller or "-"),
+                waited_s=round(timeout_s + HARD_WALL_GRACE_S, 3))
+            return None
+        if "exc" in box:
+            raise box["exc"]
+        return box.get("res")
+
     # ------------------------------------------------------------ 请求处理
     @staticmethod
     def _clamp_timeout(raw):
@@ -634,13 +674,24 @@ class TeamDaemon(object):
             session_id = obj.get("session_id")
             if session_id is not None:
                 session_id = str(session_id)
-            timeout_s = self._clamp_timeout(obj.get("timeout_s"))
+            declared_s = self._clamp_timeout(obj.get("timeout_s"))
+            # 回合硬上限：调用方声明只是"最多", 真正可用时长还要过 240s 这道墙。
+            timeout_s = min(declared_s, HARD_ROUND_CAP_S)
 
             log("req.recv", member=member, frm=(caller or "-"),
-                chars=len(text), timeout_s=timeout_s, session=(session_id or "-"))
+                chars=len(text), timeout_s=timeout_s, declared_s=declared_s,
+                session=(session_id or "-"))
 
             try:
-                status, raw = self._call_a2a(member, text, session_id, timeout_s, caller)
+                result = self._call_a2a_hard_walled(member, text, session_id, timeout_s, caller)
+                if result is None:
+                    # 硬墙到期：立刻回包 + 放 worker（不必等 socket 自己超时）
+                    return self._respond(member, reply,
+                                         self._err("timeout", "回合硬上限到期：等了 %ds 无回包（声明 %ds，硬上限 %ds）"
+                                                   % (int(timeout_s + HARD_WALL_GRACE_S), int(declared_s),
+                                                      int(HARD_ROUND_CAP_S))),
+                                         started, caller)
+                status, raw = result
             except (socket.timeout, TimeoutError) as exc:
                 return self._respond(member, reply, self._err("timeout", "A2A 超时: %s" % (exc or "read timed out")),
                                      started, caller)

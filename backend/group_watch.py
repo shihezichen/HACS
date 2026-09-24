@@ -3,7 +3,7 @@
 """群守望器：把"群里有人欠回应"变成一次 NATS/A2A 点名，让 Agent 自己回话。
 
 为什么需要它（架构缺口）：
-    群聊走 HTTP + PG（chat_svc:9980）—— 只落库、只给页面看；
+    群聊走 HTTP + PG（chat_svc:9984）—— 只落库、只给页面看；
     NATS 只服务点对点点名（a2a.v1.req.<member>）。
     中间这段桥没人接，所以你在群里 @Agent，它收不到任何信号，永远不回。
     本进程就是把这段桥接上：群消息 → NATS 点名 → Agent 回应 → 写回群。
@@ -36,8 +36,8 @@ if HERE not in sys.path:
 
 from team import call_one, REQ_FMT  # noqa: E402  复用现成的 A2A 信封与点名实现
 
-CHAT_BASE_DEFAULT = "http://<host>:9980"
-NATS_HOST_DEFAULT = "<host>:9930,<node-ip>:9930"
+CHAT_BASE_DEFAULT = os.environ.get("AGENT_TEAM_CHAT_BASE") or "http://<host>:9984"
+NATS_HOST_DEFAULT = os.environ.get("AGENT_TEAM_NATS") or "<host>:9930,<node-ip>:9930"
 STATE_DEFAULT = os.path.join(HERE, "state", "group_watch_state.json")
 # 口令可能在源码目录（D 源）也可能在中枢目录（<home>\agent-team）—— 两处都找
 PASS_CANDIDATES = (os.path.join(HERE, "nats-hermes.pass"),
@@ -283,7 +283,7 @@ def main():
     ap.add_argument("--state", default=STATE_DEFAULT)
     ap.add_argument("--interval", type=float, default=8.0)
     ap.add_argument("--gap", type=float, default=30.0, help="同一(群,成员)最小回话间隔秒")
-    ap.add_argument("--timeout", type=float, default=180.0)
+    ap.add_argument("--timeout", type=float, default=600.0, help="点名应答超时秒(2026-09-22 180→600: 180s 会砍掉跑长命令的回合)")
     ap.add_argument("--include-hermes", action="store_true", help="也让 hermes 自己回话")
     ap.add_argument("--allow-agent", dest="allow_agent", action="store_true", default=True,
                     help="也回应 Agent 发的 @（默认开；群内 Agent 互相 @ 不再石沉大海）")

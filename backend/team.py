@@ -82,7 +82,7 @@ DEDUP_WINDOW_SECONDS = 30 * 60
 DEFAULT_DEDUP_FILE = os.path.join(os.path.expanduser("~"), ".team_broadcast_dedup.json")
 DEFAULT_MEETINGS_FILE = os.path.join(os.path.expanduser("~"), ".team_meetings.jsonl")
 #: 人机对话台（群的家）—— 群消息走 HTTP 落库，NATS 只管唤醒通知（契约 §I）
-DEFAULT_CHAT_BASE = os.environ.get("TEAM_CHAT_BASE") or "http://<host>:9980"
+DEFAULT_CHAT_BASE = os.environ.get("TEAM_CHAT_BASE") or "http://<host>:9984"
 
 
 # ---------------------------------------------------------------- 内联自总控侧群发工具
