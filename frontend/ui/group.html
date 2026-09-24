@@ -69,8 +69,11 @@
         align-items:center;flex-wrap:wrap;background:#141721}
   #head .title{font-weight:600}
   /* 中段：唯一滚动容器 */
+  /* #460c：padding-top 归零、改用 ::before 占位 —— 否则组头 sticky 到顶时
+     会在 top:0 处露出 12px 的空白（padding-top 是滚动容器的内容区起点）*/
   #log{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;
-       -webkit-overflow-scrolling:touch;padding:12px 14px}
+       -webkit-overflow-scrolling:touch;padding:0 14px 12px}
+  #log::before{content:"";display:block;height:12px}
   .msg{padding:8px 10px;border-radius:8px;margin-bottom:8px;background:#1a1e28;
        border:1px solid var(--line)}
   .msg.mine{background:var(--me);border-color:#2b3648}
@@ -79,11 +82,19 @@
   .msg .h .seq{color:#5d6577}
   .msg .b{white-space:pre-wrap;word-break:break-word}
   .msg.need{border-color:#6b4a12;box-shadow:inset 3px 0 0 var(--warn)}
-  .pendo{color:var(--warn);font-size:11px}
   /* 上下文水位（2026-09-24）：服务端按真源渲染，非 Agent 自述 */
   .ctxwm{margin-top:2px;color:#6b7488;font-size:11px;font-variant-numeric:tabular-nums}
   #pending{padding:6px 14px;border-top:1px solid var(--line);color:var(--warn);font-size:12px;
-           background:#1b1710;display:none}
+           background:#1b1710;display:none;cursor:pointer;user-select:none}
+  #pending:hover{background:#241d12}
+  #pending:active{transform:scale(.997)}
+  #pending .pj{color:#ffd08a;font-weight:600;text-decoration:underline;text-underline-offset:2px}
+  /* #460e: loading / empty */
+  #log .loading{color:var(--dim);font-size:12px;padding:14px 4px}
+  #log .loading .spin{display:inline-block;width:11px;height:11px;margin-right:7px;border:2px solid #3a4358;border-top-color:var(--accent);border-radius:50%;vertical-align:-1px;animation:lspin .8s linear infinite}
+  @keyframes lspin{to{transform:rotate(360deg)}}
+  #log .emptybox{color:var(--dim);font-size:13px;padding:26px 4px;text-align:center}
+  #log .emptybox .ic{font-size:22px;display:block;margin-bottom:8px;opacity:.6}
   /* 底段：默认 64px（= 下限），内部横向排布，不产生第二个滚动条 */
   /* #347-0②：高度不再钉死 64px —— 跟随被拖高的 textarea 一起长高，下限仍是 64px */
   #composer{grid-column:3;grid-row:2;height:auto;min-height:var(--hx-bottom-h);
@@ -163,6 +174,115 @@
                     background:#1a1e28;cursor:pointer;user-select:none;color:var(--fg)}
   #msgfilter .fchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
   #msgfilter .fcount{color:var(--dim);font-size:11px;margin-left:auto;user-select:none}
+  /* ===== #460 2026-09-24 刚哥三点需求（1/2/3）=====
+     ① 主题分组：同一话题的来回交流归到一组，组头可折叠
+     ② 接收者高亮：受众（→ 后面）单独上色，与蓝色加粗发言人一眼区分
+     ③ Markdown 渲染：见 md.js（含内联/块级数学与代码块） */
+  /* ① 主题分组容器 */
+  .tgrp{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#141822}
+  .tgrp.cur{border-color:#2f4a72}
+  /* #460c 需求 1：组头**吸顶** —— 滚到组内深处时，组名/折叠钮仍固定在 #log 顶部，
+     随时知道原问题是什么、随时可折叠。
+     ⚠️ 父级不能有 overflow:hidden（会截断 sticky），所以圆角靠 .tgh 自己画：
+        组头默认带左右圆角；展开时组内消息自带底色，视觉上仍是一个整块。 */
+  .tgh{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;
+       background:#1b2130;border-bottom:1px solid var(--line);user-select:none;
+       position:sticky;top:0;z-index:5;border-radius:9px 9px 0 0;
+       box-shadow:0 1px 0 rgba(0,0,0,.35)}
+  .tgrp.closed .tgh{border-radius:9px}
+  .tgh:hover{background:#202736}
+  .tgrp.closed .tgh{border-bottom-color:transparent}
+  .tgh .tgcar{color:var(--dim);font-size:10px;width:11px;flex:0 0 auto;transition:transform .12s}
+  .tgrp.closed .tgh .tgcar{transform:rotate(-90deg)}
+  .tgh .tgt{font-weight:600;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;
+            white-space:nowrap;flex:0 1 auto}
+  .tgh .tgc{color:var(--dim);font-size:11px;flex:0 0 auto}
+  .tgh .spacer{flex:1 1 auto}
+  .tgh .tga{color:#6b7488;font-size:11px;flex:0 0 auto;font-variant-numeric:tabular-nums}
+  /* #460c 需求 2：组头也显示回应状态（等谁 / 谁已答），吸顶时一眼可见 */
+  .tgh .tgs{font-size:11px;flex:0 0 auto;white-space:nowrap;max-width:46%;overflow:hidden;
+            text-overflow:ellipsis}
+  .tgh .tgs .w{color:var(--warn)}
+  .tgh .tgs .d{color:#5fb98a}
+  .tgh .tgs .sep{color:#3a4456;padding:0 3px}
+  /* #460c 需求 2：消息级「待回应 / 已回应」分色 */
+  .pendo{font-size:11px;display:inline-flex;gap:2px;align-items:center;flex-wrap:wrap}
+  .pendo .w{color:var(--warn)}
+  .pendo .d{color:#5fb98a}
+  .pendo .sep{color:#3a4456;padding:0 2px}
+  .tgb{padding:8px 8px 2px}
+  .tgrp.closed .tgb{display:none}
+  /* 组内消息不再自带外框，靠分组卡片包着 */
+  .tgb .msg{margin-bottom:6px;background:#1a1e28}
+  .tgb .msg.mine{background:var(--me)}
+  /* ② 接收者：青色系高亮，与发言人(--accent 蓝)明显区分 */
+  .msg .h .aud{color:#4fd1c5;font-weight:600}
+  .msg .h .aud .hl{color:#7ff0e2}
+  .msg .h .arrow{color:#3d5560;padding:0 1px}
+  .msg .h .mref.hl{color:#8fb7ee;font-weight:600;background:#22314a;border-radius:4px;padding:0 3px}
+  /* ③ Markdown 渲染体（内容已由 md.js 全程转义）*/
+  .msg .b.md{white-space:normal}
+  .msg .b.md > :first-child{margin-top:0}
+  .msg .b.md > :last-child{margin-bottom:0}
+  .msg .b.md p{margin:0 0 7px}
+  /* #460b 反馈 3：**加粗** 要更明显 —— 提亮 + 加粗 + 轻微背景/描边，暗底上一眼可见 */
+  .msg .b.md strong{color:#ffffff;font-weight:800;background:rgba(110,168,255,.16);
+                    border-radius:4px;padding:0 3px}
+  .msg .b.md em{color:#e8ddb0;font-style:italic}
+  .msg .b.md del{color:#8b93a7;text-decoration:line-through}
+  .msg .b.md h1,.msg .b.md h2,.msg .b.md h3,.msg .b.md h4,.msg .b.md h5,.msg .b.md h6
+      {margin:9px 0 5px;font-size:14px;line-height:1.4}
+  .msg .b.md ul,.msg .b.md ol{margin:0 0 7px;padding-left:20px}
+  .msg .b.md li{margin:2px 0}
+  .msg .b.md blockquote{margin:6px 0;padding:2px 10px;border-left:3px solid #33415c;
+                        color:#aab3c7;background:#171c26;border-radius:0 6px 6px 0}
+  .msg .b.md hr{border:0;border-top:1px solid var(--line);margin:8px 0}
+  .msg .b.md code{background:#10141c;border:1px solid #262c38;border-radius:4px;
+                  padding:1px 4px;font-family:Consolas,"Cascadia Mono",Menlo,monospace;font-size:12.5px}
+  .msg .b.md pre.md-code{background:#0d1117;border:1px solid #262c38;border-radius:7px;
+                         padding:8px 10px;margin:6px 0;overflow:auto;max-height:44vh}
+  .msg .b.md pre.md-code code{background:transparent;border:0;padding:0;font-size:12.5px;line-height:1.5}
+  .msg .b.md table{border-collapse:collapse;margin:6px 0;font-size:13px}
+  .msg .b.md th,.msg .b.md td{border:1px solid var(--line);padding:3px 8px;text-align:left}
+  .msg .b.md th{background:#1d2331;font-weight:600}
+  .msg .b.md a{color:#6ea8ff}
+  .msg .b.md .md-math{font-family:"Cambria Math","Times New Roman",serif;font-style:italic;
+                      color:#e8d9a0;padding:0 1px}
+  .msg .b.md .md-mathblock{font-family:"Cambria Math","Times New Roman",serif;
+                           color:#e8d9a0;text-align:center;margin:8px auto;padding:6px 10px;
+                           background:#141a24;border:1px dashed #2b3648;border-radius:7px;
+                           overflow-x:auto;font-size:14px}
+  /* #460b 反馈 1：真 LaTeX → 原生 MathML（浏览器自己排版，支持上下标/分式/积分限/根式/希腊字母）*/
+  .msg .b.md math.md-mathml{font-size:15px;color:#f0e2b0;font-style:normal;
+                            vertical-align:middle;line-height:1.3}
+  .msg .b.md math.md-mathml[display="block"]{display:block;margin:10px auto;text-align:center;
+                            font-size:17px;padding:8px 10px;background:#141a24;
+                            border:1px solid #2b3648;border-radius:7px;overflow-x:auto}
+  .msg .b.md math.md-mathml mfrac{border-collapse:collapse}
+  .msg .b.md .md-mathraw{font-family:Consolas,Menlo,monospace;color:#e8a33d}
+  /* #460b 反馈 2：代码块鲜明高亮（token 配色）*/
+  .msg .b.md pre.md-code{background:#0b0f17;border:1px solid #2b3648}
+  .msg .b.md pre.md-code code .tk-kw{color:#ff7bb0;font-weight:600}
+  .msg .b.md pre.md-code code .tk-str{color:#9ae66e}
+  .msg .b.md pre.md-code code .tk-num{color:#ffb86c}
+  .msg .b.md pre.md-code code .tk-cmt{color:#6b7a90;font-style:italic}
+  .msg .b.md pre.md-code code .tk-fn{color:#66d9ef}
+  .msg .b.md pre.md-code code .tk-cls{color:#e6c07b}
+  .msg .b.md pre.md-code code .tk-tag{color:#7cc7ff}
+  .msg .b.md pre.md-code code .tk-op{color:#ff9d5c}
+  /* 自定义语言标签角标（data-lang）*/
+  .msg .b.md pre.md-code{position:relative}
+  .msg .b.md pre.md-code[data-lang]:not([data-lang=""])::before{
+    content:attr(data-lang);position:absolute;top:0;right:0;font-size:10px;color:#5d6577;
+    background:#141a24;border-left:1px solid #2b3648;border-bottom:1px solid #2b3648;
+    border-radius:0 7px 0 6px;padding:1px 7px;font-family:Consolas,Menlo,monospace}
+  /* 引用浮窗里的正文也走同一套 md 样式 */
+  .pop .pb.md{white-space:normal}
+  .pop .pb.md strong{color:#fff;font-weight:800;background:rgba(110,168,255,.16);border-radius:4px;padding:0 2px}
+  .pop .pb.md pre.md-code code .tk-kw{color:#ff7bb0;font-weight:600}
+  .pop .pb.md pre.md-code code .tk-str{color:#9ae66e}
+  .pop .pb.md pre.md-code code .tk-num{color:#ffb86c}
+  .pop .pb.md pre.md-code code .tk-cmt{color:#6b7a90;font-style:italic}
   dialog{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:12px;
          padding:16px;width:min(460px,92vw)}
   dialog::backdrop{background:rgba(0,0,0,.6)}
@@ -334,6 +454,7 @@
       <span class="title" id="gtitle">未选群</span>
       <span id="gmeta" class="pendo"></span>
       <span class="spacer"></span>
+      <button class="ghost" id="tgall" title="一键折叠 / 展开本群所有主题组">全部折叠</button>
       <button class="ghost" id="closebtn" disabled>散会（关群）</button>
     </div>
     <div id="pending"></div>
@@ -393,6 +514,10 @@
   </div>
 </dialog>
 
+<script src="/md.js"></script>
+<script src="/tex.js"></script>
+<script src="/hl.js"></script>
+<script src="/codeblock.js"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -563,10 +688,17 @@ function applyMsgFilter() {
   const log = $("log"); if (!log) return { shown: 0, total: 0 };
   let shown = 0, total = 0;
   log.querySelectorAll(".msg").forEach(el => {
-    const a = el.dataset.author || "";
-    const vis = (!FILTER.size || FILTER.has(a));
-    el.style.display = vis ? "" : "none";
-    total++; if (vis) shown++;
+    const a = el.dataset.author || ""; if (!a || seen.has(a)) return;
+    seen.set(a, el.dataset.authorname || a);
+  });
+  // #460：勾了发言者过滤时，顺带按主题组重算「组内还剩几条可见」；全显时恢复真实条数
+  log.querySelectorAll(".tgrp").forEach(g => {
+    const c = g.querySelector(".tgc"); if (!c) return;
+    const all = g.querySelectorAll(".tgb .msg").length;
+    if (!FILTER.size) { c.textContent = all + " 条"; return; }
+    let v = 0;
+    g.querySelectorAll(".tgb .msg").forEach(m => { if (m.style.display !== "none") v++; });
+    c.textContent = v + "/" + all + " 条";
   });
   const c = document.querySelector("#msgfilter .fcount");
   if (c) c.textContent = FILTER.size ? ("显示 " + shown + "/" + total + " 条") : "";
@@ -580,8 +712,7 @@ function renderMsgFilter(force) {
   log.querySelectorAll(".msg").forEach(el => {
     const a = el.dataset.author || ""; if (!a || seen.has(a)) return;
     seen.set(a, el.dataset.authorname || a);
-  });
-  const sig = Array.from(seen.keys()).join("|") + "#" + Array.from(FILTER).sort().join(",");
+  });  const sig = Array.from(seen.keys()).join("|") + "#" + Array.from(FILTER).sort().join(",");
   if (!force && sig === FILTER_SIG) return;                 // 发言者没新增 → 不重建（免得 3 秒一刷）
   FILTER_SIG = sig;
   if (!seen.size) { box.hidden = true; box.innerHTML = ""; return; }   // 没人可筛 → 整条不渲染
@@ -616,6 +747,218 @@ function filterReset() { FILTER.clear(); FILTER_SIG = null; renderMsgFilter(true
 
 // 调试/自测句柄（headless 断言用；不影响页面行为）
 window.__h438 = { FILTER, applyMsgFilter, renderMsgFilter, textSaveH, textApplyH, textMaxH, TEXT_MIN_H };
+
+// ================= #460 主题分组（2026-09-24 刚哥需求 1）=================
+// 规则：人发言 = 开一个新主题（他名下的那几条 Agent 回复 + Agent 互相讨论都归到该主题）；
+//      开场那段人发言之前的消息归到「开场」组；之后的每条人发言又起一组。
+// 每条消息用 data-topic 挂上组号，组头可折叠（折叠态按群记 localStorage）。
+const LS_TOPICS = "group.topics_closed";   // {sid: ["0","2"]}
+let TCOUNT = 0;          // 已经画出来的主题组数
+let TOPIC_NEXT = 0;      // 下一条要开组的号
+let LAST_AUTHOR = null;  // 上一条是谁说的（null = 还没有任何消息）
+let LAST_SEQ = 0;
+let LAST_TS = 0;         // 上一条时间戳（回溯开组时用来还原「何时起」）
+let lastTid = -1;        // 上一条消息落入的主题组号（-1 = 还没开始）
+// #460d：顶部「我还欠 N 条回应」的循环跳转状态
+let PEND_LIST = [];      // 待办 seq 列表（按顺序）
+let PEND_IDX = -1;       // 上次跳到了第几个（-1 = 还没跳过）
+let PEND_KEY = "";       // 待办列表指纹（变了才重置 PEND_IDX，避免点击时被轮询重置）
+
+function topicParseTs(s) {
+  const t = Date.parse(String(s || "").replace(" ", "T"));
+  return isNaN(t) ? 0 : t;
+}
+
+// ================= #460c 需求 2：待回应 / 已回应 =================
+// 契约两种写法都吃：
+//   a) 字符串数组（服务端算好的「谁没回」） → 全归 wait
+//   b) 对象 {whom: true/false}（true=待回应，false=已回应）
+//   c) 对象数组 [{id|agent|name, responded|done|answered|ok}]（容错）
+function parseNeeds(raw) {
+  const out = { wait: [], done: [] };
+  if (!raw) return out;
+  const push = (k, v) => {
+    const s = String(v == null ? "" : v).trim();
+    if (s && out[k].indexOf(s) < 0) out[k].push(s);
+  };
+  if (Array.isArray(raw)) {
+    raw.forEach(x => {
+      if (x && typeof x === "object") {
+        const id = x.id || x.agent || x.name || x.who;
+        const ok = x.responded || x.done || x.answered || x.ok || x.replied;
+        push(ok ? "done" : "wait", id);
+      } else push("wait", x);
+    });
+  } else if (typeof raw === "object") {
+    Object.keys(raw).forEach(k => push(raw[k] ? "wait" : "done", k));
+  }
+  return out;
+}
+
+// 渲染成：「待回应：A、B 已回应：C」；两边都没有则不显示
+function renderPendo(nr) {
+  if (!nr) return "";
+  const w = (nr.wait || []), d = (nr.done || []);
+  let h = "";
+  if (w.length) h += '<span class="w">待回应：' + esc(w.join("、")) + '</span>';
+  if (d.length) h += (h ? '<span class="sep">·</span>' : '') + '<span class="d">已回应：' + esc(d.join("、")) + '</span>';
+  return h ? '<span class="pendo">' + h + '</span>' : "";
+}
+
+// 全场重算：一条「等人回应」的消息，若其后有该人的发言（且晚于本条）→ 从待回应移到已回应。
+// 同时刷新每条消息旁的 .pendo 与所属主题组头的 .tgs（吸顶时也能看到状态）。
+function refreshNeedStates(msgs) {
+  const log = $("log"); if (!log) return;
+  // 1) 收集「谁在什么时间说过话」——只看本轮拉到的消息
+  const spoke = new Map();   // id -> 最大时间戳
+  (msgs || []).forEach(m => {
+    const id = mid(m.author) || "";
+    if (!id) return;
+    const t = topicParseTs(m.created_at);
+    const cur = spoke.get(id) || 0;
+    if (t > cur) spoke.set(id, t);
+  });
+  // 2) 逐条重算
+  const byTopic = new Map();   // tid -> {wait:Set, done:Set}
+  log.querySelectorAll(".tgb .msg").forEach(el => {
+    let nr = { wait: [], done: [] };
+    try { nr = JSON.parse(el.dataset.nr || '{"wait":[],"done":[]}') || nr; } catch (e) {}
+    const ts = Number(el.dataset.ts || 0);
+    const wait = (nr.wait || []).filter(Boolean);
+    const done = (nr.done || []).slice();
+    // 逐个检查「还在等的人」是否已经在本条之后说过话
+    const stillWait = [];
+    wait.forEach(who => {
+      const t = spoke.get(who) || 0;
+      if (t && t >= ts) { if (done.indexOf(who) < 0) done.push(who); }
+      else stillWait.push(who);
+    });
+    const cur = { wait: stillWait, done: done };
+    // 没变就不动 DOM（免重排）
+    if (JSON.stringify(cur) !== JSON.stringify(nr)) {
+      el.dataset.nr = JSON.stringify(cur);
+      const h = el.querySelector(".h .pendo");
+      if (h) { const nh = renderPendo(cur); if (nh) h.outerHTML = nh; else h.remove(); }
+      else if (renderPendo(cur)) el.querySelector(".h").insertAdjacentHTML("beforeend", renderPendo(cur));
+    }
+    // 顺带累积到组维度（取并集，给吸顶组头用）
+    const tid = el.dataset.topic || "";
+    const g = byTopic.get(tid) || { wait: new Set(), done: new Set() };
+    cur.wait.forEach(x => g.wait.add(x));
+    cur.done.forEach(x => { if (!g.wait.has(x)) g.done.add(x); });
+    byTopic.set(tid, g);
+  });
+  // 3) 写回组头状态
+  log.querySelectorAll(".tgrp").forEach(g => {
+    const s = byTopic.get(g.dataset.tid) || { wait: new Set(), done: new Set() };
+    let tg = g.querySelector(".tgh .tgs");
+    if (!tg) {
+      g.querySelector(".tgh").insertAdjacentHTML("beforeend", '<span class="tgs"></span>');
+      tg = g.querySelector(".tgh .tgs");
+    }
+    if (!tg) return;
+    let h = "";
+    if (s.wait.size) h += '<span class="w">待回应：' + esc(Array.from(s.wait).join("、")) + '</span>';
+    if (s.done.size) h += (h ? '<span class="sep">·</span>' : '') + '<span class="d">已回应：' + esc(Array.from(s.done).join("、")) + '</span>';
+    tg.innerHTML = h;
+  });
+}
+
+function topicsClosedRead(sid) {
+  try {
+    const a = JSON.parse(localStorage.getItem(LS_TOPICS) || "{}") || {};
+    const v = a[sid];
+    return new Set(Array.isArray(v) ? v.map(String) : []);
+  } catch (e) { return new Set(); }
+}
+
+function topicClosedWrite(sid, tid, closed) {
+  try {
+    const a = JSON.parse(localStorage.getItem(LS_TOPICS) || "{}") || {};
+    const v = new Set(Array.isArray(a[sid]) ? a[sid].map(String) : []);
+    if (closed) v.add(String(tid)); else v.delete(String(tid));
+    a[sid] = Array.from(v);
+    localStorage.setItem(LS_TOPICS, JSON.stringify(a));
+  } catch (e) { /* 无痕模式就算了 */ }
+}
+
+function topicBody(tid) {
+  const g = document.querySelector('.tgrp[data-tid="' + tid + '"]');
+  return g ? g.querySelector(".tgb") : null;
+}
+
+function topicCardEnsure(tid, title, firstTs) {
+  const log = $("log"); if (!log) return null;
+  let g = log.querySelector('.tgrp[data-tid="' + tid + '"]');
+  if (g) return g.querySelector(".tgb");
+  g = document.createElement("div");
+  g.className = "tgrp" + (String(tid) === String(TOPIC_NEXT - 1) ? " cur" : "");
+  g.dataset.tid = String(tid);
+  const closed = topicsClosedRead(CUR && CUR.session_id).has(String(tid));
+  if (closed) g.classList.add("closed");
+  const when = firstTs ? new Date(firstTs).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "";
+  g.innerHTML =
+    '<div class="tgh" title="点击折叠 / 展开本主题"><span class="tgcar">▼</span>' +
+      '<span class="tgt"></span><span class="tgc"></span>' +
+      '<span class="spacer"></span><span class="tga"></span></div>' +
+    '<div class="tgb"></div>';
+  g.querySelector(".tgt").textContent = title;
+  g.querySelector(".tga").textContent = when;
+  g.querySelector(".tgh").onclick = () => {
+    const nowClosed = !g.classList.contains("closed");
+    g.classList.toggle("closed", nowClosed);
+    topicClosedWrite(CUR && CUR.session_id, tid, nowClosed);
+    topicUpdateCount();
+  };
+  log.appendChild(g);
+  TCOUNT++;
+  topicUpdateCount();
+  return g.querySelector(".tgb");
+}
+
+// 组头标题：人的发言取正文首行（截断），Agent 开的话题取「Agent 名 · 首行」
+function topicTitle(msg, seq) {
+  let t = String((msg && msg.text) || "").replace(/\s+/g, " ").trim();
+  t = t.replace(/^[@#][^\s]*\s*/g, "").trim();
+  if (!t) t = "（无正文）";
+  if (t.length > 44) t = t.slice(0, 44) + "…";
+  if (!msg.isHuman) t = mname(msg.author) + " · " + t;
+  return "#" + seq + " " + t;
+}
+
+function topicCountRefresh() { /* 向后兼容壳：实际工作在 topicUpdateCount */ }
+
+function topicUpdateCount() {
+  const log = $("log"); if (!log) return;
+  log.querySelectorAll(".tgrp").forEach(g => {
+    const n = g.querySelectorAll(".tgb .msg").length;
+    const c = g.querySelector(".tgc");
+    if (c) c.textContent = n + " 条";
+  });
+}
+
+// topicResolve(seq, isHuman, author): 返回该消息应落入的主题组号
+function topicResolve(seq, isHuman) {
+  // lastTid = 上一条消息落入的组；-1 表示「还没有上一条」
+  if (!TCOUNT || isHuman || lastTid < 0) {
+    const tid = TOPIC_NEXT++;
+    lastTid = tid;
+    LAST_AUTHOR = "\u0000topic" + tid;
+    return tid;
+  }
+  return lastTid;
+}
+
+// 首次整拉（inc=false）时从零重算主题归属
+function topicReset() { TCOUNT = 0; TOPIC_NEXT = 0; LAST_AUTHOR = null; LAST_SEQ = 0; LAST_TS = 0; lastTid = -1; PEND_LIST = []; PEND_IDX = -1; PEND_KEY = ""; }
+
+function logReset() {
+  const log = $("log"); if (log) log.innerHTML = "";
+  topicReset();
+}
+
+// 调试句柄（无头断言用）
+window.__h460 = { topicResolve: topicResolve, topicReset: topicReset, topicUpdateCount: topicUpdateCount };
 
 async function boot() {
   try {
@@ -661,13 +1004,24 @@ async function openGroup(s) {
   const open = s.state === "open";
   $("send").disabled = !open;
   $("closebtn").disabled = !(open && (!MYID || mid(MYID) === "" || s.created_by === MYID));
-  $("log").innerHTML = "";
+  $("log").innerHTML = '<div class="loading"><span class="spin"></span>正在加载聊天记录…</div>';
+  topicReset();
   acClose();
   renderMentions(ids);
   filterReset();           // #438-3：切群 = 发言者全换了，过滤勾选清空（回到「全显」）
   refPopsReset(true);      // #476：换群 —— 旧群的引用浮窗全部收起（固定记录也复位，见下）
   await loadGroups();
   await pull();
+  // #460e：拉完若一条都没有，明确告知「本群暂无消息」而不是留一片空白
+  (function () {
+    const lg = $("log"); if (!lg) return;
+    if (!lg.querySelector(".msg") && !lg.querySelector(".tgrp")) {
+      const empty = CUR && CUR.state === "archived"
+        ? '<span class="ic">📁</span>本群已散会，且没有聊天记录。'
+        : '<span class="ic">💬</span>本群暂无消息——在下方输入框说点什么吧。';
+      lg.innerHTML = '<div class="emptybox">' + empty + '</div>';
+    }
+  })();
   refPopsRestore(s.session_id);   // #476：本群「固定过」的引用浮窗回到原位（刷新/切群都还原）
   if (TIMER) clearInterval(TIMER);
   TIMER = setInterval(() => {
@@ -848,7 +1202,7 @@ async function pull(inc) {
   const log = $("log");
   // #347-0①：先判贴底、再追加。首次/切群(!inc)视为贴底；其余按当前滚动位置实时算。
   const stick = !inc || atBottom(log);
-  if (!inc) { log.innerHTML = ""; SEEN.clear(); }
+  if (!inc) { logReset(); SEEN.clear(); }
   msgs.forEach(m => {
     const seq = m.seq || 0;
     const key = m.message_id || ("seq:" + seq);
@@ -857,38 +1211,81 @@ async function pull(inc) {
     if (seq) CURSOR = Math.max(CURSOR, seq);
     if (seq) MSGCACHE.set(msgKey(CUR && CUR.session_id, seq), m);   // #476：本地缓存，**按群 + seq** 存
     const meta = m.meta || {};
-    const need = meta.needs_response || [];
-    const aud = (meta.audience || []).map(x => x === "<human-id>" ? "刚哥(" + x + ")" : x).join("、");
+    // #460c 需求 2：待回应/已回应要按**实际回复动态更新**。契约两种可能：
+    //   a) meta.needs_response 是字符串数组（旧写法，服务端已算好）
+    //   b) meta.needs_response 是对象 {whom: true/false}（true=待回应，false=已回应）
+    // 这里统一解析成 {wait:[], done:[]}，两种都能吃。
+    const nr = parseNeeds(meta.needs_response);
+    const need = nr.wait;                          // 「还在等谁」——只有真待回应的才标黄
+    const aud = (meta.audience || []).map(x => x === "<human-id>" ? "刚哥(" + x + ")" : x);
     const mine = mid(m.author) === MYID;
+    const isHuman = !(m.author && m.author.type === "agent");
+    const tid = topicResolve(seq, isHuman, m.author);
     const el = document.createElement("div");
     el.className = "msg" + (mine ? " mine" : "") + (need.includes(MYID) ? " need" : "");
     // #438-3：发言者落到 data-* 上 —— 过滤条按它归组，勾选后切 display（不动渲染内容本身）
     el.dataset.author = mid(m.author) || "";
     el.dataset.authorname = mname(m.author) || "";
     el.dataset.seq = String(seq);           // #476：这条消息自己的编号
+    el.dataset.topic = String(tid);         // #460：这条消息属于哪个主题组
+    el.dataset.nr = JSON.stringify(nr);     // #460c：回应状态（后续收到新消息时据此重算）
+    // 顺序推演：本组第一条的时间（组头右侧时刻）取上一组最后一条之后的那条
+    const ts = topicParseTs(m.created_at);
+    if (ts) LAST_TS = ts;
+    el.dataset.ts = String(ts || LAST_TS || 0);   // #460c：时间戳，判断「后续谁回应了」
+    // #460：主题分组 + 接收者高亮（→ 后面那段单独上色）+ Markdown 渲染（md.js）
+    const audHtml = aud
+      ? Array.from(new Set(String(aud).split("、"))).filter(Boolean).map(function (x) {
+          return x === MYID ? '<span class="hl">' + esc(x) + "</span>" : esc(x);
+        }).join("、")
+      : "-";
+    const bodyHtml = (window.MD && MD.render) ? MD.render(m.text) : linkRefs(esc(m.text));
+    // #460c 需求 2：待回应/已回应 渲染（等待橙色，已答绿色）
+    const pendoHtml = renderPendo(nr);
     // 上下文水位（2026-09-24）：服务端按真源（OpenClaw sessions.json）渲染好挂在
     // meta.context，前端只负责显示 —— Agent 不再手打那行，避免分母写错与污染 prompt cache。
     const cx = (meta.context && meta.context.text) ? meta.context : null;
     el.innerHTML =
       '<div class="h"><span class="seq mref" data-seq="' + esc(seq) +
         '" title="点击展开 / 收起 #' + esc(seq) + ' 这条消息">#' + esc(seq) + '</span> <b>' + esc(mname(m.author)) +
-      '</b>' + (m.author && m.author.type === "agent" ? '（Agent）' : '（人）') + ' → ' + esc(aud || "-") +
+      '</b>' + (m.author && m.author.type === "agent" ? '（Agent）' : '（人）') +
+      ' <span class="arrow">→</span> <span class="aud" title="本条消息的接收者（受众）">' + audHtml + '</span>' +
       ' · ' + esc(m.created_at || "") +
-      (need.length ? ' <span class="pendo">待回应：' + esc(need.join("、")) + '</span>' : '') +
-      '</div><div class="b">' + linkRefs(esc(m.text)) + '</div>' +
+      pendoHtml +
+      '</div><div class="b md">' + bodyHtml + '</div>' +
       (cx ? '<div class="ctxwm" title="当前上下文占用 / 模型窗口（服务端按真源渲染，非 Agent 自述）">📚 ' +
         esc(cx.text) + '</div>' : '');   // #476：正文里的 #NNN 变可点标签
-    log.appendChild(el);
+    // #460：先确保本主题的组卡片存在，再把消息塞进组内
+    let tbody = topicBody(tid);
+    if (!tbody) tbody = topicCardEnsure(tid, topicTitle({ text: m.text, author: m.author, isHuman: isHuman }, seq), ts || LAST_TS);
+    tbody.appendChild(el);
+    if (window.MDX && MDX.applyHighlight) MDX.applyHighlight(el);   // #460b：这条消息的代码块上色
+    LAST_AUTHOR = m.author;   // 存「人/Agent 对象」，不是 id —— 免得 mid() 把对象拍平后丢失类型
+    LAST_SEQ = seq;
+    topicUpdateCount();
+    topicsAllSync();
   });
+  // #460c 需求 2：全场重算「待回应/已回应」—— 收到新回复后，旧问题自动从待回应移到已回应
+  refreshNeedStates(msgs);
   if (stick) log.scrollTop = log.scrollHeight;   // #347-0①：只有贴底才跟随，非贴底一动不动
 
   const my = (d && d.my_pending) || [];
   const p = $("pending");
   if (my.length) {
     p.style.display = "block";
-    p.textContent = "★ 我还欠 " + my.length + " 条回应：" +
-      my.map(x => "#" + x.seq + "（来自 " + x.from + "）").join("　");
-  } else { p.style.display = "none"; }
+    p.innerHTML = "★ 我还欠 " + my.length + " 条回应：" +
+      my.map(x => '<span class="pj" data-seq="' + esc(x.seq) + '" title="点击跳到 #' + esc(x.seq) +
+              '（连点依次跳下一条）">#' + esc(x.seq) + "（来自 " + esc(x.from) + "）</span>").join("　");
+    // #460e：待办列表记下来供点击循环跳转；**但 PEND_IDX 只在会话切换/内容变化时重置**，
+    //         点击跳转本身绝不能触发隐藏或重置 —— 只有自己真的回应了才会消失
+    const listKey = my.map(x => Number(x.seq)).join(",");
+    if (listKey !== PEND_KEY) { PEND_KEY = listKey; PEND_IDX = -1; }
+    PEND_LIST = my.map(x => Number(x.seq)).filter(n => n > 0);
+    if (PEND_IDX >= PEND_LIST.length) PEND_IDX = -1;
+  } else {
+    p.style.display = "none";
+    PEND_LIST = []; PEND_IDX = -1; PEND_KEY = "";
+  }
   composerSyncSb();        // #418-2：消息区滚动条出现/消失 → 输入区右边界跟着对齐
   // #438-3：本轮可能带进新发言者 → 补过滤 chip（集合没变则不重建），再按当前勾选切显示
   renderMsgFilter(false); applyMsgFilter();
@@ -1569,7 +1966,10 @@ async function refOpen(seq, opt) {
   rm.textContent = mname(m.author) +
     (m.author && m.author.type === "agent" ? "（Agent）" : "（人）") +
     (m.created_at ? " · " + m.created_at : "");
-  pb.innerHTML = linkRefs(esc(m.text || ""));
+  // #460：引用浮窗的正文也走同一套 Markdown 渲染（渲染体已全程转义）
+  pb.className = "pb md";
+  pb.innerHTML = (window.MD && MD.render) ? MD.render(m.text || "") : linkRefs(esc(m.text || ""));
+  if (window.MDX && MDX.applyHighlight) MDX.applyHighlight(pb);
   refPlace(rec);                                // 正文进来后高度变了，重新夹一次
   return rec;
 }
@@ -1589,6 +1989,75 @@ document.addEventListener("click", (e) => {
   if (!seq) return;
   e.preventDefault();
   refToggle(seq);
+});
+
+// #460d：顶部「我还欠 N 条回应」——点一下依次跳到下一条未答复的，循环。
+// 若正好是待办里的某条，从它开始往后循环；不是待办（比如手点别的）则从头开始。
+function pendingJump(seq) {
+  const log = $("log"); if (!log || !PEND_LIST.length) return;
+  if (seq > 0) {
+    const k = PEND_LIST.indexOf(Number(seq));
+    if (k >= 0) PEND_IDX = k;                       // 从被点的这条开始
+  }
+  if (PEND_IDX < 0) PEND_IDX = 0;
+  else if (seq <= 0) PEND_IDX = (PEND_IDX + 1) % PEND_LIST.length;   // 仅顶部行点击才向后步进
+  const target = PEND_LIST[PEND_IDX];
+  const el = log.querySelector('.tgb .msg[data-seq="' + target + '"]');
+  if (!el) return null;
+  // 若目标所在主题组是折叠的，先展开（否则看不见）
+  const g = el.closest(".tgrp");
+  if (g && g.classList.contains("closed")) {
+    g.classList.remove("closed");
+    topicClosedWrite(CUR && CUR.session_id, g.dataset.tid, false);
+    topicUpdateCount();
+  }
+  if (el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  else log.scrollTop = Math.max(0, el.offsetTop - log.clientHeight / 2);
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 2400);
+  return target;
+}
+
+// 两条点击路径：①点顶部那行本体 → 循环跳；②点行内的 #39（来自 hermes）→ 以那条为起点往后循环
+document.addEventListener("click", (e) => {
+  const p = (e.target && e.target.closest) ? e.target.closest("#pending") : null;
+  if (!p) return;
+  if (p.style.display === "none") return;
+  e.preventDefault();
+  const j = (e.target.closest && e.target.closest(".pj")) || null;
+  pendingJump(j ? parseInt(j.dataset.seq, 10) : 0);
+});
+
+// ================= #460f：一键全部折叠 / 全部展开 =================
+// 规则：若还有「展开着」的组 → 折叠全部；若已全部折叠 → 展开全部（按钮文案跟着变）。
+function topicsAll(closed) {
+  const log = $("log"); if (!log) return;
+  log.querySelectorAll(".tgrp").forEach(g => {
+    g.classList.toggle("closed", !!closed);
+    topicClosedWrite(CUR && CUR.session_id, g.dataset.tid, !!closed);
+    // 折叠时把吸顶组头也拉回原位，避免残影
+    if (closed) g.scrollTop = 0;
+  });
+  topicUpdateCount();
+  topicsAllSync();
+}
+
+function topicsAllSync() {
+  const log = $("log"), b = $("tgall");
+  if (!log || !b) return;
+  const all = log.querySelectorAll(".tgrp").length;
+  const closed = log.querySelectorAll(".tgrp.closed").length;
+  const anyOpen = closed < all && all > 0;
+  b.textContent = anyOpen ? "全部折叠" : "全部展开";
+  b.disabled = all === 0;
+  b.title = anyOpen ? "折叠本群所有主题组" : "展开本群所有主题组";
+}
+
+if ($("tgall")) $("tgall").addEventListener("click", () => {
+  const log = $("log"); if (!log) return;
+  const all = log.querySelectorAll(".tgrp").length;
+  const closed = log.querySelectorAll(".tgrp.closed").length;
+  topicsAll(closed < all);        // 还有展开的 → 全折；已全折 → 全开
 });
 
 // 自测句柄（真机实测读内部状态用；不改变任何行为）
