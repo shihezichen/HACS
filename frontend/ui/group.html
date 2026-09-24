@@ -259,6 +259,13 @@
                             font-size:17px;padding:8px 10px;background:#141a24;
                             border:1px solid #2b3648;border-radius:7px;overflow-x:auto}
   .msg .b.md math.md-mathml mfrac{border-collapse:collapse}
+  /* 行内公式：强制行内排版（MathML 默认是块级/整行） */
+  .msg .b.md math.md-mathml.md-math-inline{display:inline;vertical-align:-0.15em;
+                            font-size:1.02em;padding:0 1px;background:transparent;
+                            border:0;margin:0;text-align:left}
+  /* 公式前的标签行（「块级公式：」）行内化，与紧随的公式同处一个块流，
+     避免 </p> 与块级 <math> 之间被 margin 撑开一大截 */
+  .msg .b.md .md-lab{display:block;margin:6px 0 2px;color:var(--fg)}
   .msg .b.md .md-mathraw{font-family:Consolas,Menlo,monospace;color:#e8a33d}
   /* #460b 反馈 2：代码块鲜明高亮（token 配色）*/
   .msg .b.md pre.md-code{background:#0b0f17;border:1px solid #2b3648}
@@ -312,6 +319,12 @@
     #msgfilter{padding:6px 10px}
   }
 
+  /* #477：文字按钮改图标 —— .ico 统一成方形图标钮，尺寸与 .ghost 同高，
+     无文字所以靠 title/aria-label 保留语义（鼠标悬停有提示、读屏器能念）。 */
+  .ghost.ico { padding: 0; width: 30px; min-width: 30px; text-align: center;
+               font-size: 15px; line-height: 1; overflow: hidden; }
+  .ghost.ico:disabled { opacity: .45; }
+  #send { padding: 0; width: 40px; min-width: 40px; text-align: center; font-size: 17px; line-height: 1; }
   /* ===== 任务清单面板（task_svc :9981 · 群任务清单 v1）=====
      position:fixed 脱离文档流：不动三段式、不动 #log 唯一滚动容器；
      面板内部自己的列表才滚动（#tp-list）。 */
@@ -425,8 +438,8 @@
   <span id="who">身份读取中…</span>
   <span class="spacer"></span>
   <button class="ghost" id="newbtn">＋ 建群</button>
-  <button class="ghost" id="taskbtn">☰ 任务清单</button>
-  <button class="ghost" id="refresh">刷新</button>
+
+  <button class="ghost ico" id="refresh" title="刷新群列表与聊天记录" aria-label="刷新">🔄</button>
 </header>
 
 <main>
@@ -440,7 +453,7 @@
       <!-- #448-3：清空队列（服务端 POST /api/sessions/<sid>/todos/purge，落库；刷新后仍为空） -->
       <button class="ghost atclear" id="tqclear" hidden
               title="清空本群任务队列（落库，刷新后仍为空）">清空</button>
-      <button class="ghost" id="collapsebtn" title="向左折叠左栏面板">◀ 折叠</button>
+      <button class="ghost ico" id="collapsebtn" title="向左折叠左栏面板" aria-label="折叠左栏">◀</button>
     </div>
     <div id="groups"></div>
     <div id="tqueue" hidden></div>
@@ -454,8 +467,8 @@
       <span class="title" id="gtitle">未选群</span>
       <span id="gmeta" class="pendo"></span>
       <span class="spacer"></span>
-      <button class="ghost" id="tgall" title="一键折叠 / 展开本群所有主题组">全部折叠</button>
-      <button class="ghost" id="closebtn" disabled>散会（关群）</button>
+      <button class="ghost ico" id="tgall" title="一键折叠本群所有主题组" aria-label="折叠/展开全部主题组">⏫</button>
+      <button class="ghost ico" id="closebtn" disabled title="宣布散会（关群，归档后不能再发言）" aria-label="散会">🚪</button>
     </div>
     <div id="pending"></div>
     <!-- #438-3：按发言者过滤消息（多选；全不选 = 全显）。放在 #log 外面 ——
@@ -470,7 +483,7 @@
          是 Safari / iOS / 各类输入法的同类抑制项。 -->
     <textarea id="text" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off"
               placeholder="在这里说话。打 @ 会弹出本群成员联想（↑↓ 选，Enter 补全）；Ctrl+Enter 直接发送。"></textarea>
-    <button id="send" disabled>发送</button>
+    <button id="send" disabled title="发送（Ctrl+Enter）" aria-label="发送">➤</button>
   </div>
   <div class="mentions" id="mentions"></div>
   <div class="ac" id="ac"></div>
@@ -479,27 +492,7 @@
 
 </main>
 
-<!-- 任务清单抽屉（群任务清单 v1 · 数据来自 task_svc :9981）。fixed 定位：不改三段式、不引第二个页面滚动条 -->
-<div id="taskpanel" aria-hidden="true">
-  <div id="tp-head">
-    <b>任务清单</b>
-    <span class="g" id="tp-group">meet_20260921_demo01</span>
-    <span class="spacer"></span>
-    <span class="pendo" id="tp-count"></span>
-    <button class="ghost" id="tp-refresh">刷新</button>
-    <button class="ghost" id="tp-close">收起</button>
-  </div>
-  <div id="tp-err"></div>
-  <div id="tp-list"></div>
-  <div id="tp-add">
-    <input id="tp-title" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" placeholder="新任务标题（Enter 提交）">
-    <div class="row">
-      <input id="tp-owner" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" placeholder="责任人">
-      <select id="tp-prio"><option value="normal">普通</option><option value="special">特殊</option></select>
-      <button id="tp-addbtn">＋ 新增</button>
-    </div>
-  </div>
-</div>
+
 
 
 
@@ -519,6 +512,24 @@
 <script src="/hl.js"></script>
 <script src="/codeblock.js"></script>
 <script>
+
+/* ⚠️ 状态声明必须放脚本最前面：文件后面的 boot() 会同步走到访问它们的路径，
+   声明在后 → 「Cannot access 'REFPOP' before initialization」→ 页面启动失败、
+   聊天记录永远加载不出来。 */
+const MSGCACHE = new Map();      // 键 = "<群 id>#<seq>" -> 消息对象（pull() 时顺手写）
+const REFPOP = new Map();        // seq -> {el, seq, sid, x, y, pinned}
+const REFREST = new Set();       // 已还原过「固定浮窗」的群（轮询/重渲染不重复还原）
+const LS_REFPINS = "group.refpins";
+let REFSID = "";
+let REFZ = 70;
+let REFSRC = "";                     // 最近一次取正文实际走的来源（single / list），便于真机实测取证
+
+// —— 左栏 TAB 状态（必须在任何访问之前初始化，否则顶部同步路径踩 TDZ）——
+const ATABS = ["groups", "queue"];
+const TQSTATUS = { open: "待办", doing: "进行中", done: "已完成" };
+const TQCLS = { open: "pending", doing: "running", done: "done" };   // 沿用既有 .tqs 三档配色
+const TQRANK = { doing: 0, open: 1, done: 2 };                       // 在办的在上、完成的在下
+let ATAB = "groups";
 "use strict";
 const $ = (id) => document.getElementById(id);
 const API = "";              // 同源托管：直接打本站 /api
@@ -688,8 +699,10 @@ function applyMsgFilter() {
   const log = $("log"); if (!log) return { shown: 0, total: 0 };
   let shown = 0, total = 0;
   log.querySelectorAll(".msg").forEach(el => {
-    const a = el.dataset.author || ""; if (!a || seen.has(a)) return;
-    seen.set(a, el.dataset.authorname || a);
+    const a = el.dataset.author || "";
+    const vis = (!FILTER.size || FILTER.has(a));
+    el.style.display = vis ? "" : "none";
+    total++; if (vis) shown++;
   });
   // #460：勾了发言者过滤时，顺带按主题组重算「组内还剩几条可见」；全显时恢复真实条数
   log.querySelectorAll(".tgrp").forEach(g => {
@@ -1472,7 +1485,7 @@ async function tAdd() {
 }
 
 function tOpen(on) {
-  const p = $("taskpanel");
+  const p = $("taskpanel"); if (!p) return;      // 抽屉已下线：无元素时直接返回，避免空引用崩启动
   const open = (on === undefined) ? !p.classList.contains("on") : !!on;
   p.classList.toggle("on", open);
   p.setAttribute("aria-hidden", open ? "false" : "true");
@@ -1483,9 +1496,7 @@ function tOpen(on) {
   } else if (TPOLL) { clearInterval(TPOLL); TPOLL = null; }
 }
 
-$("taskbtn").onclick = () => tOpen();
-$("tp-close").onclick = () => tOpen(false);
-$("tp-refresh").onclick = () => tLoad();
+/* 任务清单抽屉已下线（2026-09-24 刚哥）：入口按钮与抽屉 DOM 一并移除，tOpen/tLoad 保留但不再有调用方 */
 $("tp-addbtn").onclick = tAdd;
 $("tp-title").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); tAdd(); } });
 
@@ -1521,11 +1532,7 @@ $("tp-title").addEventListener("keydown", e => { if (e.key === "Enter") { e.prev
 // （GET /api/sessions/<本群 session_id>/todos）—— 同源、落库，刷新/换设备都还在。
 // 入队不靠前端：人在群里 @agent 下发任务时后端自动建条目（待办），
 // agent 开工/完成时把同一条目翻「进行中 / 已完成」，这里只如实呈现。
-const ATABS = ["groups", "queue"];
-// 状态口径（与后端 TODO_STATUS 一一对应）：open=待办 / doing=进行中 / done=已完成
-const TQSTATUS = { open: "待办", doing: "进行中", done: "已完成" };
-const TQCLS = { open: "pending", doing: "running", done: "done" };   // 沿用既有 .tqs 三档配色
-const TQRANK = { doing: 0, open: 1, done: 2 };                       // 在办的在上、完成的在下
+
 
 // ===== #534：列表只显示「抽象后的任务名」，鼠标悬停再看完整详细任务信息 =====
 // #541：短名/详情改由**模型**给（入队后异步富化回写 task_name + task_summary）。
@@ -1582,7 +1589,7 @@ function tqDetail(t) {                     // 悬停显示的完整信息（换�
   lines.push("落点：" + (landing || "（暂无）"));
   return lines.join("\n");
 }
-let ATAB = "groups";
+
 
 function aTabSet(name) {
   if (ATABS.indexOf(name) < 0) name = "groups";
@@ -1738,16 +1745,9 @@ window.setInterval(() => { if (ATAB === "queue") tqLoad(); }, 5000);
 //   发送方 / 时间 / 正文）；页面上已经渲染过的消息先吃本地缓存 MSGCACHE（pull 时顺手存），
 //   命中就不打网络。浮窗层 #refpop 挂在 body 下 —— #log 每 3 秒轮询会 innerHTML=""，
 //   挂在那儿才不会被轮询连带清掉。
-const MSGCACHE = new Map();      // 键 = "<群 id>#<seq>" -> 消息对象（pull() 时顺手写）
 // ⚠️ 必须带群 id：#NNN 只是**会话内**序号，跨群会撞号（真机实测踩到 —— 切到别的群再回来，
 //    引用标签曾展开出另一个群同号的正文）。所以缓存键 = 群 id + seq，绝不裸用 seq。
 function msgKey(sid, seq) { return String(sid || "") + "#" + String(seq); }
-const REFPOP = new Map();        // seq -> {el, seq, sid, x, y, pinned}
-const REFREST = new Set();       // 已还原过「固定浮窗」的群（轮询/重渲染不重复还原）
-const LS_REFPINS = "group.refpins";
-let REFSID = "";
-let REFZ = 70;
-let REFSRC = "";                     // 最近一次取正文实际走的来源（single / list），便于真机实测取证
 
 // 把（已转义的）正文里的 #NNN 换成可点标签。前缀不吃 # / 词字符，避免 ##123、T-#123 这种误伤。
 function linkRefs(html) {
@@ -2048,9 +2048,10 @@ function topicsAllSync() {
   const all = log.querySelectorAll(".tgrp").length;
   const closed = log.querySelectorAll(".tgrp.closed").length;
   const anyOpen = closed < all && all > 0;
-  b.textContent = anyOpen ? "全部折叠" : "全部展开";
+  b.textContent = anyOpen ? "⏫" : "⏬";        // 文字改图标：收起 / 展开（语义放 title/aria）
   b.disabled = all === 0;
   b.title = anyOpen ? "折叠本群所有主题组" : "展开本群所有主题组";
+  b.setAttribute("aria-label", b.title);        // 只剩图标：语义放 title + aria
 }
 
 if ($("tgall")) $("tgall").addEventListener("click", () => {
