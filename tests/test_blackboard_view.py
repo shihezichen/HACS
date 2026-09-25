@@ -56,8 +56,17 @@ BOARD_PATH = bv.BOARD_PATH
 # 各 Agent 往黑板里写的"不可信正文"：脚本标签 + 引号 + & + 换行
 NASTY = '<script>alert(1)</script> & "引号" \'单引号\' <img src=x onerror=alert(2)>\n第二行'
 
+# ---------------------------------------------------------------------------
+# 测试夹具真值（硬编码清零 Phase 1.5）
+# PHASE2_TODO: 待节点注入 env 后删除
+# 默认值逐字等于改动前的真值；未注入 env 时测试行为与改动前完全等价。
+FIX_MEMBER_CLOUD = os.environ.get("AGENT_TEAM_TEST_MEMBER_CLOUD") or "lobster"
+FIX_MEMBER_TOP001 = os.environ.get("AGENT_TEAM_TEST_MEMBER_TOP001") or "top001"
+FIX_NODE_CLOUD_IP = os.environ.get("AGENT_TEAM_TEST_NODE_CLOUD_IP") or "<host>"
+FIX_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+
 HEALTH = {
-    "ok": True, "version": "1.1", "node": "lobster",
+    "ok": True, "version": "1.1", "node": FIX_MEMBER_CLOUD,
     "db": {"ok": True, "latency_ms": 15},
     "entries": {"total": 12},
     "embed": {"available": True, "model": "BAAI/bge-small-zh-v1.5",
@@ -86,18 +95,18 @@ def free_port():
 
 SESSION_LIST = [
     {"session_id": "rt-20260919-120000-aaaa", "topic": "p5", "question": NASTY,
-     "moderator": "hermes", "members": ["hermes", "lobster", "top001"],
+     "moderator": "hermes", "members": ["hermes", FIX_MEMBER_CLOUD, FIX_MEMBER_TOP001],
      "state": "converged", "round_no": 3, "max_rounds": 4,
      "started_at": "2026-09-19T11:00:00Z", "ended_at": "2026-09-19T11:20:00Z",
      "turns_total": 9, "speakers_total": 3, "conclusion_entry": 77},
     {"session_id": "rt-20260919-110000-bbbb", "topic": "p5", "question": "要不要上异地副本？",
-     "moderator": "lobster", "members": ["hermes", "lobster"],
+     "moderator": FIX_MEMBER_CLOUD, "members": ["hermes", FIX_MEMBER_CLOUD],
      "state": "running", "round_no": 1, "max_rounds": 4,
      "started_at": "2026-09-19T10:00:00Z", "ended_at": None,
      "turns_total": 2, "speakers_total": 2, "conclusion_entry": None},
     # UTC 16:30 = 北京 9/20 00:30 —— 专门用来验"日历按北京时间切日"，不是按 UTC
     {"session_id": "rt-20260920-003000-cccc", "topic": "p6", "question": "跨零点的那一场",
-     "moderator": "top001", "members": ["hermes", "top001"],
+     "moderator": FIX_MEMBER_TOP001, "members": ["hermes", FIX_MEMBER_TOP001],
      "state": "converged", "round_no": 2, "max_rounds": 4,
      "started_at": "2026-09-19T16:30:00Z", "ended_at": "2026-09-19T17:10:00Z",
      "turns_total": 4, "speakers_total": 2, "conclusion_entry": 88},
@@ -108,7 +117,7 @@ SESSION_TURNS = [
      "kind": "opinion", "stance": "support", "vote": "continue", "confidence": 0.8,
      "content": NASTY, "refs": [{"type": "file", "value": "<script>alert(3)</script>"}],
      "entry_id": 61, "error": None, "ts": "2026-09-19T11:01:00Z", "elapsed_ms": 1200},
-    {"turn_id": 2, "round_no": 1, "seq": 2, "speaker": "lobster", "status": "absent",
+    {"turn_id": 2, "round_no": 1, "seq": 2, "speaker": FIX_MEMBER_CLOUD, "status": "absent",
      "kind": None, "stance": None, "vote": None, "confidence": None,
      "content": None, "refs": [], "entry_id": None,
      "error": "点名探针无应答，判定离线", "ts": "2026-09-19T11:01:30Z", "elapsed_ms": 6000},
@@ -133,12 +142,12 @@ CONFIRMATIONS = [
     {"confirm_id": 21, "session_id": "rt-20260919-120000-aaaa", "target": "overall",
      "member": "hermes", "verdict": "agree", "note": None, "ts": "2026-09-19T11:19:00Z"},
     {"confirm_id": 22, "session_id": "rt-20260919-120000-aaaa", "target": "overall",
-     "member": "top001", "verdict": "object", "note": NASTY, "ts": "2026-09-19T11:19:10Z"},
+     "member": FIX_MEMBER_TOP001, "verdict": "object", "note": NASTY, "ts": "2026-09-19T11:19:10Z"},
 ]
 
 TRACK_ACTIONS = [
     {"action_id": 31, "session_id": "rt-20260919-120000-aaaa", "agenda_seq": 1,
-     "what": NASTY, "owner": "lobster", "due_at": "2020-01-01T00:00:00Z", "status": "open",
+     "what": NASTY, "owner": FIX_MEMBER_CLOUD, "due_at": "2020-01-01T00:00:00Z", "status": "open",
      "evidence": None, "note": None, "created_at": "2026-09-19T11:20:00Z",
      "closed_at": None, "closed_by": None, "session_topic": "p5", "overdue": True},
     {"action_id": 32, "session_id": "rt-20260919-120000-aaaa", "agenda_seq": 1,
@@ -150,7 +159,7 @@ TRACK_ACTIONS = [
 
 TRACK_ISSUES = [
     {"issue_id": 41, "session_id": "rt-20260919-120000-aaaa", "title": NASTY,
-     "detail": "预算没批", "owner": "lobster", "status": "open",
+     "detail": "预算没批", "owner": FIX_MEMBER_CLOUD, "status": "open",
      "due_at": "2020-01-01T00:00:00Z", "next_check_at": "2020-02-01T00:00:00Z",
      "refs": [{"type": "entry", "value": 61}], "created_at": "2026-09-19T11:20:00Z",
      "closed_at": None, "closed_by": None, "note": None, "session_topic": "p5",
@@ -160,7 +169,7 @@ TRACK_ISSUES = [
 TRACK_COUNTS = {"actions_open": 2, "actions_overdue": 1,
                 "issues_open": 1, "issues_overdue": 1}
 
-CONFIRM_SUMMARY = {"agree": ["hermes", "lobster"], "object": ["top001"], "abstain": [],
+CONFIRM_SUMMARY = {"agree": ["hermes", FIX_MEMBER_CLOUD], "object": [FIX_MEMBER_TOP001], "abstain": [],
                    "absent": [], "required": 3, "passed": False}
 
 
@@ -172,31 +181,31 @@ SECRET_BODY = "主人手机号 13800000000，家庭住址……（这段正文�
 
 SHARED_PERMANENT = [
     {"shared_id": 101, "scope": "permanent", "kind": "node", "title": NASTY,
-     "body": "龙虾 <host> / top001 100.x.x.x", "tags": ["infra", "节点"],
+     "body": "龙虾 " + FIX_NODE_CLOUD_IP + " / " + FIX_MEMBER_TOP001 + " 100.x.x.x", "tags": ["infra", "节点"],
      "owner": "hermes", "updated_at": "2026-09-18T03:00:00Z",
      "expires_at": "2026-09-20T00:00:00Z", "review_at": "2026-09-01T00:00:00Z",
      "version": 3, "sensitive": False, "authorized": True, "revoked": False,
      "expired": False, "expiring_soon": True, "review_due": True,
      "history": [{"version": 3, "by": "hermes", "at": "2026-09-18T03:00:00Z",
                   "fields": ["body", "tags"]},
-                 {"version": 2, "by": "lobster", "at": "2026-09-10T03:00:00Z",
+                 {"version": 2, "by": FIX_MEMBER_CLOUD, "at": "2026-09-10T03:00:00Z",
                   "fields": ["title"]}]},
     {"shared_id": 102, "scope": "permanent", "kind": "owner_key_info",
      "title": SECRET_TITLE, "body": SECRET_BODY, "tags": ["私密", "主人"],
-     "owner": "lobster", "updated_at": "2026-09-17T03:00:00Z",
+     "owner": FIX_MEMBER_CLOUD, "updated_at": "2026-09-17T03:00:00Z",
      "expires_at": None, "review_at": "2026-12-01T00:00:00Z", "version": 1,
      "sensitive": True, "authorized": False, "revoked": False,
-     "history": [{"version": 1, "by": "lobster", "at": "2026-09-17T03:00:00Z",
+     "history": [{"version": 1, "by": FIX_MEMBER_CLOUD, "at": "2026-09-17T03:00:00Z",
                   "fields": ["body"]}]},
     {"shared_id": 103, "scope": "permanent", "kind": "config", "title": "已撤下的旧配置",
-     "body": "老网关配置", "tags": [], "owner": "top001",
+     "body": "老网关配置", "tags": [], "owner": FIX_MEMBER_TOP001,
      "updated_at": "2026-08-01T03:00:00Z", "expires_at": "2026-09-01T00:00:00Z",
      "review_at": None, "version": 5, "sensitive": False, "authorized": True,
      "revoked": True, "expired": True, "history": []},
 ]
 
 SHARED_TASKS = [
-    {"task_id": "T-D2", "title": "D2 看板重构", "owner": "top001", "status": "active",
+    {"task_id": "T-D2", "title": "D2 看板重构", "owner": FIX_MEMBER_TOP001, "status": "active",
      "ttl_expire_at": "2026-09-20T00:00:00Z",
      "destroy_when": "任务验收通过后 24 小时自动销毁",
      "items": [
@@ -207,10 +216,10 @@ SHARED_TASKS = [
           "sensitive": False, "authorized": True, "revoked": False, "history": []},
          {"shared_id": 202, "scope": "task", "task_id": "T-D2", "kind": "owner_profile",
           "title": SECRET_TITLE, "body": SECRET_BODY, "tags": ["私密"],
-          "owner": "lobster", "updated_at": "2026-09-19T03:30:00Z",
+          "owner": FIX_MEMBER_CLOUD, "updated_at": "2026-09-19T03:30:00Z",
           "expires_at": None, "review_at": None, "version": 1,
           "sensitive": True, "authorized": False, "revoked": False,
-          "history": [{"version": 1, "by": "lobster", "at": "2026-09-19T03:30:00Z",
+          "history": [{"version": 1, "by": FIX_MEMBER_CLOUD, "at": "2026-09-19T03:30:00Z",
                        "fields": ["body"]}]},
      ]},
     {"task_id": "T-OLD", "title": "已结束的老任务", "owner": "hermes", "status": "done",
@@ -789,8 +798,8 @@ class TestMisc(BaseCase):
         args = bv.build_parser().parse_args([])
         self.assertEqual(args.host, "127.0.0.1")
         self.assertEqual(args.port, 9941)
-        self.assertEqual(args.upstream, "http://<host>:9940")
-        self.assertEqual(args.token_file, "<deploy-dir>/client-token")
+        self.assertEqual(args.upstream, "http://" + FIX_NODE_CLOUD_IP + ":9940")
+        self.assertEqual(args.token_file, FIX_ETC_DIR + "/client-token")
         self.assertEqual(args.refresh_seconds, 30)
 
     def test_main_rejects_bad_upstream_scheme(self):
@@ -1004,11 +1013,11 @@ class TestTrackingPassthrough(BaseCase):
         self.assertIsNone(self.last_call()[1].get("overdue"), "看不懂的值当没开")
 
     def test_actions_and_issues_pass_filters_through(self):
-        call("/api/actions?status=open&owner=lobster&overdue=1&limit=5")
+        call("/api/actions?status=open&owner=" + FIX_MEMBER_CLOUD + "&overdue=1&limit=5")
         path, query, _ = self.last_call()
         self.assertEqual(path, "/actions")
         self.assertEqual(query.get("status"), "open")
-        self.assertEqual(query.get("owner"), "lobster")
+        self.assertEqual(query.get("owner"), FIX_MEMBER_CLOUD)
         self.assertEqual(query.get("overdue"), "1")
         self.assertEqual(query.get("limit"), "5")
         code, body, _ = call("/api/issues?status=watching")
@@ -1441,7 +1450,7 @@ class TestSharedSensitive(BaseCase):
         self.assertEqual(item["tags"], [])
         self.assertNotIn("history", item, "变更历史也可能带正文，一并抹掉")
         # 但"存在"这件事本身要留下：谁维护、归哪个 kind、什么时候更新过
-        self.assertEqual(item["owner"], "lobster")
+        self.assertEqual(item["owner"], FIX_MEMBER_CLOUD)
         self.assertEqual(item["kind"], "owner_key_info")
         self.assertIn("2026-09-17", item["updated_at"])
 

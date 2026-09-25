@@ -5,7 +5,7 @@ teamd.py —— 团队 NATS 客户端守护（每个成员节点跑一份）
 
 它是「NATS 中枢」与「本机 A2A 服务（a2a_svc.py:9920）」之间的翻译官：
 
-    别的成员                NATS 中枢 <host>:9930          本机
+    别的成员                NATS 中枢 <NODE_IP>:9930          本机
     a2a.v1.req.<member>  ───────────────────────────────────▶  teamd
                                                                   │ POST /a2a/<member>/messages
                                                                   ▼
@@ -27,28 +27,28 @@ teamd.py —— 团队 NATS 客户端守护（每个成员节点跑一份）
 Windows 与 Linux 都能跑（signal 注册一律 try/except 兜住）。
 
 用法（单成员，向后兼容旧写法）：
-    python teamd.py --member lobster \\
-        --nats-host <host> --nats-port 9930 \\
-        --user lobster --password-file /etc/nats/lobster.pass \\
-        --a2a-base http://127.0.0.1:9920 --token-file <deploy-dir>/lobster-token \\
+    python teamd.py --member <MEMBER_ID> \\
+        --nats-host <NODE_IP> --nats-port 9930 \\
+        --user <MEMBER_ID> --password-file <PASS_FILE> \\
+        --a2a-base http://127.0.0.1:9920 --token-file <TOKEN_FILE> \\
         --admin-port 9960
 
 用法（同机多成员，每人一套凭据）：
-    python teamd.py --member hermes,codex,piagent \\
-        --nats-host <host> --nats-port 9930 \\
-        --user hermes=hermes --user codex=codex --user piagent=piagent \\
-        --password-file hermes=<home>\\agent-team\\nats-hermes.pass \\
-        --password-file codex=<home>\\agent-team\\nats-codex.pass \\
-        --password-file piagent=<home>\\agent-team\\nats-piagent.pass \\
-        --a2a-base http://<node-ip>:9920 \\
-        --token-file hermes=<home>\\agent-team\\hermes-token \\
-        --token-file codex=<home>\\agent-team\\codex-token \\
-        --token-file piagent=<home>\\agent-team\\piagent-token \\
+    python teamd.py --member <MEMBER_ID_1>,<MEMBER_ID_2>,<MEMBER_ID_3> \\
+        --nats-host <NODE_IP> --nats-port 9930 \\
+        --user <MEMBER_ID_1>=<USER_ID_1> --user <MEMBER_ID_2>=<USER_ID_2> --user <MEMBER_ID_3>=<USER_ID_3> \\
+        --password-file <MEMBER_ID_1>=<RUNTIME_DIR>\\nats-<MEMBER_ID_1>.pass \\
+        --password-file <MEMBER_ID_2>=<RUNTIME_DIR>\\nats-<MEMBER_ID_2>.pass \\
+        --password-file <MEMBER_ID_3>=<RUNTIME_DIR>\\nats-<MEMBER_ID_3>.pass \\
+        --a2a-base http://<NODE_IP>:9920 \\
+        --token-file <MEMBER_ID_1>=<RUNTIME_DIR>\\<MEMBER_ID_1>-token \\
+        --token-file <MEMBER_ID_2>=<RUNTIME_DIR>\\<MEMBER_ID_2>-token \\
+        --token-file <MEMBER_ID_3>=<RUNTIME_DIR>\\<MEMBER_ID_3>-token \\
         --admin-port 9960
 
 --user / --password-file 都缺省时按平台自动推断路径：
-    Linux   /etc/nats/<member>.pass
-    Windows <home>\\agent-team\\nats-<member>.pass
+    Linux   <PASS_DIR>/<member>.pass
+    Windows <PASS_DIR>\\nats-<member>.pass
 推断不到就在启动时报清楚哪个成员缺凭据并退出（非 0 退出码），不静默降级。
 """
 
@@ -73,6 +73,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from nats_client import NatsClient, NatsError, read_secret_file  # noqa: E402
 
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<home>\\agent-team"
+
 VERSION = "1.2"
 REQ_SUBJECT_FMT = "a2a.v1.req.%s"
 HB_SUBJECT_FMT = "team.hb.%s"
@@ -81,7 +84,7 @@ _MEMBER_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")  # 成员名：字母数字._-
 
 DEFAULT_TIMEOUT_S = 120.0
 MAX_TIMEOUT_S = 600.0   # 调用方**声明**的上限，不再等于一个回合实际能用多久。
-                        # 2026-09-22: 300→600. 值守点名 hermes 的回合常>300s(带工具调用),
+                        # 2026-09-22: 300→600. 值守点名 <MEMBER_ID> 的回合常>300s(带工具调用),
                         # 300 上限会把整轮砍成 timeout, 群里表现为"它没回应"。
                         # 2026-09-22 二改: 实际回合时长由 HARD_ROUND_CAP_S 兜底(取二者小值)。
 MIN_TIMEOUT_S = 0.1          # 下限只防 0/负数，方便自测跑短超时
@@ -187,8 +190,8 @@ def default_password_path(member):
     # type: (str) -> str
     """两者都缺省时的平台默认口令文件路径。"""
     if os.name == "nt":
-        return "<home>\\agent-team\\nats-%s.pass" % member
-    return "/etc/nats/%s.pass" % member
+        return "%s\\nats-%s.pass" % (os.environ.get("AGENT_TEAM_NATS_DIR") or AGENT_TEAM_RUNTIME_DIR, member)
+    return "%s/%s.pass" % (os.environ.get("AGENT_TEAM_NATS_DIR") or "/etc/nats", member)  # PHASE2_TODO: 待节点注入 env 后删除
 
 
 def resolve_member_creds(members, user_entries, password_file_entries):
@@ -225,7 +228,7 @@ def resolve_member_creds(members, user_entries, password_file_entries):
         if len(members) > 1:
             raise SystemExit(
                 "[FATAL] --member 有多个成员时，--password-file 必须用「成员=路径」形式给出"
-                "（如 --password-file %s=/etc/nats/%s.pass）；收到未加成员前缀的单值: %r"
+                "（如 --password-file %s=<PASS_DIR>/%s.pass）；收到未加成员前缀的单值: %r"
                 % (members[0], members[0], pass_unkeyed[0]))
         pass_keyed.setdefault(members[0], pass_unkeyed[0])
 
@@ -299,7 +302,7 @@ class Config(object):
         self.workers = max(1, int(workers))
         self.per_member_limit = max(1, int(per_member_limit))
         self.watch_stdin = bool(watch_stdin)
-        # inbound=False：纯出站成员（如量子，按规划零监听）——不订阅自己的点名 subject
+        # inbound=False：纯出站成员（如 <MEMBER_ID>，按规划零监听）——不订阅自己的点名 subject
         self.inbound = bool(inbound)
 
     def user_for(self, member):
@@ -1320,38 +1323,38 @@ def build_parser():
         description="团队 NATS 客户端守护：把 a2a.v1.req.<member> 的点名转成本机 A2A 调用；"
                     "每个成员各自一条独立 NATS 连接、各自一套凭据")
     ap.add_argument("--member", required=True,
-                    help="本机成员 id；同机多成员用逗号分隔（如 hermes,codex,piagent），"
+                    help="本机成员 id；同机多成员用逗号分隔（如 <MEMBER_ID_1>,<MEMBER_ID_2>,<MEMBER_ID_3>），"
                          "共用一个 teamd 进程/9960 管理口，但每个成员各自一条独立 NATS 连接")
     ap.add_argument("--nats-host", required=True,
-                    help="NATS 中枢地址，如 <host>；支持逗号分隔多地址做故障转移，"
-                         "如 ip1:9930,ip2:9930")
+                    help="NATS 中枢地址，如 <NODE_IP>；支持逗号分隔多地址做故障转移，"
+                         "如 <NODE_IP_1>:9930,<NODE_IP_2>:9930")
     ap.add_argument("--nats-port", type=int, default=9930, help="NATS 端口（默认 9930）")
     ap.add_argument("--user", default=None, action="append",
                     metavar="[成员=]用户名",
-                    help="NATS 用户名；多成员可重复给出「成员=用户名」（如 --user hermes=hermes）；"
+                    help="NATS 用户名；多成员可重复给出「成员=用户名」（如 --user <MEMBER_ID>=<USER_ID>）；"
                          "--member 只有一个成员时可给单值（向后兼容旧写法）；"
                          "缺省时默认取成员名本身")
     ap.add_argument("--password-file", default=None, action="append",
                     metavar="[成员=]路径",
                     help="NATS 口令文件路径；多成员可重复给出「成员=路径」"
-                         "（如 --password-file hermes=/etc/nats/hermes.pass）；"
+                         "（如 --password-file <MEMBER_ID>=<PASS_FILE>）；"
                          "--member 只有一个成员时可给单值（向后兼容旧写法）；"
-                         "缺省时自动探测 Linux /etc/nats/<member>.pass 或 "
-                         "Windows <home>\\agent-team\\nats-<member>.pass，探测不到会在启动时报错退出")
+                         "缺省时自动探测 Linux <PASS_DIR>/<member>.pass 或 "
+                         "Windows <PASS_DIR>\\nats-<member>.pass，探测不到会在启动时报错退出")
     ap.add_argument("--a2a-base",
-                    help="本机 A2A 基地址，如 http://<node-ip>:9920")
+                    help="本机 A2A 基地址，如 http://<NODE_IP>:9920")
     ap.add_argument("--token-file", default=None, action="append",
                     metavar="[成员=]路径",
-                    help="A2A token 文件；多成员可重复给出（如 --token-file hermes=<home>/agent-team/hermes-token）；"
+                    help="A2A token 文件；多成员可重复给出（如 --token-file <MEMBER_ID>=<RUNTIME_DIR>/<MEMBER_ID>-token）；"
                          "单成员可不带成员前缀；--no-inbound 时可不给")
     ap.add_argument("--no-inbound", action="store_true",
-                    help="纯出站模式：不订阅自己的点名 subject（零对外服务成员用，如量子）")
+                    help="纯出站模式：不订阅自己的点名 subject（零对外服务成员用，如 <MEMBER_ID>）")
     ap.add_argument("--admin-port", type=int, default=9960,
                     help="管理口端口（默认 9960，只绑 127.0.0.1）")
     ap.add_argument("--no-admin", action="store_true", help="不起管理口")
     ap.add_argument("--blackboard-base",
-                    default=os.environ.get("TEAMD_BLACKBOARD_BASE", ""),
-                    help="中枢（blackboard）基址，如 http://<host>:9940；"
+                    default=os.environ.get("AGENT_TEAM_BB_BASE") or os.environ.get("TEAMD_BLACKBOARD_BASE", ""),
+                    help="中枢（blackboard）基址，如 http://<NODE_IP>:9940；"
                          "给了才会做离线补拉")
     ap.add_argument("--inbox-replay-limit", type=int, default=DEFAULT_INBOX_REPLAY_LIMIT,
                     help="一次离线补拉最多领几条")

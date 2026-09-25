@@ -8,7 +8,7 @@ POST /entries，走 append-only 的正路）和 **roundtable_turns**（留痕）
 每项判到收敛或撞上限就让主持人出该项结论、**当场点名确认**，全部议程走完再出
 总体结论 + **落实事项（有人有期限）**，然后退出。
 
-会议四要素（刚哥口径：会议有目标，会前有议程，会中有结论，会有落实）：
+会议四要素（<USER_ID>口径：会议有目标，会前有议程，会中有结论，会有落实）：
   * **目标**：--goal 必填，写进 sessions.goal（冻结列），每次 prompt 都带；
   * **议程**：--agenda 必填，写进 sessions.agenda 快照 + roundtable_agenda_items
     逐项行；每项有 title / expected，会中逐项推进、逐项出结论；
@@ -20,7 +20,7 @@ POST /entries，走 append-only 的正路）和 **roundtable_turns**（留痕）
     due_at 必须是未来时刻，校验不过重试 1 次，仍不过 → 会议记 incomplete。
   * **遗留问题**：deferred 项 / 被 object 的结论 / 缺席导致证据不全 → roundtable_issues。
 
-出席率与缺席开单（刚哥澄清后的最终口径，别再写成"缺席率"）：
+出席率与缺席开单（<USER_ID>澄清后的最终口径，别再写成"缺席率"）：
   * **出席率 = 在场人数 / 应到人数**。应到 = sessions.members 全集（原定期望成员）；
     在场 = 本场**至少应答过一次点名**的成员。两个数与缺席名单都落回 sessions
     （expected_count / present_count / absent_count / attendance_rate）。
@@ -52,13 +52,13 @@ POST /entries，走 append-only 的正路）和 **roundtable_turns**（留痕）
     python roundtable.py --topic p5-roundtable --question "备份该多久跑一次？" \\
         --goal "定下备份频率与保留期，并落到人" \\
         --agenda "频率|给出每天/每周的明确数字; 保留期|给出天数与异地副本方案" \\
-        --members hermes,lobster,top001 \\
-        --nats-host <host> --nats-user lobster \\
-        --nats-password-file /root/.nats-lobster.pass
+        --members <MEMBER_ID_1>,<MEMBER_ID_2>,<MEMBER_ID_3> \\
+        --nats-host <NODE_IP> --nats-user <MEMBER_ID> \\
+        --nats-password-file <PASS_FILE>
 
     # 正式跑：写黑板 + 写 PG
     python roundtable.py ... --commit \\
-        --token-file <deploy-dir>/client-token --dsn-file <deploy-dir>/pg.env
+        --token-file <TOKEN_FILE> --dsn-file <ETC_DIR>/pg.env
 
     # 离线自测：假应答，不调任何 Agent、不写库、不联网
     python roundtable.py --topic t --question q --members a,b,c --dry-run
@@ -85,14 +85,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 VERSION = "1.2"
 
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+
 DEFAULT_MAX_ROUNDS = 2       # **每个议程项**的轮次上限（不是整场）
 DEFAULT_MAX_TOTAL_ROUNDS = 0  # 整场总轮数上限，0 = 不额外限制（= 议程项数 × --max-rounds）
 DEFECT_DUE_HOURS = 24        # 缺席缺陷单的闭环期限：次日
 DEFAULT_DEADLINE_S = 900
 DEFAULT_MAX_CHARS = 6000
-DEFAULT_MODERATOR = "hermes"
+# PHASE2_TODO: 待节点注入 env 后删除
+DEFAULT_MODERATOR = os.environ.get("AGENT_TEAM_MODERATOR") or "hermes"
 DEFAULT_TOPIC = "roundtable"   # 没给 --topic 时的缺省话题（会打一行 warn，不静默）
-MODERATOR_FALLBACK = ("hermes", "lobster", "top001")
+# PHASE2_TODO: 待节点注入 env 后删除
+MODERATOR_FALLBACK = tuple(m.strip() for m in (os.environ.get("AGENT_TEAM_MODERATOR_FALLBACK") or "hermes,lobster,top001").split(",") if m.strip())
 
 SNIPPET_MAX = 12             # 单次 prompt 最多塞几条黑板片段
 SNIPPET_CHARS = 240          # 每条片段截断到这么长 —— 保证"绝不含完整历史发言"
@@ -366,7 +371,7 @@ def tally_confirmations(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
 
     通过判据（硬）：**无 object**，且 agree 数 >= ⌊**在场人数**/2⌋+1。
 
-    分母口径（刚哥澄清后的最终版）：**在场人数 = 被点名且应答了的人**。
+    分母口径（<USER_ID>澄清后的最终版）：**在场人数 = 被点名且应答了的人**。
     absent（无应答）**不计入分母**，只单独记在 absent 名单里 —— 一个人没应答，
     不等于剩下的人就能替他决定，但也不该让"没人应答"这件事把门槛抬到不可能。
     缺席本身另有去处：出席率（分母是应到人数）+ 自动开 defect 单。
@@ -1192,7 +1197,7 @@ class NatsTransport(object):
 
 
 class A2ATransport(object):
-    """走点对点 A2A HTTP（POST /a2a/<member>/messages）。quantum 没有端点，只能走 NATS。"""
+    """走点对点 A2A HTTP（POST /a2a/<member>/messages）。<MEMBER_ID> 没有端点，只能走 NATS。"""
 
     name = "a2a"
 
@@ -1759,7 +1764,7 @@ class Roundtable(object):
                 self.cited_entries.append(entry_id)
 
     def _pick_moderator(self) -> Optional[str]:
-        """在线的优先：--moderator → hermes → lobster → top001。全离线返回 None。"""
+        """在线的优先：--moderator → <MEMBER_ID_1> → <MEMBER_ID_2> → <MEMBER_ID_3>。全离线返回 None。"""
         chain = [self.moderator] + [m for m in MODERATOR_FALLBACK if m != self.moderator]
         for candidate in chain:
             try:
@@ -2250,7 +2255,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="**会前必填**：本场会议的目标（缺了直接拒绝开会，退出码 2）")
     parser.add_argument("--agenda", action="append", default=[],
                         help='**会前必填**：议程，格式 "标题|预期产出; 标题|预期产出"，可重复传入')
-    parser.add_argument("--members", default="", help="成员名，逗号分隔，如 hermes,lobster,top001")
+    parser.add_argument("--members", default="", help="成员名，逗号分隔，如 <MEMBER_ID_1>,<MEMBER_ID_2>,<MEMBER_ID_3>")
     parser.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS,
                         help="**每个议程项**的最大轮次，默认 %d" % DEFAULT_MAX_ROUNDS)
     parser.add_argument("--max-total-rounds", type=int, default=DEFAULT_MAX_TOTAL_ROUNDS,
@@ -2272,13 +2277,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true",
                         help="离线自测：假应答，不调任何 Agent、不写库、不联网")
     parser.add_argument("--resume", default=None, help="从 PG 里已有的 session_id 续跑")
-    parser.add_argument("--dsn-file", default="<deploy-dir>/pg.env",
+    parser.add_argument("--dsn-file", default=os.environ.get("AGENT_TEAM_PG_ENV_FILE") or (AGENT_TEAM_ETC_DIR + "/pg.env"),
                         help="systemd 环境文件，从中取 BB_PG_DSN=")
-    parser.add_argument("--blackboard", default="http://<host>:9940",
+    parser.add_argument("--blackboard", default=os.environ.get("AGENT_TEAM_BB_BASE") or "http://<host>:9940",
                         help="黑板服务地址（写入只走它的 POST /entries）")
-    parser.add_argument("--token-file", default="<deploy-dir>/client-token",
+    parser.add_argument("--token-file", default=os.environ.get("AGENT_TEAM_TOKEN_FILE") or (AGENT_TEAM_ETC_DIR + "/client-token"),
                         help="黑板 / A2A 的 Bearer token 文件路径")
-    parser.add_argument("--nats-host", default="<host>", help="NATS 中枢地址")
+    parser.add_argument("--nats-host", default=os.environ.get("AGENT_TEAM_NATS_HOST") or "<host>", help="NATS 中枢地址")
     parser.add_argument("--nats-port", type=int, default=9930, help="NATS 端口，默认 9930")
     parser.add_argument("--nats-user", default=None, help="自己的 NATS 用户名")
     parser.add_argument("--nats-password-file", default=None, help="自己的 NATS 口令文件")

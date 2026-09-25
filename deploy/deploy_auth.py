@@ -3,7 +3,7 @@
 """deploy_auth.py —— 把「看板认证」(E1 产物) 部署到龙虾，并起双实例。
 
 设计（为什么是两个实例，别合并）：
-  * 9941 继续绑 tailnet(<host>)，`--mode tailnet` —— 内网 Agent 照旧免登录直连，
+  * 9941 继续绑 tailnet(<NODE_IP>)，`--mode tailnet` —— 内网 Agent 照旧免登录直连，
     这条路**一点不动**（旧行为零回归）。
   * 新增 9942 只绑 127.0.0.1，`--mode public` —— 专供 cloudflared 回连；公网流量全部
     从这里进，必须登录（127.0.0.1 在 public 模式下**不在免登录白名单**，白名单只认
@@ -24,11 +24,18 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOST = "lobster"
 STAGE = "/tmp/agent-team-auth"
-OPT = "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+OPT = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
 UNIT_DIR = "/etc/systemd/system"
-TAILNET_IP = "<host>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_NODES = dict(kv.split("=", 1) for kv in (os.environ.get("AGENT_TEAM_NODES")
+                        or "lobster=<host>").split(","))
+TAILNET_IP = AGENT_TEAM_NODES[HOST]
 PUB_PORT = 9942
-KEY_FILE = "<deploy-dir>/view-session.key"
+# PHASE2_TODO: 待节点注入 env 后删除
+KEY_FILE = os.environ.get("AGENT_TEAM_SESSION_KEY_FILE") or AGENT_TEAM_ETC_DIR + "/view-session.key"
 
 FILES = [
     ("view_auth.py", "0644"),
@@ -39,23 +46,23 @@ FILES = [
 
 PUB_UNIT = """[Unit]
 Description=Agent-Team blackboard view · 公网入口实例 (127.0.0.1:%(port)d, mode=public)
-Documentation=file:<deploy-dir>/blackboard_view.py
+Documentation=file:%(opt)s/blackboard_view.py
 After=network-online.target tailscaled.service agent-team-blackboard.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=<deploy-dir>
+WorkingDirectory=%(opt)s
 # 只绑回环：公网流量只能经 cloudflared 从 127.0.0.1 进来，这一层强制登录。
 # tailnet 那条路不受影响（另一个实例 9941 --mode tailnet 照旧）。
-ExecStart=/usr/bin/python3 <deploy-dir>/blackboard_view.py \\
+ExecStart=/usr/bin/python3 %(opt)s/blackboard_view.py \\
   --host 127.0.0.1 \\
   --port %(port)d \\
   --mode public \\
   --trust-proxy 127.0.0.1 \\
-  --upstream http://<host>:9940 \\
-  --token-file <deploy-dir>/client-token \\
+  --upstream http://%(ip)s:9940 \\
+  --token-file %(etc)s/client-token \\
   --refresh-seconds 30
 Restart=always
 RestartSec=5
@@ -74,12 +81,12 @@ LockPersonality=yes
 
 [Install]
 WantedBy=multi-user.target
-""" % {"port": PUB_PORT}
+""" % {"port": PUB_PORT, "opt": OPT, "ip": TAILNET_IP, "etc": AGENT_TEAM_ETC_DIR}
 
 # 9941 那份照抄现网单元，只补一行 `--mode tailnet`（内网免登录这条行为一字不改）。
 TAIL_UNIT = """[Unit]
 Description=Agent-Team blackboard read-only view (port 9941)
-Documentation=file:<deploy-dir>/blackboard_view.py
+Documentation=file:%(opt)s/blackboard_view.py
 # 绑的是 tailnet 地址，必须等 tailscaled 把 100.x 挂上来再启动；
 # 起早了也没事，靠 Restart=always 重试绑定（与 a2a-svc.service 同一套口径）。
 After=network-online.target tailscaled.service agent-team-blackboard.service
@@ -88,15 +95,15 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=<deploy-dir>
+WorkingDirectory=%(opt)s
 # --host 换成本机 tailnet 的 100.x 地址；--upstream 指向黑板服务的 9940。
 # token 只从 --token-file 读进本进程内存，绝不会发给浏览器、也不会进日志。
-ExecStart=/usr/bin/python3 <deploy-dir>/blackboard_view.py \\
-  --host <host> \\
+ExecStart=/usr/bin/python3 %(opt)s/blackboard_view.py \\
+  --host %(ip)s \\
   --port 9941 \\
   --mode tailnet \\
-  --upstream http://<host>:9940 \\
-  --token-file <deploy-dir>/client-token \\
+  --upstream http://%(ip)s:9940 \\
+  --token-file %(etc)s/client-token \\
   --refresh-seconds 30
 Restart=always
 RestartSec=5
@@ -116,7 +123,7 @@ LockPersonality=yes
 
 [Install]
 WantedBy=multi-user.target
-"""
+""" % {"opt": OPT, "ip": TAILNET_IP, "etc": AGENT_TEAM_ETC_DIR}
 
 
 def ssh(script, stdin_bytes=None, timeout=180):
@@ -143,13 +150,13 @@ def step(title):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="部署看板认证（E1）到龙虾")
+    ap = argparse.ArgumentParser(description="部署看板认证（E1）到 <HOST>")
     ap.add_argument("--check", action="store_true", help="只做部署后自检")
     args = ap.parse_args(argv)
     ok = True
 
     if not args.check:
-        step("1/6 推文件到龙虾 %s" % STAGE)
+        step("1/6 推文件到 <HOST> %s" % STAGE)
         ssh("mkdir -p %s" % STAGE)
         for rel, mode in FILES:
             local_ok = os.path.exists(os.path.join(HERE, rel.replace("/", os.sep)))

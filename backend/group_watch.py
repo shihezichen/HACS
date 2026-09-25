@@ -36,12 +36,20 @@ if HERE not in sys.path:
 
 from team import call_one, REQ_FMT  # noqa: E402  复用现成的 A2A 信封与点名实现
 
-CHAT_BASE_DEFAULT = os.environ.get("AGENT_TEAM_CHAT_BASE") or "http://<host>:9984"
-NATS_HOST_DEFAULT = os.environ.get("AGENT_TEAM_NATS") or "<host>:9930,<node-ip>:9930"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_CHAT_BASE = os.environ.get("AGENT_TEAM_CHAT_BASE") or "http://<host>:9984"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_NATS_HOST = os.environ.get("AGENT_TEAM_NATS_HOST") or os.environ.get("AGENT_TEAM_NATS") or "<host>:9930,<node-ip>:9930"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or r"<home>\agent-team"
+
+CHAT_BASE_DEFAULT = AGENT_TEAM_CHAT_BASE
+NATS_HOST_DEFAULT = AGENT_TEAM_NATS_HOST
 STATE_DEFAULT = os.path.join(HERE, "state", "group_watch_state.json")
-# 口令可能在源码目录（D 源）也可能在中枢目录（<home>\agent-team）—— 两处都找
+# 口令可能在源码目录（D 源）也可能在中枢目录（<RUNTIME_DIR>）—— 两处都找
 PASS_CANDIDATES = (os.path.join(HERE, "nats-hermes.pass"),
-                   os.path.join(r"<home>\agent-team", "nats-hermes.pass"))
+                   os.path.join(os.environ.get("AGENT_TEAM_NATS_DIR")
+                                or AGENT_TEAM_RUNTIME_DIR, "nats-hermes.pass"))
 
 
 def default_pass_file():
@@ -52,7 +60,8 @@ def default_pass_file():
 
 CTX_LIMIT = 12          # 喂给 Agent 的上下文条数
 MAX_PER_ROUND = 1       # 每轮每个 (群,成员) 最多回几条
-HUMAN_IDS = ("<human-id>",)   # 谁是"人"：只有人发的消息才触发 Agent 回应（防死循环）
+# PHASE2_TODO: 待节点注入 env 后删除（"人"的成员 id 列表，逗号分隔）
+HUMAN_IDS = tuple(x.strip() for x in (os.environ.get("AGENT_TEAM_HUMAN_IDS") or "<human-id>").split(",") if x.strip())   # 谁是"人"：只有人发的消息才触发 Agent 回应（防死循环）
 
 
 LOG_FILE = None
@@ -199,7 +208,7 @@ def one_round(args, state):
             msgs = d.get("messages") or []
 
             # 头部阻塞修复(2026-09-21 实测踩到): 不能"取 pend[:1] 再过滤" —— 一条 Agent 发的
-            # 待回应会把它后面**人发的**待回应一起堵死, 表现为"刚哥 @ 了它, 它却一直不回"。
+            # 待回应会把它后面**人发的**待回应一起堵死, 表现为"<USER_ID> @ 了它, 它却一直不回"。
             # 现在: 先筛出所有可用条目 → 人的优先, Agent 发的按 --allow-agent 兜底(带链式上限)。
             usable = [p for p in pend
                       if p.get("seq") and p.get("from") and p.get("from") != member
@@ -284,7 +293,7 @@ def main():
     ap.add_argument("--interval", type=float, default=8.0)
     ap.add_argument("--gap", type=float, default=30.0, help="同一(群,成员)最小回话间隔秒")
     ap.add_argument("--timeout", type=float, default=600.0, help="点名应答超时秒(2026-09-22 180→600: 180s 会砍掉跑长命令的回合)")
-    ap.add_argument("--include-hermes", action="store_true", help="也让 hermes 自己回话")
+    ap.add_argument("--include-hermes", action="store_true", help="也让 <MEMBER_ID> 自己回话")
     ap.add_argument("--allow-agent", dest="allow_agent", action="store_true", default=True,
                     help="也回应 Agent 发的 @（默认开；群内 Agent 互相 @ 不再石沉大海）")
     ap.add_argument("--no-allow-agent", dest="allow_agent", action="store_false",

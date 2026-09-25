@@ -45,6 +45,18 @@ sys.path.insert(0, os.path.dirname(HERE))
 import chat_svc as cs  # noqa: E402
 import view_auth  # noqa: E402
 
+# ---------------------------------------------------------------------------
+# 测试夹具真值（硬编码清零 Phase 1.5）
+# PHASE2_TODO: 待节点注入 env 后删除
+# 默认值逐字等于改动前的真值；未注入 env 时测试行为与改动前完全等价。
+FIX_MEMBER_CLOUD   = os.environ.get("AGENT_TEAM_TEST_MEMBER_CLOUD") or "lobster"
+FIX_MEMBER_NB      = os.environ.get("AGENT_TEAM_TEST_MEMBER_NB") or "openclaw-nb"
+FIX_MEMBER_QUANTUM = os.environ.get("AGENT_TEAM_TEST_MEMBER_QUANTUM") or "quantum"
+FIX_NODE_LAPTOP    = os.environ.get("AGENT_TEAM_TEST_NODE_LAPTOP") or "thinkbook"
+FIX_NODE_CLOUD_IP  = os.environ.get("AGENT_TEAM_TEST_NODE_CLOUD_IP") or "<host>"
+FIX_NODE_LAPTOP_IP = os.environ.get("AGENT_TEAM_TEST_NODE_LAPTOP_IP") or "<node-ip>"
+FIX_HUMAN_ID       = os.environ.get("AGENT_TEAM_HUMAN_ID") or "<human-id>"
+
 UTC = datetime.timezone.utc
 BJ = datetime.timezone(datetime.timedelta(hours=8))
 
@@ -54,15 +66,15 @@ NOW = datetime.datetime(2026, 9, 20, 10, 30, 0, tzinfo=UTC)
 # ------------------------------------------------------------------ 假件
 
 def _session_row(sid="dm_20260920_k7f3qa", kind="dm", title="与 龙虾 的对话 · 9月20日 18:20",
-                 sensitivity="internal", members=None, created_by="<human-id>",
+                 sensitivity="internal", members=None, created_by=FIX_HUMAN_ID,
                  created_at=NOW, updated_at=NOW, state="open",
                  ref_table=None, ref_id=None):
-    return (sid, kind, title, sensitivity, members if members is not None else ["lobster"],
+    return (sid, kind, title, sensitivity, members if members is not None else [FIX_MEMBER_CLOUD],
             created_by, created_at, updated_at, state, ref_table, ref_id)
 
 
 def _message_row(mid="msg_20260920183000_abc123", sid="dm_20260920_k7f3qa", seq=1,
-                 author_type="agent", author_id="lobster", kind="text",
+                 author_type="agent", author_id=FIX_MEMBER_CLOUD, kind="text",
                  text="连上了。", ref_table=None, ref_id=None, status="done",
                  reply_to=None, run=None, meta=None, created_at=NOW):
     return (mid, sid, seq, author_type, author_id, kind, text, ref_table, ref_id,
@@ -143,11 +155,11 @@ class FakeDB(object):
 class FakeRoster(object):
     def __init__(self, members=None):
         self._members = members if members is not None else {
-            "lobster": {"id": "lobster", "display": "龙虾", "node_id": "lobster",
-                        "host": "<host>", "model": "openclaw/default",
-                        "description": "lobster 助手（云）", "skills": ["general"]},
-            "openclaw": {"id": "openclaw", "display": "OpenClaw", "node_id": "thinkbook",
-                         "host": "<node-ip>", "model": "openclaw/default",
+            FIX_MEMBER_CLOUD: {"id": FIX_MEMBER_CLOUD, "display": "龙虾", "node_id": FIX_MEMBER_CLOUD,
+                        "host": FIX_NODE_CLOUD_IP, "model": "openclaw/default",
+                        "description": FIX_MEMBER_CLOUD + " 助手（云）", "skills": ["general"]},
+            "openclaw": {"id": "openclaw", "display": "OpenClaw", "node_id": FIX_NODE_LAPTOP,
+                         "host": FIX_NODE_LAPTOP_IP, "model": "openclaw/default",
                          "description": "笔记本 OpenClaw", "skills": ["openclaw"]},
         }
 
@@ -170,7 +182,7 @@ class FakePrincipal(object):
 class FakeAuth(object):
     """check_cookie 只认一个魔法 cookie 值。"""
 
-    def __init__(self, username="<human-id>", role="owner"):
+    def __init__(self, username=FIX_HUMAN_ID, role="owner"):
         self.username = username
         self.role = role
         self.key = b"0" * 32
@@ -292,7 +304,7 @@ class TestAuth(ChatServiceCase):
         status, body = self.call("/api/whoami", cookie="bbview_session=valid-session-cookie")
         self.assertEqual(status, 200)
         self.assertTrue(body["ok"])
-        self.assertEqual(body["user"]["name"], "<human-id>")
+        self.assertEqual(body["user"]["name"], FIX_HUMAN_ID)
         self.assertEqual(body["user"]["role"], "owner")
         self.assertEqual(body["user"]["role_cn"], "主人")
         self.assertEqual(body["user"]["source"], "session")
@@ -329,7 +341,7 @@ class TestCaps(ChatServiceCase):
             self.assertFalse(body["caps"]["can_admin"])
             self.assertEqual(body["user"]["role_cn"], "只读访客")
         finally:
-            self.auth.username, self.auth.role = "<human-id>", "owner"
+            self.auth.username, self.auth.role = FIX_HUMAN_ID, "owner"
 
     def test_member_can_write_but_not_admin(self):
         self.auth.username, self.auth.role = "team", "member"
@@ -339,7 +351,7 @@ class TestCaps(ChatServiceCase):
             self.assertTrue(body["caps"]["can_write"])
             self.assertFalse(body["caps"]["can_admin"])
         finally:
-            self.auth.username, self.auth.role = "<human-id>", "owner"
+            self.auth.username, self.auth.role = FIX_HUMAN_ID, "owner"
 
 
 # ------------------------------------------------------------------ 3. agents
@@ -351,8 +363,8 @@ class TestAgents(ChatServiceCase):
         self.assertTrue(body["ok"])
         ids = [a["id"] for a in body["agents"]]
         self.assertEqual(ids, sorted(ids), "成员按 id 排序，前端才好稳定渲染")
-        self.assertIn("lobster", ids)
-        lobster = [a for a in body["agents"] if a["id"] == "lobster"][0]
+        self.assertIn(FIX_MEMBER_CLOUD, ids)
+        lobster = [a for a in body["agents"] if a["id"] == FIX_MEMBER_CLOUD][0]
         for key in ("id", "display", "online", "busy", "last_hb_at", "meta"):
             self.assertIn(key, lobster)
         self.assertEqual(lobster["display"], "龙虾")
@@ -370,7 +382,7 @@ def _demo_sessions():
             sid="dm_20260920_pub001", title="公开会话", sensitivity="public", members=["openclaw"]),
         "meet_20260920_x2m9bd": _session_row(
             sid="meet_20260920_x2m9bd", kind="meet", title="圆桌 · 9月20日",
-            sensitivity="internal", members=["lobster", "openclaw"],
+            sensitivity="internal", members=[FIX_MEMBER_CLOUD, "openclaw"],
             ref_table="roundtable_sessions", ref_id="rt_20260920_aaa"),
     }
 
@@ -399,7 +411,7 @@ class TestSessionsList(ChatServiceCase):
                     "created_by", "created_at", "updated_at", "last_message",
                     "unread", "observing", "my_role"):
             self.assertIn(key, row)
-        self.assertEqual(row["members"], [{"id": "lobster", "display": "龙虾"}])
+        self.assertEqual(row["members"], [{"id": FIX_MEMBER_CLOUD, "display": "龙虾"}])
         self.assertEqual(row["last_message"]["seq"], 7)
         self.assertEqual(row["last_message"]["excerpt"], "第 7 条")
         self.assertEqual(row["my_role"], "owner")
@@ -443,7 +455,7 @@ class TestSessionsVisibility(ChatServiceCase):
         self.auth.username, self.auth.role = "guest", "viewer"
 
     def tearDown(self):
-        self.auth.username, self.auth.role = "<human-id>", "owner"
+        self.auth.username, self.auth.role = FIX_HUMAN_ID, "owner"
 
     def test_viewer_only_sees_public(self):
         status, body = self.call("/api/sessions", cookie="bbview_session=valid-session-cookie")
@@ -503,7 +515,7 @@ class TestMessages(ChatServiceCase):
                     "status", "reply_to", "run", "meta", "created_at"):
             self.assertIn(key, msg)
         self.assertEqual(msg["author"]["type"], "agent")
-        self.assertEqual(msg["author"]["id"], "lobster")
+        self.assertEqual(msg["author"]["id"], FIX_MEMBER_CLOUD)
         self.assertEqual(msg["author"]["display"], "龙虾")
 
     def test_limit_clamped_high(self):
@@ -615,7 +627,7 @@ class TestHelpers(unittest.TestCase):
         self.assertNotEqual(cs.gen_session_id("dm"), cs.gen_session_id("dm"))
 
     def test_display_names(self):
-        self.assertEqual(cs.display_of("lobster"), "龙虾")
+        self.assertEqual(cs.display_of(FIX_MEMBER_CLOUD), "龙虾")
         self.assertEqual(cs.display_of("openclaw"), "OpenClaw")
         self.assertEqual(cs.display_of("nobody"), "nobody")
         self.assertEqual(cs.display_of(""), "")
@@ -668,19 +680,19 @@ class TestRosterLoad(unittest.TestCase):
         paths = []
         try:
             for payload in (
-                {"node_id": "thinkbook", "host": "<node-ip>",
-                 "agents": {"hermes": {"description": "Hermes 总控"}, "lobster": {"description": "本机的"}}},
-                {"node_id": "lobster", "host": "<host>",
-                 "agents": {"lobster": {"description": "云上的"}, "quantum": {"description": "量子"}}},
+                {"node_id": FIX_NODE_LAPTOP, "host": FIX_NODE_LAPTOP_IP,
+                 "agents": {"hermes": {"description": "Hermes 总控"}, FIX_MEMBER_CLOUD: {"description": "本机的"}}},
+                {"node_id": FIX_MEMBER_CLOUD, "host": FIX_NODE_CLOUD_IP,
+                 "agents": {FIX_MEMBER_CLOUD: {"description": "云上的"}, FIX_MEMBER_QUANTUM: {"description": "量子"}}},
             ):
                 handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
                 json.dump(payload, handle)
                 handle.close()
                 paths.append(handle.name)
             roster = cs.Roster(paths)
-            self.assertEqual(sorted(roster.ids()), ["hermes", "lobster", "quantum"])
-            self.assertEqual(roster.get("lobster")["description"], "本机的", "先读到的为准")
-            self.assertEqual(roster.get("lobster")["display"], "龙虾", "显示名走补充表")
+            self.assertEqual(sorted(roster.ids()), ["hermes", FIX_MEMBER_CLOUD, FIX_MEMBER_QUANTUM])
+            self.assertEqual(roster.get(FIX_MEMBER_CLOUD)["description"], "本机的", "先读到的为准")
+            self.assertEqual(roster.get(FIX_MEMBER_CLOUD)["display"], "龙虾", "显示名走补充表")
         finally:
             for path in paths:
                 try:
@@ -693,7 +705,7 @@ class TestRosterLoad(unittest.TestCase):
         self.assertEqual(roster.ids(), [])
 
 
-# ------------------------------------------------------------------ 12. 同源静态托管（会议 §H · openclaw-nb 8 条清单）
+# ------------------------------------------------------------------ 12. 同源静态托管（会议 §H · <MEMBER_ID> 8 条清单）
 
 class RawCallMixin(object):
     """静态/HTML 用例要拿原始字节与响应头，不能只吃 JSON。"""
@@ -842,19 +854,19 @@ class TestStaticWithoutUiDir(RawCallMixin, ChatServiceCase):
 
 GRP = "meet_20260921_grp001"
 SESSION_COOKIE_OK = "bbview_session=valid-session-cookie"
-GROUP_MEMBERS = ["<human-id>", "hermes", "openclaw-nb"]
+GROUP_MEMBERS = [FIX_HUMAN_ID, "hermes", FIX_MEMBER_NB]
 
 GROUP_ROSTER = {
-    "hermes": {"id": "hermes", "display": "Hermes", "node_id": "lobster",
-               "host": "<host>", "model": "test/na",
+    "hermes": {"id": "hermes", "display": "Hermes", "node_id": FIX_MEMBER_CLOUD,
+               "host": FIX_NODE_CLOUD_IP, "model": "test/na",
                "description": "总控", "skills": []},
-    "openclaw-nb": {"id": "openclaw-nb", "display": "OpenClaw(本机)",
-                    "node_id": "thinkbook", "host": "<node-ip>",
+    FIX_MEMBER_NB: {"id": FIX_MEMBER_NB, "display": "OpenClaw(本机)",
+                    "node_id": FIX_NODE_LAPTOP, "host": FIX_NODE_LAPTOP_IP,
                     "model": "test/na", "description": "本机 OpenClaw", "skills": []},
 }
 
 
-def _group_row(sid=GRP, state="open", members=None, created_by="<human-id>"):
+def _group_row(sid=GRP, state="open", members=None, created_by=FIX_HUMAN_ID):
     return _session_row(sid=sid, kind="meet", title="临时群 · 对话台前后端分工",
                         members=list(members if members is not None else GROUP_MEMBERS),
                         created_by=created_by, state=state)
@@ -898,7 +910,7 @@ class GroupBase(ChatServiceCase):
     def setUp(self):
         self.db = GroupFakeDB(sessions={GRP: _group_row()}, messages={})
         self.roster = FakeRoster(members=dict(GROUP_ROSTER))
-        self.auth = FakeAuth(username="<human-id>", role="owner")
+        self.auth = FakeAuth(username=FIX_HUMAN_ID, role="owner")
         cs.Runtime.reset()
         cs.Runtime.db = self.db
         cs.Runtime.roster = self.roster
@@ -946,7 +958,7 @@ class GroupCase(GroupBase):
         """
         status, body = self.say("我是谁", mentions=["@all"])
         self.assertEqual(status, 201)
-        self.assertEqual(body["message"]["author"]["id"], "<human-id>")
+        self.assertEqual(body["message"]["author"]["id"], FIX_HUMAN_ID)
         self.assertEqual(body["message"]["author"]["type"], "human")
 
     def test_message_after_archive_is_409(self):
@@ -963,19 +975,19 @@ class GroupCase(GroupBase):
         self.assertEqual(status, 201)
         msg = body["message"]
         self.assertEqual(msg["author"]["type"], "human")
-        self.assertEqual(msg["author"]["id"], "<human-id>")
+        self.assertEqual(msg["author"]["id"], FIX_HUMAN_ID)
         self.assertEqual(msg["meta"]["mentions"], ["@all"])
         self.assertCountEqual(msg["meta"]["audience"], GROUP_MEMBERS)
         # 自己不必回应自己
-        self.assertCountEqual(msg["meta"]["needs_response"], ["hermes", "openclaw-nb"])
+        self.assertCountEqual(msg["meta"]["needs_response"], ["hermes", FIX_MEMBER_NB])
 
     def test_human_mention_single_agent_reaches_only_him(self):
         """规则 3：@ 某人 ⇒ 只有他需要处理和回应。"""
-        status, body = self.human_says("前台做到哪了", mentions=["openclaw-nb"])
+        status, body = self.human_says("前台做到哪了", mentions=[FIX_MEMBER_NB])
         self.assertEqual(status, 201)
         msg = body["message"]
-        self.assertEqual(msg["meta"]["mentions"], ["openclaw-nb"])
-        self.assertEqual(msg["meta"]["needs_response"], ["openclaw-nb"])
+        self.assertEqual(msg["meta"]["mentions"], [FIX_MEMBER_NB])
+        self.assertEqual(msg["meta"]["needs_response"], [FIX_MEMBER_NB])
 
     def test_agent_at_all_reaches_others(self):
         status, body = self.say("后台建表完成", mentions=["@all"], agent="hermes")
@@ -983,37 +995,37 @@ class GroupCase(GroupBase):
         msg = body["message"]
         self.assertEqual(msg["author"]["type"], "agent")
         self.assertCountEqual(msg["meta"]["audience"], GROUP_MEMBERS)
-        self.assertCountEqual(msg["meta"]["needs_response"], ["<human-id>", "openclaw-nb"])
+        self.assertCountEqual(msg["meta"]["needs_response"], [FIX_HUMAN_ID, FIX_MEMBER_NB])
 
     def test_agent_mention_multi_reaches_those(self):
-        status, body = self.say("接口冻结了", mentions=["<human-id>", "openclaw-nb"],
+        status, body = self.say("接口冻结了", mentions=[FIX_HUMAN_ID, FIX_MEMBER_NB],
                                 agent="hermes")
         self.assertEqual(status, 201)
         self.assertCountEqual(body["message"]["meta"]["needs_response"],
-                              ["<human-id>", "openclaw-nb"])
+                              [FIX_HUMAN_ID, FIX_MEMBER_NB])
 
     # -- 可见性（规则 5） -------------------------------------------
 
     def test_every_member_sees_all_messages(self):
         self.human_says("开始")
-        self.say("收到", mentions=["<human-id>"], agent="hermes")
-        status, body = self.read(agent="openclaw-nb")
+        self.say("收到", mentions=[FIX_HUMAN_ID], agent="hermes")
+        status, body = self.read(agent=FIX_MEMBER_NB)
         self.assertEqual(status, 200)
         self.assertEqual([m["author"]["id"] for m in body["messages"]],
-                         ["<human-id>", "hermes"])
+                         [FIX_HUMAN_ID, "hermes"])
 
     # -- 待回应（规则 2 的落实） ------------------------------------
 
     def test_my_pending_lists_what_i_owe(self):
         self.human_says("你们两个配合做对话台")
-        status, body = self.read(agent="openclaw-nb")
+        status, body = self.read(agent=FIX_MEMBER_NB)
         self.assertEqual(status, 200)
         self.assertEqual([p["seq"] for p in body.get("my_pending") or []], [1])
 
     def test_my_pending_is_empty_after_i_reply(self):
         self.human_says("你们两个配合做对话台")
-        self.say("收到，我看前台", mentions=["<human-id>"], agent="openclaw-nb")
-        status, body = self.read(agent="openclaw-nb")
+        self.say("收到，我看前台", mentions=[FIX_HUMAN_ID], agent=FIX_MEMBER_NB)
+        status, body = self.read(agent=FIX_MEMBER_NB)
         self.assertEqual(body.get("my_pending") or [], [])
 
     # -- 建群 / 关群（规则 4） --------------------------------------
@@ -1022,11 +1034,11 @@ class GroupCase(GroupBase):
         status, body = self.call("/api/sessions", method="POST",
                                  cookie=SESSION_COOKIE_OK,
                                  body={"kind": "meet", "title": "临时群 · 分工",
-                                       "members": ["hermes", "openclaw-nb"]})
+                                       "members": ["hermes", FIX_MEMBER_NB]})
         self.assertEqual(status, 201)
         sess = body["session"]
         self.assertCountEqual(sess["member_ids"], GROUP_MEMBERS)
-        self.assertEqual(sess["created_by"], "<human-id>")
+        self.assertEqual(sess["created_by"], FIX_HUMAN_ID)
         self.assertEqual(sess["state"], "open")
 
     def test_only_owner_can_close_group(self):

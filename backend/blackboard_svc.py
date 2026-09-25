@@ -80,10 +80,10 @@ blackboard_svc.py —— 团队黑板·记忆网关（统一端口 9940）
 
 用法：
     BB_PG_DSN='host=127.0.0.1 port=9950 dbname=blackboard user=bb password=...' \
-    python blackboard_svc.py --host <host> --port 9940 \
-        --agents-json <deploy-dir>/agents.json \
-        --peers-json <deploy-dir>/peers.json \
-        --admin-port 0 --log-file /var/log/agent-team/blackboard.log
+    python blackboard_svc.py --host <NODE_IP> --port 9940 \
+        --agents-json <ETC_DIR>/agents.json \
+        --peers-json <ETC_DIR>/peers.json \
+        --admin-port 0 --log-file /var/log/<SERVICE>.log
 """
 
 import argparse
@@ -106,6 +106,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import embedder  # 同目录模块；导入只读环境变量，不会加载模型
 
 VERSION = "1.9"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
 MAX_BODY_BYTES = 262144      # 请求体上限 256 KiB，与 a2a_svc 对齐
 DRAIN_MAX = 4 * 1024 * 1024  # 超限请求最多排空这么多字节，再多就直接断连接
 DETAIL_MAX = 200             # 错误 detail 截断长度
@@ -810,7 +814,7 @@ def select_turns(session_id: str, limit: int) -> List[Dict[str, Any]]:
 
 # ---------------------------------------------------------------- 业务：会议四要素（只读）
 #
-# 口径（刚哥定的）：会议有目标，会前有议程，会中有结论（当场确认、指定责任人+截止时间），
+# 口径（<USER_ID>定的）：会议有目标，会前有议程，会中有结论（当场确认、指定责任人+截止时间），
 # 会有落实（遗留问题进跟踪系统）。这一段把这四件事从库里读出来，**只有 SELECT**。
 #
 # 时间一律换算到 UTC 再比较：逾期与否是服务端算好的事实（字段 overdue），响应里带
@@ -1195,7 +1199,7 @@ def tracking_counts(now: datetime.datetime,
 
 # ---------------------------------------------------------------- 业务：共享内容（只读）
 #
-# 口径（刚哥定的）：共享内容 ≠ 会议。任务级是临时共享（有时间限制与销毁条件，任务结束即销毁），
+# 口径（<USER_ID>定的）：共享内容 ≠ 会议。任务级是临时共享（有时间限制与销毁条件，任务结束即销毁），
 # 永久级是常驻共享（节点公网 IP、各机装了什么 Agent、主人画像与关键信息，一份共享）。
 # 两种都会变、都会过期、都能被撤下 —— 因此每一条都带 status 与 expires_at，
 # 且**过期与否由服务端算**（字段 expired），浏览器不参与判断。
@@ -3969,7 +3973,7 @@ class BlackboardHandler(BaseHTTPRequestHandler):
     def _msg_ack(self, peer: str, raw_id: str) -> None:
         """POST /msg/<id>/ack —— 收件方说「已收到并开始处理」。
 
-        这就是刚哥要的那句反馈：「我发送消息后，类似 TCP 一样，对方要反馈
+        这就是<USER_ID>要的那句反馈：「我发送消息后，类似 TCP 一样，对方要反馈
         '已经收到并且开始处理'，让发送方知道已经送达。」
         """
         if not msg_id_ok(raw_id):

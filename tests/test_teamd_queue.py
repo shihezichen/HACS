@@ -33,6 +33,12 @@ from teamd import Config, TeamDaemon  # noqa: E402
 
 TOKEN = "test-token-not-a-secret"
 
+# ---------------------------------------------------------------------------
+# 测试夹具真值（硬编码清零 Phase 1.5）
+# PHASE2_TODO: 待节点注入 env 后删除
+# 默认值逐字等于改动前的真值；未注入 env 时测试行为与改动前完全等价。
+FIX_MEMBER_CLOUD = os.environ.get("AGENT_TEAM_TEST_MEMBER_CLOUD") or "lobster"
+
 
 class FakeNats(object):
     """只记录、不联网的假传输。"""
@@ -248,7 +254,7 @@ class TeamdQueueTest(unittest.TestCase):
         self.fake.deliver("a2a.v1.req.hermes", req("第一条"), "_INBOX.Q7a")
         time.sleep(0.2)
         self.fake.deliver("a2a.v1.req.hermes", req("第二条"), "_INBOX.Q7b")
-        self.fake.deliver("a2a.v1.req.hermes", req("第三条", reply="", frm="lobster"), "_INBOX.Q7c")
+        self.fake.deliver("a2a.v1.req.hermes", req("第三条", reply="", frm=FIX_MEMBER_CLOUD), "_INBOX.Q7c")
         item = self.fake.wait_publish("_INBOX.Q7c", 5.0)
         self.assertIsNotNone(item, "即使队列满，也必须把结果送回它指定的 reply 通道")
         self.assertEqual(item[0], "_INBOX.Q7c",

@@ -29,6 +29,12 @@ import teamd  # noqa: E402
 BB = "http://127.0.0.1:19940"
 TOKEN = "unit-test-token-hermes"
 
+# ---------------------------------------------------------------------------
+# 测试夹具真值（硬编码清零 Phase 1.5）
+# PHASE2_TODO: 待节点注入 env 后删除
+# 默认值逐字等于改动前的真值；未注入 env 时测试行为与改动前完全等价。
+FIX_MEMBER_CLOUD = os.environ.get("AGENT_TEAM_TEST_MEMBER_CLOUD") or "lobster"
+
 
 def make_cfg(**kw):
     args = dict(member="hermes", nats_host="127.0.0.1", nats_port=4222,
@@ -39,7 +45,7 @@ def make_cfg(**kw):
     return teamd.Config(**args)
 
 
-def make_msg(mid, frm="lobster", body="帮我看看这个", session_id=None, seq=1):
+def make_msg(mid, frm=FIX_MEMBER_CLOUD, body="帮我看看这个", session_id=None, seq=1):
     return {"msg_id": mid, "seq": seq, "from": frm, "from_member": frm, "to": "hermes",
             "to_member": "hermes", "body": body, "text": body,
             "session_id": session_id, "state": "queued", "attempts": 0}
@@ -125,12 +131,12 @@ class ReplayInboxTest(unittest.TestCase):
         self.assertEqual(0, d.counters.snapshot().get("inbox_replayed"))
 
     def test_03_回投结果给原发送方(self):
-        hub = FakeHub(queued=[make_msg("m-bbb00001", frm="lobster", session_id="as-x")])
+        hub = FakeHub(queued=[make_msg("m-bbb00001", frm=FIX_MEMBER_CLOUD, session_id="as-x")])
         d = make_daemon(hub)
         d.replay_inbox()
         self.assertEqual(1, len(hub.sent), "处理结果要回投，否则对方永远等不到答复")
         sent = json.loads(hub.sent[0].decode("utf-8"))
-        self.assertEqual("lobster", sent.get("to"), "回投给原发送方")
+        self.assertEqual(FIX_MEMBER_CLOUD, sent.get("to"), "回投给原发送方")
         self.assertIn("好，我来", json.dumps(sent, ensure_ascii=False))
         self.assertEqual("as-x", sent.get("session_id"), "会话要跟着走")
 

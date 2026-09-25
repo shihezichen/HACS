@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""accept_auth.py —— 公网入口「先认证后暴露」验收（10 项），在龙虾上跑。
+"""accept_auth.py —— 公网入口「先认证后暴露」验收（10 项），在 <HOST> 上跑。
 
-为什么在龙虾上跑：公网实例 9942 只绑 127.0.0.1，本机连不上，必须从机上打。
-凭据纪律：临时验收账号的口令**在龙虾上现生成、只在机上用**，只回传 HTTP 码与判词，
+为什么在 <HOST> 上跑：公网实例 9942 只绑 127.0.0.1，本机连不上，必须从机上打。
+凭据纪律：临时验收账号的口令**在 <HOST> 上现生成、只在机上用**，只回传 HTTP 码与判词，
 口令既不进命令行、也不进日志、更不进聊天。
 
 顺序是有讲究的（踩过坑）：
@@ -14,19 +14,34 @@
 用法：python accept_auth.py
 """
 
+import os
 import subprocess
 import sys
 
-HOST = "lobster"
-TAIL = "http://<host>:9941"
-PUB = "http://127.0.0.1:9942"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_SSH_HOST = os.environ.get("AGENT_TEAM_SSH_HOST") or "lobster"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_VIEW_BASE = os.environ.get("AGENT_TEAM_VIEW_BASE") or "http://<host>:9941"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"   # 远端机运行目录
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_PUBLIC_IP = os.environ.get("AGENT_TEAM_PUBLIC_IP") or "<node-ip>"
+
+HOST = AGENT_TEAM_SSH_HOST
+TAIL = AGENT_TEAM_VIEW_BASE
+PUB = os.environ.get("AGENT_TEAM_PUBLIC_BASE") or "http://127.0.0.1:9942"
 USER = "acc_viewer"
 USER2 = "acc_lock"
+OPT = AGENT_TEAM_RUNTIME_DIR
+DSN = AGENT_TEAM_ETC_DIR + "/pg.env"
+PUBIP = AGENT_TEAM_PUBLIC_IP
 
 REMOTE = r"""
 set -u
-PUB="%(pub)s"; TAIL="%(tail)s"; OPT="<deploy-dir>"
-U="%(user)s"; U2="%(user2)s"; DSN="<deploy-dir>/pg.env"
+PUB="%(pub)s"; TAIL="%(tail)s"; OPT="%(opt)s"
+U="%(user)s"; U2="%(user2)s"; DSN="%(dsn)s"
 PW=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)
 PW2="$PW-b"
 FAILED=0; SKIPPED=0
@@ -80,7 +95,7 @@ echo "== 4) 带会话访问：应 200，且不含主人情报 =="
 if [ "${LOGIN_OK:-0}" = "1" ]; then
   C=$(curl -s -b $JAR -o /tmp/acc_in.$$ -w '%%{http_code}' "$PUB/")
   [ "$C" = "200" ] && pass "带会话 200" || fail "带会话 $C"
-  grep -q "<node-ip>" /tmp/acc_in.$$ && fail "公网页面泄露了公网 IP" || pass "公网页面无公网 IP 明文"
+  grep -q "%(pubip)s" /tmp/acc_in.$$ && fail "公网页面泄露了公网 IP" || pass "公网页面无公网 IP 明文"
   if grep -qE "存在但无权查看" /tmp/acc_in.$$; then pass "越权内容按口径遮蔽"; else skip "本页没有需要遮蔽的条目"; fi
   echo "== 5) 错误口令：应被拒不建会话 =="
   JAR2=/tmp/acc.jar2.$$
@@ -136,11 +151,12 @@ python3 $OPT/view_auth.py disable --user $U2 --dsn-file $DSN >/dev/null 2>&1
 rm -f $JAR /tmp/acc_login.$$ /tmp/acc_ok.$$ /tmp/acc_bad.$$ /tmp/acc_in.$$
 echo
 echo "RESULT_FAILED=$FAILED SKIPPED=$SKIPPED"
-""" % {"pub": PUB, "tail": TAIL, "user": USER, "user2": USER2}
+""" % {"pub": PUB, "tail": TAIL, "user": USER, "user2": USER2,
+       "opt": OPT, "dsn": DSN, "pubip": PUBIP}
 
 
 def main():
-    print("### 公网入口验收（在龙虾上执行，口令只在机上现生成）")
+    print("### 公网入口验收（在 <HOST> 上执行，口令只在机上现生成）")
     p = subprocess.run(["ssh", "-o", "ConnectTimeout=10", HOST, REMOTE],
                        capture_output=True, timeout=300)
     out = p.stdout.decode("utf-8", "replace")

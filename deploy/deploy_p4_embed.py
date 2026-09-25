@@ -5,12 +5,18 @@
       python deploy_p4_embed.py --dry-run  # 只看要传什么
 """
 import hashlib
+import os
 import pathlib
 import subprocess
 import sys
 
-LOCAL = pathlib.Path(r"<repo>\agent-team")
-REMOTE = "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+LOCAL = pathlib.Path(os.environ.get("AGENT_TEAM_REPO_DIR") or r"<repo>\agent-team")
+# PHASE2_TODO: 待节点注入 env 后删除
+REMOTE = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_NODES = dict(kv.split("=", 1) for kv in (os.environ.get("AGENT_TEAM_NODES")
+                        or "lobster=<host>").split(","))
 FILES = ["embedder.py", "blackboard_svc.py", "backfill_embeddings.py"]
 UNIT = "agent-team-blackboard"
 SSH = ["ssh", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", "lobster"]
@@ -64,7 +70,7 @@ def main():
     print("   ", out.strip(), err.strip()[:200])
 
     print("== 5) 服务自报（版本 + 嵌入状态）==")
-    rc, out, err = ssh("curl -s -m 8 http://<host>:9940/healthz")
+    rc, out, err = ssh("curl -s -m 8 http://%s:9940/healthz" % AGENT_TEAM_NODES["lobster"])
     print("   ", out.strip()[:400])
 
     print("== 6) 监听面（应仍只绑 tailnet）==")

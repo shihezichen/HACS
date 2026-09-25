@@ -3,7 +3,7 @@
 """chat_svc.py —— 人机对话台（team_chat）后端服务
 
 契约：API契约-人机对话台-v1.md（已冻结）/ v1.1-前端增强增补.md
-本文件只做**后端**；前端产物 agent-team/ui/ 归 OpenClaw，本服务只负责同源托管。
+本文件只做**后端**；前端产物 agent-team/ui/ 归 <MEMBER_ID>，本服务只负责同源托管。
 
 依赖纪律（与团队其它服务一致）：**纯标准库 + psycopg2**（唯一第三方），
 语法兼容 Python 3.9；口令只从环境变量 / 受保护文件读，绝不写进代码 / 日志 / 响应。
@@ -15,10 +15,10 @@
   ④ POST meetings + 会议推流    ⑤ 旁听
   未实现的端点一律 501 not_implemented（**不是 404**），前端据此开关按钮。
 
-起法（龙虾）：
-  CHAT_PG_DSN='${CHAT_PG_DSN}' \
-  CHAT_SESSION_KEY_FILE=${CHAT_ENV_DIR}/view-session.key \
-  python3 chat_svc.py --host ${CHAT_HOST} --port ${CHAT_PORT}
+起法（<HOST>）：
+  CHAT_PG_DSN='host=127.0.0.1 port=9950 dbname=blackboard user=bb password=...' \
+  CHAT_SESSION_KEY_FILE=<PASS_FILE> \
+  python3 chat_svc.py --host <NODE_IP> --port 9980
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import view_auth  # noqa: E402  —— 账号 / 会话 / 角色 / 密级，与看板同一套口径
 
 # 上下文水位（服务端渲染，2026-09-24）：让「上下文：约 Xk/Yk (Z%)」由服务端按
-# 真源（OpenClaw sessions.json / Hermes state.db）渲染，绝不采信 Agent 手打的数字。
+# 真源（<MEMBER_ID_1> sessions.json / <MEMBER_ID_2> state.db）渲染，绝不采信 Agent 手打的数字。
 try:
     import ctx_watermark as _ctx_wm  # noqa: E402
 except Exception:  # noqa: BLE001 —— 缺这个模块只是不挂水位行，不影响主流程
@@ -66,33 +66,39 @@ DEFAULT_PORT = 9980
 #: 默认文档：根路径 / 与 SPA fallback 都落这里（原 index.html 已停用）
 DEFAULT_DOC = "group.html"
 
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_DOMAIN = os.environ.get("AGENT_TEAM_DOMAIN") or "example.com"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_SSH_TARGET = os.environ.get("AGENT_TEAM_SSH_TARGET") or ""
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_CLAUDE_EXEC = os.environ.get("AGENT_TEAM_CLAUDE_EXEC") or "<home>/AppData/Local/hermes/scripts/claude_exec.py"
+
 #: 门户登录页（本服务**不自己签发 cookie**，与「只有看板 POST /login」的既有口径一致）。
 #: 未登录的浏览器访客一律转交这里，并带「登录后回本页」的 next。
 LOGIN_BASE_URL = (os.environ.get("CHAT_LOGIN_BASE_URL")
-                  or "https://example.com").rstrip("/")
+                  or "https://%s" % AGENT_TEAM_DOMAIN).rstrip("/")
 #: 本服务的对外地址（Host 不在自有域名内时的兜底，用来拼 next）。
 PUBLIC_URL = (os.environ.get("CHAT_PUBLIC_URL")
-              or "https://chat.example.com").rstrip("/")
+              or "https://chat.%s" % AGENT_TEAM_DOMAIN).rstrip("/")
 
 #: 数据库连接串：优先 CHAT_PG_DSN，其次与黑板同一个 BB_PG_DSN
 DSN_ENV_PRIMARY = "CHAT_PG_DSN"
 DSN_ENV_FALLBACK = "BB_PG_DSN"
-#: 配置目录：所有配置文件（pg.env / view-session.key / agents.json / ssh 密钥…）的默认落点。
-#: 用 CHAT_ENV_DIR 覆盖，代码里不留任何绝对路径。
-APP_ENV_DIR = (os.environ.get("CHAT_ENV_DIR") or "").rstrip("/")
-
-#: DSN 文件（KEY=VALUE 形式，含 CHAT_PG_DSN / BB_PG_DSN）。
-DSN_FILE = (os.environ.get("CHAT_DSN_FILE")
-            or os.path.join(APP_ENV_DIR, "pg.env"))
+DSN_FILE = os.environ.get("AGENT_TEAM_PG_ENV_FILE") or AGENT_TEAM_ETC_DIR + "/pg.env"
 
 #: 成员名册：多份 agents.json 合并（后面读到的同名成员不覆盖先读到的）
 ROSTER_ENV = "CHAT_AGENTS_JSON"          # 冒号/分号分隔的路径列表
-ROSTER_DEFAULTS = tuple(filter(None, [
-    os.environ.get("AGENTS_JSON") or os.path.join(APP_ENV_DIR, "agents.json"),
-]))
+ROSTER_DEFAULTS = (
+    os.environ.get("AGENT_TEAM_AGENTS_JSON") or AGENT_TEAM_ETC_DIR + "/agents.json",
+)
 
 #: 成员显示名补充表（agents.json 里只有 description 时用；键 = 成员 id）
-DISPLAY_NAMES = {
+# PHASE2_TODO: 待节点注入 env 后删除（键=成员 id，值=显示名）
+_DISPLAY_NAMES_FALLBACK = {
     "lobster": "龙虾",
     "quantum": "量子",
     "top001": "Top001",
@@ -103,13 +109,16 @@ DISPLAY_NAMES = {
     "piagent": "Pi Agent",
     "hermes": "Hermes",
 }
+DISPLAY_NAMES = dict(_DISPLAY_NAMES_FALLBACK)
+_dn_override = os.environ.get("AGENT_TEAM_DISPLAY_NAMES")
+if _dn_override:
+    DISPLAY_NAMES.update(json.loads(_dn_override))
 
 BODY_MAX = 1 << 20                       # 请求体上限 1MB
 #: tailnet 内免登录时把对端认作的人（与看板"内网免登录"同口径）。
 #: 有人用会话登录时以登录身份为准；要区分多人就实现 §H 的 /login（复用 view_auth）。
-DEFAULT_HUMAN_ID = (os.environ.get("TEAM_DEFAULT_HUMAN_ID")
-                    or os.environ.get("CHAT_HUMAN_ID")
-                    or "human").strip() or "human"
+# PHASE2_TODO: 待节点注入 env 后删除
+DEFAULT_HUMAN_ID = (os.environ.get("AGENT_TEAM_HUMAN_ID") or os.environ.get("CHAT_HUMAN_ID") or "<human-id>").strip() or "<human-id>"
 DB_CONNECT_TIMEOUT_S = 5
 DB_RETRY_S = 30.0                        # 连接坏了多久才重连
 PAGE_LIMIT_DEFAULT = 20
@@ -306,7 +315,7 @@ TODO_EVIDENCE_HTTP_RE = re.compile(r"\b[1-5]\d{2}\b")
 TODO_EVIDENCE_PID_RE = re.compile(r"(?i)\bpid\b\s*[:=]?\s*\d+")
 TODO_EVIDENCE_COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
-# ---- 同源托管（会议 §H · openclaw-nb 8 条清单）-------------------------
+# ---- 同源托管（会议 §H · <MEMBER_ID> 8 条清单）-------------------------
 #: 静态根：优先 CHAT_UI_DIR，默认本文件同级的 ui/
 UI_DIR_ENV = "CHAT_UI_DIR"
 UI_DIR_NAME = "ui"
@@ -611,7 +620,7 @@ def normalize_landing(raw: Any) -> Tuple[List[str], List[Dict[str, str]]]:
 # ---- #448：群聊下发的任务 → 任务队列（todos）自动入队 ----
 #: 队列条目正文摘要长度（左栏一条看得下）
 TODO_TASK_SUMMARY_LEN = 160
-#: 入队时剥掉正文开头的「点名」（`@hermes`/`@hermes：` 这类；id 允许汉字后缀）
+#: 入队时剥掉正文开头的「点名」（`@<MEMBER_ID>`/`@<MEMBER_ID>：` 这类；id 允许汉字后缀）
 TODO_TASK_MENTION_STRIP_RE = re.compile(
     r"^\s*(?:@[\u4e00-\u9fffA-Za-z0-9_\-]+[\s:：,，]*)+")
 
@@ -657,7 +666,7 @@ def todo_message_key(text: Any) -> str:
 
     必须先剥开头的 `@点名` 再算指纹：队列条目的正文是剥过点名的
     （`#476 如下任务： …`），而群里那条消息原文是带点名的
-    （`@hermes 如下任务：\\n1. …`）—— 两边直接比指纹永远不相等，
+    （`@<MEMBER_ID> 如下任务：\\n1. …`）—— 两边直接比指纹永远不相等，
     会得出「队列里没有这条」的错误结论（回填去重复核实测踩到）。
     """
     body = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -666,7 +675,7 @@ def todo_message_key(text: Any) -> str:
 
 
 def roster_agent_ids(roster: Any) -> set:
-    """名册里的 id = agent；名册外的成员（刚哥 <human-id> / 默认人）= 人。
+    """名册里的 id = agent；名册外的成员（<USER_DISPLAY> <USER_ID> / 默认人）= 人。
 
     「人给 agent 派活才入队、agent 之间互相 @ 不入队」这条分界就靠它。
     """
@@ -720,7 +729,7 @@ def todo_task_name(text: Any, limit: int = TODO_TASK_NAME_MAX) -> str:
 def todo_text_from_message(message: Any, limit: int = TODO_TASK_SUMMARY_LEN) -> str:
     """消息 → 队列条目正文：`#<seq> <摘要>`（剥掉开头 @点名、压平换行）。
 
-    带 `#seq` 是为了队列里一眼对回群里的原话（刚哥 #448 就是第 448 条）。
+    带 `#seq` 是为了队列里一眼对回群里的原话（<USER_ID> #448 就是第 448 条）。
     """
     raw = re.sub(r"\s+", " ", str((message or {}).get("text") or "")).strip()
     raw = TODO_TASK_MENTION_STRIP_RE.sub("", raw).strip()
@@ -741,7 +750,7 @@ def todo_landing_from_text(text: Any) -> List[str]:
       · 先剥掉段首的 `@点名`；
       · file 类**只取 `<路径> @ <时间戳>`**，不是把整句当落点 ——
         `validate_todo_evidence` 是按**第一个** `@` 切「路径 | 时间戳」的，
-        句子以 `@<human-id>` 开头时切出来是空串，直接 422 `file 落点需给路径`
+        句子以 `@<USER_ID>` 开头时切出来是空串，直接 422 `file 落点需给路径`
         （第一次跑就踩到：明明写了落点，队列里却只留下 msg 兜底）。
     """
     out = []  # type: List[str]
@@ -770,7 +779,7 @@ def todo_landing_from_text(text: Any) -> List[str]:
 #: 只把追问次数累加到该 owner 已有条目的 `followup_count` 上。
 TODO_INTENTS = ("task", "followup")
 
-#: 追问 / 催问的**显式短语**：命中即认定「问进度」。前几条就是 #478 刚哥的原话形状，
+#: 追问 / 催问的**显式短语**：命中即认定「问进度」。前几条就是 #478 <USER_ID>的原话形状，
 #: 其余是同一类句式的常用说法。
 TODO_FOLLOWUP_PHRASES = (
     "完成了吗", "完成了没", "完成了没有", "做完了吗", "做完了没", "改完了吗", "改完了没",
@@ -785,7 +794,7 @@ TODO_FOLLOWUP_PHRASES = (
 )
 
 #: **强催问 / 警告**句式：命中的是「最后通牒 / 训人」而不是派活，优先级**高于**动作动词。
-#: 实测踩到：刚哥 #494「我等你的完成结果通报…这是最后一次机会…我就会把你从机器上删除了」
+#: 实测踩到：<USER_ID> #494「我等你的完成结果通报…这是最后一次机会…我就会把你从机器上删除了」
 #: —— 里面有「删除」这个动作词，只按动词表会把它当新任务排队（它其实是催问+警告）。
 #: 已知取舍：这类句子若同时又给了真活儿（罕见），会被判 followup，但会落台账可回查。
 TODO_FOLLOWUP_STRONG = (
@@ -804,7 +813,7 @@ TODO_TASK_ACTION_WORDS = (
     "测试", "验证", "复现", "整理", "梳理", "盘点", "清理", "归档",
     # ---- #539：实测漏判的常用派活动词（人点名 agent 却判成「没动作」→ 不入队）----
     # 重启 / 停止 / 删掉 / 收尾 这些是运维与验收里最高频的指令，白名单里原来一个都没有，
-    # 于是「@hermes 重启 9980 两个服务」「把队列里的空条目删掉」被判 followup 静默不入队。
+    # 于是「@<MEMBER_ID> 重启 9980 两个服务」「把队列里的空条目删掉」被判 followup 静默不入队。
     "重启", "启动", "停止", "停掉", "关掉", "删掉", "清掉", "收尾", "收口",
     "回滚", "回退", "改回", "补上", "接上", "跑通", "执行", "安装", "装上",
     "落盘", "出图", "出件", "打包", "对齐", "拉取", "推送", "提交",
@@ -820,7 +829,7 @@ TODO_TASK_DIRECTIVE_MARKERS = (
 )
 
 #: 动作动词前面出现这些否定/排除词，说明这句在**描述「没做 / 别做」**，不是派活。
-#: 实测踩到：刚哥 #494「如果这次你还是什么都不做在这里糊弄我」里的「做」，
+#: 实测踩到：<USER_ID> #494「如果这次你还是什么都不做在这里糊弄我」里的「做」，
 #: 会把一条纯催问判成新任务（只做子串匹配就是这个下场）。
 TODO_ACTION_NEGATIONS = ("不", "没", "未", "别", "无", "非")
 #: 看动作动词前面几个字内有否定词（够覆盖「都不做 / 没有做 / 别搞 / 未修复」）
@@ -848,7 +857,7 @@ def todo_action_hits(text: str) -> List[str]:
 
 
 #: 明确「这是派活」的**任务引导词**：它们本身就是任务书的抬头，命中即 task
-#: （不再要求句子里出现动作动词）。实测踩出来的：刚哥的真实派活 #452/#476 写的是
+#: （不再要求句子里出现动作动词）。实测踩出来的：<USER_ID>的真实派活 #452/#476 写的是
 #: 「你负责如下任务：1. …」「如下任务：1. …」—— 句子是**效果描述**（"我希望它能够点击"），
 #: 一个动作动词都抠不到，只靠动词表会被误判成追问（首次回填实测：这两条被判 followup）。
 TODO_TASK_INTRODUCERS = (
@@ -912,7 +921,7 @@ def classify_human_intent(text: Any) -> Dict[str, Any]:
     #   任务书抬头 > 强催问/警告 > 动作指令 > 追问短语 > 疑问句 > 默认不入队
     # 强催问必须压在动作指令**前面**：#494 里「把你删除」有动作词，
     # 但整句是催问+警告，不能当派活。
-    # ---- #534：两类误入队要在这里挡住（都是刚哥 #509 实测踩到的形状）----
+    # ---- #534：两类误入队要在这里挡住（都是<USER_ID> #509 实测踩到的形状）----
     #   a) 定语用法：「你负责的<东西>」是在指称已有的东西，不是派活抬头
     #      （#509「我们继续测试你负责的任务队列」里的「你负责」正是这种）；
     #   b) 只发了抬头没发正文：整句以冒号收尾（「我给你一个任务：」）——
@@ -934,7 +943,7 @@ def classify_human_intent(text: Any) -> Dict[str, Any]:
         return _intent_out("followup", "question_no_directive", directives or actions)
     # ---- #539：处置式祈使句兜底 ----
     # 「把 <东西> <动词>」是最典型的中文派活句形，动词却是开放集合（删掉 / 收尾 / 干掉 …），
-    # 白名单永远追不上；实测「@hermes 把队列里的空条目删掉」被判 followup、条目不入队。
+    # 白名单永远追不上；实测「@<MEMBER_ID> 把队列里的空条目删掉」被判 followup、条目不入队。
     # 前置闸门全在：不是疑问句、不是催问/警告（都在上面 return 了）、不是否定句
     # （「别把队列清空」不算派活），且调用方只在「人 + @点名了名册 agent」时才走到这里。
     if "把" in directives:
@@ -968,15 +977,15 @@ def clamp(value: Any, low: int, high: int, default: int) -> int:
 
 
 #: 正文里手打 @xxx 的识别。三条硬口径（都不折叠大小写/繁简，与成员表原文精确比对）：
-#: 1) **在标点处截断**，不是只 rstrip 结尾标点——中文不写空格，"@hermes，你好"
-#:    用 '@([^\s@]+)' 取会整段黏成 "hermes，你好" 而漏解析（2026-09-21 实踩）。
+#: 1) **在标点处截断**，不是只 rstrip 结尾标点——中文不写空格，"@<MEMBER_ID>，你好"
+#:    用 '@([^\s@]+)' 取会整段黏成 "<MEMBER_ID>，你好" 而漏解析（2026-09-21 实踩）。
 #: 2) 前缀 (?<![A-Za-z0-9._%+@-]) 排除邮箱/普通 @ 文本（"a@b.com" 不算点名）；
-#:    注意不能用 \w：\w 含汉字，"我@hermes" 会被误排除。
-#: 3) 汉字直接黏在 id 后（"@hermes你好"）由 parse_text_mentions 的汉字前缀回退兜住。
+#:    注意不能用 \w：\w 含汉字，"我@<MEMBER_ID>" 会被误排除。
+#: 3) 汉字直接黏在 id 后（"@<MEMBER_ID>你好"）由 parse_text_mentions 的汉字前缀回退兜住。
 MENTION_TEXT_RE = re.compile(
     r"(?<![A-Za-z0-9._%+@-])@([^\s@，。！？；：、,.!?;:\"'“”‘’（）()\[\]【】{}《》<>·…]+)")
 MENTION_TRAILING = "，。！？；：、,.!?;:\"'“”‘’）)】]}>》…"
-#: 汉字判据（回退用）：只有截断处是汉字才认前缀命中，避免 "@hermesabc" 误点名
+#: 汉字判据（回退用）：只有截断处是汉字才认前缀命中，避免 "@<MEMBER_ID>abc" 误点名
 CJK_CHAR_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 #: 与前端 group.html textMentions() 同口径的别名（手点 @ 栏写进正文的就是 "@所有人"）
 MENTION_ALL_ALIASES = frozenset(["所有人", "全员", "all"])
@@ -991,13 +1000,13 @@ def parse_text_mentions(text: str, member_ids: Sequence[str]) -> List[str]:
     命中规则（#539 起，按这个顺序）：
       1. 成员表原文**精确**命中（真有个成员叫 all 也不吃亏）；
       2. 别名（所有人 / 全员 / all）→ `@all`；
-      3. **大小写不敏感**命中成员表原文（"@Hermes" → 成员 `hermes`）——
-         前端 group.html 的 @ 栏已下线、群成员名就是 "Hermes" 这种首字母大写写法，
-         人照显示名打 `@Hermes` 是本能的；此前只做精确匹配 → 点名被丢弃 →
+      3. **大小写不敏感**命中成员表原文（"@<MEMBER_ID_CAP>" → 成员 `<MEMBER_ID>`）——
+         前端 group.html 的 @ 栏已下线、群成员名就是 "<MEMBER_ID>" 这种首字母大写写法，
+         人照显示名打 `@<MEMBER_ID>` 是本能的；此前只做精确匹配 → 点名被丢弃 →
          mentions 退成 `@all` → 「人点名 agent 派活自动入队」这条钩子**静默不触发**（#539 实测）。
          只有当 casefold 后**唯一**命中一个成员时才认，有歧义（两个成员仅大小写不同）就不认。
-      4. 汉字直接黏在 id 后（"@hermes你好"）：按前缀回退，只在截断处是汉字时认
-         （"@hermesabc" 这类英文黏连不算点名），前缀同样走大小写不敏感。
+      4. 汉字直接黏在 id 后（"@<MEMBER_ID>你好"）：按前缀回退，只在截断处是汉字时认
+         （"@<MEMBER_ID>abc" 这类英文黏连不算点名），前缀同样走大小写不敏感。
     """
     known = set(member_ids or [])
     fold = {}                              # casefold -> id；只留**无歧义**的
@@ -1922,7 +1931,7 @@ class ChatDB(object):
         meta = meta if isinstance(meta, dict) else {}
         # ---- 上下文水位（服务端渲染，2026-09-24）----
         # Agent 回复不再手打「📚 上下文：约 Xk/Yk (Z%)」那行；改由服务端
-        # 按真源（OpenClaw sessions.json / Hermes state.db）现读现挂到 meta.context。
+        # 按真源（<MEMBER_ID_1> sessions.json / <MEMBER_ID_2> state.db）现读现挂到 meta.context。
         # 口径：只对 agent 发言挂（人不挂）；读不到就不挂（绝不编造）。
         # **不覆盖已有 meta.context** —— 落库时若不慎带了 error 标记则保留（见 _stamp_context）。
         if author_type == "agent":
@@ -1990,7 +1999,7 @@ class ChatDB(object):
 # ---------------------------------------------------- #541 模型富化（任务判定 + 任务名抽象）
 
 #: #541：任务**是不是任务**、**叫什么名**这两件事交给模型做 —— 规则只做快速预筛。
-#: 模型通道 = 龙虾上**反向 SSH 回本机**跑 claude_exec.py（原生 claude.exe + 本机代理，
+#: 模型通道 = <HOST>上**反向 SSH 回本机**跑 claude_exec.py（原生 claude.exe + 本机代理，
 #: 包月额度；本机直连 api.anthropic.com 必 403，别试）。整条链路可被环境变量覆盖，
 #: 排障/降级实测就靠它们：
 #:   CHAT_ENRICH_ENABLE=0        → 关掉富化（worker 不起，条目保留规则名）
@@ -2007,12 +2016,12 @@ ENRICH_TIMEOUT_ENV = "CHAT_ENRICH_TIMEOUT_S"
 ENRICH_MIN_INTERVAL_ENV = "CHAT_ENRICH_MIN_INTERVAL_S"
 
 ENRICH_SSH_BIN = "/usr/bin/ssh"
-ENRICH_SSH_TARGET = os.environ.get("CHAT_ENRICH_SSH") or ""
+ENRICH_SSH_TARGET = AGENT_TEAM_SSH_TARGET
 #: 私钥/known_hosts 放**/etc 下**而不是 /root/.ssh：公网那个实例带 ProtectHome=yes，
 #: 家目录被隐藏，默认私钥路径在沙箱里读不到（实测过），显式 -i 才是两个实例都能跑的写法。
-ENRICH_KEY_FILE = os.path.join(APP_ENV_DIR, "ssh/id_ed25519")
-ENRICH_KNOWN_HOSTS = os.path.join(APP_ENV_DIR, "ssh/known_hosts")
-ENRICH_REMOTE_CMD = os.environ.get("CHAT_ENRICH_REMOTE_CMD") or ""
+ENRICH_KEY_FILE = AGENT_TEAM_ETC_DIR + "/ssh/id_ed25519"
+ENRICH_KNOWN_HOSTS = AGENT_TEAM_ETC_DIR + "/ssh/known_hosts"
+ENRICH_REMOTE_CMD = ("python -X utf8 %s" % AGENT_TEAM_CLAUDE_EXEC) + " --timeout 150 -"
 ENRICH_TIMEOUT_S = 240.0
 ENRICH_MIN_INTERVAL_S = 1.0
 ENRICH_QUEUE_MAX = 200
@@ -2547,21 +2556,21 @@ class ChatHandler(BaseHTTPRequestHandler):
         if path in ("/login", "/logout") and method in ("GET", "HEAD"):
             return self._login_redirect(path, query)
 
-        # ---- 计算器（Hermes 落地 · 2026-09-23 · 前后台配合实验）--------------
+        # ---- 计算器（<MEMBER_ID> 落地 · 2026-09-23 · 前后台配合实验）--------------
         # 只加两条路由，全部在 /calc 前缀下，不碰任何既有路由，也不破坏
         # 「静态绝不允许覆盖 /api/ 前缀」的不变量（这里是 /calc/api，不是 /api）：
         #   GET|HEAD /calc            -> 同源托管 ui/calc.html
-        #                                （前台产物；归 OpenClaw，覆盖同名文件即可换前台）
+        #                                （前台产物；归 <MEMBER_ID>，覆盖同名文件即可换前台）
         #   *        /calc/api/<...>  -> 反代到后台计算服务 127.0.0.1:9985/api/<...>
-        #                                （后台归 Hermes：本部署目录下 calc/calc_svc.py）
+        #                                （后台归 <MEMBER_ID>：<RUNTIME_DIR>/calc/calc_svc.py）
         # 后台没起时返 502 JSON，绝不影响本服务其它任何功能。
         if path == "/calc" and method in ("GET", "HEAD"):
             return self._serve_static("/calc.html", method)
         if path.startswith("/calc/api/"):
             return self._calc_proxy(method, path[len("/calc"):], query)
 
-        # ---- 计算器「后台侧」Vue 管理后台（Hermes 落地 · 2026-09-24）----------
-        # 只为后台侧 SPA 加两条路由（前台 /calc 归 OpenClaw，ui/ 一个字都不动）：
+        # ---- 计算器「后台侧」Vue 管理后台（<MEMBER_ID> 落地 · 2026-09-24）----------
+        # 只为后台侧 SPA 加两条路由（前台 /calc 归 <MEMBER_ID>，ui/ 一个字都不动）：
         #   GET|HEAD /calc/admin          -> admin-ui/index.html（SPA fallback）
         #   GET|HEAD /calc/admin/assets/* -> admin-ui/assets/* 静态文件
         # _dispatch 已对 path 做过 rstrip("/")，所以 /calc/admin 与 /calc/admin/ 命中同一条。
@@ -2684,7 +2693,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         """这次发言以谁的名义：(author_type, author_id)。
 
         Agent 走 tailnet 直连 + `X-Agent-Id`；人走会话 cookie（cookie 优先，
-        所以刚哥在 tailnet 内也是 <human-id> 而非匿名 owner）。
+        所以<USER_DISPLAY>在 tailnet 内也是 <USER_ID> 而非匿名 owner）。
         `X-Agent-Id` **只在 tailnet 来源被接受**，防冒名。
 
         tailnet 内没有会话 cookie 时（= 与看板一样的"内网免登录"），按
@@ -3264,7 +3273,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         """人在群里 @某个 agent 派活 → 自动入队一条**待办**（status=open）。
 
         规则（#448 原样保留 + #478 加一层意图闸门）：
-          · 触发：作者**不是**名册里的 agent（名册外 = 人：刚哥/默认人），且 mentions 里
+          · 触发：作者**不是**名册里的 agent（名册外 = 人：<USER_ID>/默认人），且 mentions 里
             至少有一个名册里的 agent。agent 之间互相 @（协同/催办）不入队，免得刷成噪声。
           · **#478 闸门**：正文先过 `classify_human_intent` —— 只会为 `intent=task`
             （有动作指令、指向具体产出）建条目；判为 `followup`（进度追问/催问/纯提问）
@@ -3712,7 +3721,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         与 `/todos/clear`（勾选递交 = 逐条盖完成章 + 落点校验）**分开**：purge 是显式的
         「这个队列不要了」，整批删掉本群队列条目，左栏「任务队列」立刻归空、
         **刷新后仍为空**（状态在服务端，不在 localStorage）。
-        权限：必须是**本群成员**（人按会话身份 / 人 tailnet 默认 <human-id>；agent 带
+        权限：必须是**本群成员**（人按会话身份 / 人 tailnet 默认 <USER_ID>；agent 带
         X-Agent-Id）。群已归档只读（与其它写口同口径）。
         体：`{}` 或 `{"scope":"all"}`（只支持 all，别的值 422）。
         """
@@ -4195,8 +4204,8 @@ class ChatHandler(BaseHTTPRequestHandler):
         从本机回环回连本服务，放行回环等于给公网开后门。
         """
         ip = self._peer_ip()
-        # 先看会话 cookie —— **tailnet 内也要认**：否则刚哥在自己网里打开网页时，
-        # 系统只知道"来了个 owner"、认不出"你是 <human-id>"，群协议里"人"就不成立。
+        # 先看会话 cookie —— **tailnet 内也要认**：否则<USER_ID>在自己网里打开网页时，
+        # 系统只知道"来了个 owner"、认不出"你是 <USER_ID>"，群协议里"人"就不成立。
         cookie = self._cookie(view_auth.SESSION_COOKIE)
         if cookie and Runtime.auth is not None:
             principal, _reason = Runtime.auth.check_cookie(cookie, self._client_ip(),
@@ -4257,7 +4266,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-    # --- 计算器反代（Hermes · 2026-09-23 · 前后台配合）------------------
+    # --- 计算器反代（<MEMBER_ID> · 2026-09-23 · 前后台配合）------------------
 
     #: 计算器后台地址（默认本机 9985；可用环境变量 CHAT_CALC_UPSTREAM 覆盖）
     CHAT_CALC_UPSTREAM = os.environ.get("CHAT_CALC_UPSTREAM", "http://127.0.0.1:9985")
@@ -4291,13 +4300,11 @@ class ChatHandler(BaseHTTPRequestHandler):
         self._send_bytes(status, raw, out_type, "no-store")
         return None
 
-    # --- 计算器后台侧管理后台静态托管（Hermes 责任田 · 2026-09-24）------
+    # --- 计算器后台侧管理后台静态托管（<MEMBER_ID> 责任田 · 2026-09-24）------
 
-    #: 后台侧 Vue 产物目录（默认本文件同级 admin-ui/）。可用 CHAT_ADMIN_UI_DIR 覆盖。
-    #: 与 ui/（OpenClaw 前台）**完全分离**：两边目录不同、路由前缀不同，互不覆盖。
-    CHAT_ADMIN_UI_DIR = (os.environ.get("CHAT_ADMIN_UI_DIR")
-                         or os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                         "admin-ui"))
+    #: 后台侧 Vue 产物目录（<RUNTIME_DIR>/admin-ui/）。可用 CHAT_ADMIN_UI_DIR 覆盖。
+    #: 与 ui/（<MEMBER_ID> 前台）**完全分离**：两边目录不同、路由前缀不同，互不覆盖。
+    CHAT_ADMIN_UI_DIR = os.environ.get("CHAT_ADMIN_UI_DIR", AGENT_TEAM_RUNTIME_DIR + "/admin-ui")
     ADMIN_DOC = "index.html"
 
     def _serve_admin(self, rel_path: str, method: str) -> Optional[Tuple[int, Dict[str, Any]]]:
@@ -4347,7 +4354,7 @@ class ChatHandler(BaseHTTPRequestHandler):
         self._send_file(target)
         return None
 
-    # --- 同源静态托管（会议 §H · openclaw-nb 8 条清单）-------------
+    # --- 同源静态托管（会议 §H · <MEMBER_ID> 8 条清单）-------------
 
     def _redirect(self, location: str) -> None:
         """302 跳转。响应自行发出 —— _handle 返回 None 即表示响应已发。"""
@@ -4537,7 +4544,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--port", type=int, default=int(os.environ.get("CHAT_PORT") or DEFAULT_PORT))
     ap.add_argument("--dsn", default=None, help="PG 连接串（默认读 CHAT_PG_DSN / BB_PG_DSN）")
     ap.add_argument("--agents-json", action="append", default=None,
-                    help="agents.json 路径，可给多次（默认读 CHAT_AGENTS_JSON / AGENTS_JSON）")
+                    help="agents.json 路径，可给多次（默认 <ETC_DIR>/agents.json）")
     ap.add_argument("--ui-dir", default=None,
                     help="前端静态根（同源托管；默认读 CHAT_UI_DIR / 本文件同级 ui/）")
     ap.add_argument("--log-level", default=os.environ.get("CHAT_LOG_LEVEL") or "INFO")

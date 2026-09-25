@@ -50,6 +50,12 @@ sys.path.insert(0, ROOT)
 import blackboard_view as bv  # noqa: E402
 import view_auth  # noqa: E402
 
+# ---------------------------------------------------------------------------
+# 测试夹具真值（硬编码清零 Phase 1.5）
+# PHASE2_TODO: 待节点注入 env 后删除
+# 默认值逐字等于改动前的真值；未注入 env 时测试行为与改动前完全等价。
+FIX_NODE_CLOUD_IP = os.environ.get("AGENT_TEAM_TEST_NODE_CLOUD_IP") or "<host>"
+
 UPSTREAM_TOKEN = "view-auth-test-token-DO-NOT-LEAK-91af"
 PASSWORD = "GoodPass2026!"
 BAD_PASSWORD = "wrong-password-0000"
@@ -395,7 +401,7 @@ class TestTokenSigning(unittest.TestCase):
 
 class TestTailnet(unittest.TestCase):
     def test_tailnet_addresses(self):
-        for ip in ("100.64.0.1", "<host>", "100.127.255.254",
+        for ip in ("100.64.0.1", FIX_NODE_CLOUD_IP, "100.127.255.254",
                    "::ffff:100.64.0.1"):
             self.assertTrue(view_auth.in_tailnet(ip), "%s 应该算 tailnet" % ip)
 

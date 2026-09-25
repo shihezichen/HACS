@@ -6,18 +6,18 @@
 
 用法：
     # 1) 探活（不需要 token）
-    python a2a_call.py --base http://<node-ip>:9920 healthz
+    python a2a_call.py --base http://<NODE_IP>:9920 healthz
 
     # 2) 取 Agent Card（不需要 token）
-    python a2a_call.py --base http://<node-ip>:9920 card top001
+    python a2a_call.py --base http://<NODE_IP>:9920 card top001
 
     # 3) 派活（需要 token 文件）
-    python a2a_call.py --base http://<node-ip>:9920 call top001 \
-        --token-file <deploy-dir>/client-token \
+    python a2a_call.py --base http://<NODE_IP>:9920 call top001 \
+        --token-file <TOKEN_FILE> \
         --text "把 /tmp/x.log 的最后 20 行发我"
 
     # 4) 列本机对外提供的 agent（需要 token）
-    python a2a_call.py --base http://<node-ip>:9920 agents --token-file ./client-token
+    python a2a_call.py --base http://<NODE_IP>:9920 agents --token-file ./client-token
 
 环境变量：A2A_TOKEN 可直接给 token（优先于 --token-file）。
 退出码：0 成功；1 服务端返回非 200；2 参数/网络错误。
@@ -122,7 +122,7 @@ def main(argv=None):
 
     args = parser.parse_args(rest)
     if not opts["base"]:
-        parser.error("必须提供 --base（例如 --base http://<node-ip>:9920）")
+        parser.error("必须提供 --base（例如 --base http://<NODE_IP>:9920）")
     base = opts["base"].rstrip("/")
     args.json = opts["json"]
     args.timeout = opts["timeout"]

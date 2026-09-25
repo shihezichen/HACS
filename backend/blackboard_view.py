@@ -71,17 +71,17 @@ blackboard_view.py —— 团队黑板·只读看板（默认端口 9941）
 
 用法：
     # 内网调试（免登录，口径同 v1.3）
-    python blackboard_view.py --host <host> --port 9941 --mode tailnet \\
-        --upstream http://<host>:9940 \\
-        --token-file <deploy-dir>/client-token
+    python blackboard_view.py --host <NODE_IP> --port 9941 --mode tailnet \\
+        --upstream <BB_BASE> \\
+        --token-file <PASS_FILE>
 
     # 公网部署（默认口径：一律要登录）
     python blackboard_view.py --host 127.0.0.1 --port 9941 --mode public \\
-        --upstream http://<host>:9940 \\
-        --token-file <deploy-dir>/client-token \\
-        --session-key-file <deploy-dir>/view-session.key \\
-        --dsn-file <deploy-dir>/pg.env \\
-        --log-file /var/log/agent-team/blackboard-view.log
+        --upstream <BB_BASE> \\
+        --token-file <PASS_FILE> \\
+        --session-key-file <PASS_FILE> \\
+        --dsn-file <ETC_DIR>/pg.env \\
+        --log-file /var/log/<SERVICE>.log
 """
 
 import argparse
@@ -103,8 +103,18 @@ from typing import Any, Dict, List, Optional, Tuple
 import view_auth                        # 账号 / 会话 / 角色 / 审计，纯标准库
 
 VERSION = "1.5"
-DEFAULT_UPSTREAM = os.environ.get("BBVIEW_UPSTREAM") or "http://127.0.0.1:9940"
-DEFAULT_TOKEN_FILE = os.environ.get("BBVIEW_TOKEN_FILE") or "client-token"
+
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_DOMAIN = os.environ.get("AGENT_TEAM_DOMAIN") or "example.com"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_BB_BASE = os.environ.get("AGENT_TEAM_BB_BASE") or "http://<host>:9940"
+
+DEFAULT_UPSTREAM = AGENT_TEAM_BB_BASE
+DEFAULT_TOKEN_FILE = os.environ.get("AGENT_TEAM_TOKEN_FILE") or AGENT_TEAM_ETC_DIR + "/client-token"
 DEFAULT_PORT = 9941
 DEFAULT_REFRESH_S = 30
 
@@ -131,8 +141,8 @@ CSRF_FIELD = "csrf"             # 表单里 CSRF 隐藏域的名字（cookie 那
 NEXT_MAX = 512                  # ?next= 的长度上限
 SESSION_MAX_AGE_S = view_auth.SESSION_TTL_S
 
-DEFAULT_SESSION_KEY_FILE = os.environ.get("BBVIEW_SESSION_KEY_FILE") or "view-session.key"
-DEFAULT_DSN_FILE = os.environ.get("BBVIEW_DSN_FILE") or "pg.env"
+DEFAULT_SESSION_KEY_FILE = os.environ.get("AGENT_TEAM_SESSION_KEY_FILE") or AGENT_TEAM_ETC_DIR + "/view-session.key"
+DEFAULT_DSN_FILE = os.environ.get("AGENT_TEAM_PG_ENV_FILE") or AGENT_TEAM_ETC_DIR + "/pg.env"
 
 LOG = logging.getLogger("blackboard_view")
 
@@ -359,11 +369,11 @@ def safe_next(raw: Any) -> str:
     return text
 
 
-#: Cookie 归属域（可由环境变量覆盖）。让 example.com 的各子域
+#: Cookie 归属域（可由环境变量覆盖）。让 <DOMAIN> 的各子域
 #: （门户 / 看板 / 对话台）共享同一份登录态 —— 缺了它，在门户登录过的人
-#: 打开 chat.example.com 仍会被当未登录（host-only cookie 带不过去）。
+#: 打开 chat.<DOMAIN> 仍会被当未登录（host-only cookie 带不过去）。
 COOKIE_DOMAIN_SCOPE = (os.environ.get("BBVIEW_COOKIE_DOMAIN")
-                       or "example.com").strip().lower()
+                       or AGENT_TEAM_DOMAIN).strip().lower()
 
 
 def cookie_domain(host: Optional[str]) -> Optional[str]:
@@ -3235,7 +3245,7 @@ function renderManual(){
     "curl -s '" + base + "/api/tracking?overdue=1&limit=50'" +
     (owner ? "\\ncurl -s '" + base + "/api/actions?owner=" + owner + "&status=open'" : ""));
   curlBlock(host, "⑤ 直接打黑板（9940）要自带 token；看板这一层已经替你带过了",
-    "curl -s -H 'Authorization: Bearer <token>' <host>:9940/tracking");
+    "curl -s -H 'Authorization: Bearer <token>' <NODE_IP>:9940/tracking");
   host.appendChild(el("div", "p",
     "只读约定：以上端点只接 GET / HEAD；任何写请求都会拿到 405 method_not_allowed。"));
 }
@@ -3402,16 +3412,16 @@ def render_page(userbar: str = "") -> str:
 # 不给出一个打不开的死链。开通后把它改成 True 就点亮，不用动别的。
 #
 #
-# 公网落点（2026-09-22 上线，同一朵 Cloudflare 命名隧道 ed201266，见龙虾
-# <cloudflared-dir>/config.yml）：apex `example.com` 与 `board.example.com`
+# 公网落点（2026-09-22 上线，同一朵 Cloudflare 命名隧道 ed201266，见 <HOST>
+# <cloudflared-dir>/config.yml）：apex `<DOMAIN>` 与 `board.<DOMAIN>`
 # 都指本实例（127.0.0.1:9942，强制登录），所以桌面/手机直接敲域名进的就是这张卡
-# 片墙，白板本尊在 /board；`chat.example.com` 由 chat 公网实例（127.0.0.1:9980）
+# 片墙，白板本尊在 /board；`chat.<DOMAIN>` 由 chat 公网实例（127.0.0.1:9980）
 # 承载，卡片 2 指向它 —— 两张卡今天都是 ready=True。
-# 卡数口径（刚哥 #187 批示，2026-09-22）：**就两张**，不设第三张。原三张卡方案里
+# 卡数口径（<USER_ID> #187 批示，2026-09-22）：**就两张**，不设第三张。原三张卡方案里
 # 那张「圆桌会议」卡删掉——会议本来就在「团队看板」的会议页签里，单列一张卡等于
 # 一个入口两个名字。要再加卡必须先在群里拿到点头，不许只改这一处就上线。
 
-CHAT_URL = os.environ.get("BBVIEW_CHAT_URL") or "https://chat.example.com/"
+CHAT_URL = os.environ.get("AGENT_TEAM_CHAT_URL") or "https://chat.%s/" % AGENT_TEAM_DOMAIN
 
 PORTAL_CARDS = (
     {
@@ -3527,7 +3537,9 @@ def render_portal(userbar: str = "") -> str:
                        "" if ready else " wait", _esc(card["badge"]),
                        _esc(card["desc"]), _esc(card["cta"]), tag))
     page = PORTAL_HTML.replace("__CARDS__", "\n".join(cards))
-    return page.replace("__USERBAR__", userbar or "", 1)
+    page = page.replace("__USERBAR__", userbar or "", 1)
+    # 页面里的域名走 AGENT_TEAM_DOMAIN（默认与原字面量等价，行为零变更）
+    return page.replace("example.com", AGENT_TEAM_DOMAIN)
 
 
 # --- 登录页 / 账号页（自包含、内联样式、无任何外部资源）------------------

@@ -13,10 +13,10 @@ nats_client.py —— 纯标准库 NATS 客户端（零 pip 依赖，语法兼�
      就是靠 -ERR 报的，静默吞掉会让「消息发不出去」变成查不出来的哑故障。
 
 对外 API：
-    c = NatsClient(host, port, user, password, name="teamd-hermes", on_error=cb)
+    c = NatsClient(host, port, user, password, name="teamd-<MEMBER_ID>", on_error=cb)
     c.connect()                                  # 建连 + 鉴权握手（失败抛 NatsError）
-    c.subscribe("a2a.v1.req.hermes", cb, sid="1")  # cb(payload: bytes, reply: str)
-    c.publish("team.hb.hermes", b"...", reply="")
+    c.subscribe("a2a.v1.req.<MEMBER_ID>", cb, sid="1")  # cb(payload: bytes, reply: str)
+    c.publish("team.hb.<MEMBER_ID>", b"...", reply="")
     c.request("a2a.v1.req.x", b"...", timeout=6.0)  # -> bytes 或 None
     c.flush(timeout=5.0)                          # 发 PING 等 PONG，探活用
     c.is_connected                                # 属性，断线会变 False

@@ -3,15 +3,15 @@
 """
 team.py —— 成员侧统一通信 CLI（"成员平等"的核心）
 
-背景：过去只有总控（hermes）配齐了 team_call.py / team_broadcast.py / team_roster.py 这套
-工具，其他成员只能"被点名"，自己发不出呼叫。本工具让**任意一个成员**在 hermes 不在线、
-龙虾（NATS 主中枢）也不在线（走 top001 热备）的情况下，仍能主动：
+背景：过去只有总控（<MEMBER_ID>）配齐了 team_call.py / team_broadcast.py / team_roster.py 这套
+工具，其他成员只能"被点名"，自己发不出呼叫。本工具让**任意一个成员**在 <MEMBER_ID> 不在线、
+主中枢（NATS 主中枢）也不在线（走 <MEMBER_ID> 热备）的情况下，仍能主动：
   * 点对点呼叫队友（say）
   * 群发消息（broadcast）
   * 召集临时会议（meet）并留痕回放（history）
   * 查看谁在线（who）
 
-全程只走 NATS 中枢（<host>:9930 主 / <node-ip>:9930 备，逐个尝试到连上），
+全程只走 NATS 中枢（<NODE_IP_1>:9930 主 / <NODE_IP_2>:9930 备，逐个尝试到连上），
 不依赖总控、不依赖黑板/PG——这是"正式会议才写黑板"之外的降级通道。
 
 复用现有实现，不重造轮子：
@@ -22,11 +22,11 @@ team.py —— 成员侧统一通信 CLI（"成员平等"的核心）
 
 身份与连接参数（尽量少输）：
   --as <成员>       显式指定自己是谁；省略时自动推断——
-                    Linux：扫 /etc/nats/*.pass，要求**恰好一个**；
-                    Windows：默认 openclaw-nb，但若 <home>\\agent-team\\nats-*.pass 存在多个，
+                    Linux：扫 <PASS_DIR>/*.pass，要求**恰好一个**；
+                    Windows：默认 <MEMBER_ID>，但若 <PASS_DIR>\\nats-*.pass 存在多个，
                     视为身份不明确，报错要求显式 --as。
   --password-file   默认按平台 + 上面解出的成员名拼路径；可覆盖。
-  --nats-host       默认多地址 "<host>:9930,<node-ip>:9930"；可逗号分隔多个覆盖。
+  --nats-host       默认多地址 "<NODE_IP_1>:9930,<NODE_IP_2>:9930"；可逗号分隔多个覆盖。
   --nats-port       地址未显式带端口时的兜底端口，默认 9930。
   --timeout         等回应上限秒，默认 120，最大 300。
   --json            打印原始 JSON。
@@ -40,12 +40,12 @@ team.py —— 成员侧统一通信 CLI（"成员平等"的核心）
 
 用法示例：
   python team.py who
-  python team.py say hermes "你在吗？"
+  python team.py say <MEMBER_ID> "你在吗？"
   python team.py broadcast --all "全体注意：..."
-  python team.py broadcast --to lobster,top001 --text-file msg.md
+  python team.py broadcast --to <MEMBER_ID_A>,<MEMBER_ID_B> --text-file msg.md
   python team.py meet --goal "对齐明天的发布计划" --agenda "确认范围" --agenda "定风险点" \\
-      --members lobster,codex,piagent
-  python team.py history --session-id meet-20260920-1200-a1b2
+      --members <MEMBER_ID_A>,<MEMBER_ID_B>,<MEMBER_ID_C>
+  python team.py history --session-id <SESSION_ID>
 """
 
 import argparse
@@ -74,7 +74,12 @@ except Exception:
 
 MAX_TIMEOUT = 300.0
 DEFAULT_TIMEOUT = 120.0
-DEFAULT_NATS_HOSTS = "<host>:9930,<node-ip>:9930"  # 龙虾主 / top001 备
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<home>\\agent-team"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_NATS_HOST = (os.environ.get("AGENT_TEAM_NATS_HOST")
+                        or "<host>:9930,<node-ip>:9930")  # <NODE_IP_1> 主 / <NODE_IP_2> 备
+DEFAULT_NATS_HOSTS = AGENT_TEAM_NATS_HOST
 DEFAULT_PORT = 9930
 HB_PREFIX = "team.hb."
 REQ_FMT = "a2a.v1.req.%s"
@@ -82,7 +87,8 @@ DEDUP_WINDOW_SECONDS = 30 * 60
 DEFAULT_DEDUP_FILE = os.path.join(os.path.expanduser("~"), ".team_broadcast_dedup.json")
 DEFAULT_MEETINGS_FILE = os.path.join(os.path.expanduser("~"), ".team_meetings.jsonl")
 #: 人机对话台（群的家）—— 群消息走 HTTP 落库，NATS 只管唤醒通知（契约 §I）
-DEFAULT_CHAT_BASE = os.environ.get("TEAM_CHAT_BASE") or "http://<host>:9984"
+# PHASE2_TODO: 待节点注入 env 后删除
+DEFAULT_CHAT_BASE = os.environ.get("AGENT_TEAM_CHAT_BASE") or os.environ.get("TEAM_CHAT_BASE") or "http://<host>:9984"
 
 
 # ---------------------------------------------------------------- 内联自总控侧群发工具
@@ -181,7 +187,7 @@ class TeamCliError(Exception):
 
 def _infer_member_linux():
     # type: () -> str
-    d = "/etc/nats"
+    d = os.environ.get("AGENT_TEAM_NATS_DIR") or "/etc/nats"  # PHASE2_TODO: 待节点注入 env 后删除
     names = []
     if os.path.isdir(d):
         for f in glob.glob(os.path.join(d, "*.pass")):
@@ -196,8 +202,9 @@ def _infer_member_linux():
 
 def _infer_member_windows():
     # type: () -> str
-    default = "openclaw-nb"
-    d = "<home>\\agent-team"
+    # PHASE2_TODO: 待节点注入 env 后删除（无凭据时的兜底身份）
+    default = os.environ.get("AGENT_TEAM_MEMBER_ID") or "openclaw-nb"
+    d = os.environ.get("AGENT_TEAM_NATS_DIR") or AGENT_TEAM_RUNTIME_DIR
     if os.path.isdir(d):
         names = [os.path.basename(f)[len("nats-"):-len(".pass")]
                 for f in glob.glob(os.path.join(d, "nats-*.pass"))]
@@ -219,8 +226,8 @@ def resolve_password_file(args, member):
     if args.password_file:
         return args.password_file
     if sys.platform == "win32":
-        return "<home>\\agent-team\\nats-%s.pass" % member
-    return "/etc/nats/%s.pass" % member
+        return "%s\\nats-%s.pass" % (os.environ.get("AGENT_TEAM_NATS_DIR") or AGENT_TEAM_RUNTIME_DIR, member)
+    return "%s/%s.pass" % (os.environ.get("AGENT_TEAM_NATS_DIR") or "/etc/nats", member)
 
 
 def resolve_member_and_password(args):
@@ -426,7 +433,7 @@ def derive_default_session(from_member, target, now=None):
     """不带 --session-id/--new-session 时的默认会话键：按**小时**分桶的稳定派生。
 
     同一小时内、同一 (发送方, 目标) 的连续对话落在同一会话 —— 多轮上下文才成立；
-    跨小时自动滚新桶，避免后端上下文无限堆积（openclaw 实测已用到 38k/120k）。
+    跨小时自动滚新桶，避免后端上下文无限堆积（<MEMBER_ID> 实测已用到 38k/120k）。
 
     为什么按小时分桶而不是固定键：没有「对话边界」信号时，固定键会把一整天里
     互不相关的对话全塞进同一段上下文 —— token 顶到模型窗口上限，且互相污染。
@@ -766,12 +773,12 @@ def build_common_parser():
     # type: () -> argparse.ArgumentParser
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--as", dest="as_member", default=None,
-                   help="显式指定自己是谁；省略时自动推断（Linux 扫 /etc/nats/*.pass 取唯一一个，"
-                        "Windows 默认 openclaw-nb，若口令文件不唯一则报错要求显式指定）")
+                   help="显式指定自己是谁；省略时自动推断（Linux 扫 <PASS_DIR>/*.pass 取唯一一个，"
+                        "Windows 默认 <MEMBER_ID>，若口令文件不唯一则报错要求显式指定）")
     p.add_argument("--password-file", default=None,
                    help="自己的 NATS 口令文件；默认按平台 + --as 推断出的成员名拼路径")
     p.add_argument("--nats-host", default=DEFAULT_NATS_HOSTS,
-                   help="NATS 中枢地址，逗号分隔可给多个做故障转移（默认：龙虾主/top001 备）")
+                   help="NATS 中枢地址，逗号分隔可给多个做故障转移（默认：<NODE_IP_1> 主/<NODE_IP_2> 备）")
     p.add_argument("--nats-port", type=int, default=DEFAULT_PORT,
                    help="兜底端口，仅用于地址里没显式带端口的项（默认 9930）")
     p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
@@ -938,7 +945,7 @@ def build_parser():
     p_who.set_defaults(func=cmd_who)
 
     p_say = sub.add_parser("say", parents=[common], help="点对点呼叫某个成员，等其回应")
-    p_say.add_argument("target", help="被叫成员 id，如 hermes")
+    p_say.add_argument("target", help="被叫成员 id，如 <MEMBER_ID>")
     p_say.add_argument("text", nargs="?", default=None, help="正文（中文长文本建议改用 --text-file）")
     p_say.add_argument("--text-file", default=None, help="正文文件（UTF-8）")
     p_say.add_argument("--session-id", default=None,
@@ -988,11 +995,11 @@ def build_parser():
 
     g_say = grp.add_parser("say", parents=[common],
                            help="在群里发言（Agent 必须 @；规则 6 由服务端硬门禁）")
-    g_say.add_argument("--group", required=True, help="群 id（session_id，如 meet_20260921_ab12cd）")
+    g_say.add_argument("--group", required=True, help="群 id（session_id，如 <SESSION_ID>）")
     g_say.add_argument("text", nargs="?", default=None, help="正文（长文建议 --text-file）")
     g_say.add_argument("--text-file", default=None, help="正文文件（UTF-8）")
     g_say.add_argument("--to", default="@all",
-                       help="@all（默认，全员）或成员 id 逗号分隔，如 hermes,<human-id>")
+                       help="@all（默认，全员）或成员 id 逗号分隔，如 <MEMBER_ID>,<USER_ID>")
     g_say.add_argument("--reply-to", default=None, help="引用某条的 message_id（登记这是回应）")
     g_say.add_argument("--client-msg-id", default=None, help="幂等键，防重复提交")
     g_say.add_argument("--chat-base", default=DEFAULT_CHAT_BASE, help="对话台地址")

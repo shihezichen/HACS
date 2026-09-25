@@ -6,7 +6,7 @@
     群里每条 Agent 回复末尾都带一行「📚 上下文：约 118k/120k (98%)」——
     这行是 **Agent 自己手打** 的：分子是它凭印象估的、分母（120k）是它记错的。
     本机 deepseek-v4-flash 真实窗口是 **200k**（sessions.json 的 contextTokens），
-    于是真实水位 57% 被报成 98%，刚哥以为「到 98% 还不压缩」。
+    于是真实水位 57% 被报成 98%，<USER_ID> 以为「到 98% 还不压缩」。
     另外这行是可变内容，混进 prompt 前缀会伤 DeepSeek 的 prompt-cache 命中。
 
 怎么做（口径）：
@@ -20,7 +20,7 @@
     保证「显示的值」和「触发压缩的值」永远一致。
 
 用法：
-    wm = ctx_watermark.read_watermark(caller="openclaw-nb", session_id="meet:meet_xxx",
+    wm = ctx_watermark.read_watermark(caller="<MEMBER_ID>", session_id="meet:meet_xxx",
                                       agent_cfg={"backend": "...", "model": "..."})
     # -> {"used": 114082, "window": 200000, "pct": 57, "text": "上下文：约 114k/200k (57%)"}  或 None
     None 表示读不到（不渲染，页面/消息就不挂这行），绝不编造。
@@ -44,7 +44,7 @@ HERMES_STATE_DB = (os.environ.get("A2A_HERMES_STATE_DB")
                    or os.environ.get("CTX_HERMES_STATE_DB") or "")
 
 # ---- 远端 a2a 服务（本机不是 agent 所在节点时用）：/ctx-usage/<agent> ----
-# 例：chat_svc 在龙虾，而 openclaw-nb 的会话在另一台节点（<tailnet-ip>:9920）。
+# 例：chat_svc 在 <HOST_CLOUD>，而 <MEMBER_ID> 的会话在 <HOST_LAPTOP>（<NODE_IP>:9920）。
 A2A_BASE = os.environ.get("CTX_A2A_BASE") or os.environ.get("A2A_BASE") or ""
 A2A_TOKEN = (os.environ.get("CTX_A2A_TOKEN") or os.environ.get("A2A_TOKEN") or "")
 A2A_TOKEN_FILE = (os.environ.get("CTX_A2A_TOKEN_FILE")
@@ -56,8 +56,11 @@ if not A2A_TOKEN and A2A_TOKEN_FILE and os.path.isfile(A2A_TOKEN_FILE):
     except Exception:  # noqa: BLE001
         A2A_TOKEN = ""
 
-# ---- 共享本地 token（部署目录下若有 client-token 可直接用）----
-for _cand in ((os.environ.get("CTX_TOKEN_FILE") or "client-token"),):
+# ---- 共享本地 token（<HOST> 上有 <TOKEN_FILE> 可直接用）----
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+for _cand in (os.environ.get("AGENT_TEAM_TOKEN_FILE")
+              or AGENT_TEAM_ETC_DIR + "/client-token",):
     if not A2A_TOKEN and os.path.isfile(_cand):
         try:
             with open(_cand, "r", encoding="utf-8") as _fh:
@@ -216,7 +219,7 @@ def read_watermark(caller: str, session_id: str,
     """读真源水位 → dict；读不到返回 None（不渲染，绝不编造数字）。
 
     两级：① 本机直读（若本机就是该 agent 所在节点）；② 远端 a2a 服务
-    （/ctx-usage/<agent>，本机读不到时用，例子：chat_svc 在龙虾、会话在 thinkbook）。
+    （/ctx-usage/<agent>，本机读不到时用，例子：chat_svc 在 <HOST_CLOUD>、会话在 <HOST_LAPTOP>）。
     """
     if not caller or not session_id:
         return None

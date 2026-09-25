@@ -8,7 +8,7 @@ Human-Agent Communication System — 人机群聊前端 + 多 Agent 通信后端
 - 分支：`main`。
 - 目标形态：一台新机器拿到本仓 + 一份 `.env`，照着 `docs/` 与 `deploy/` 就能把整套跑起来。
 
-## 目录（目录清单已由刚哥核过）
+## 目录
 
 | 目录 | 放什么 |
 |---|---|

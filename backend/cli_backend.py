@@ -11,12 +11,12 @@ cli_backend.py —— 本机「CLI 成员后端」（给 a2a_svc.py 当 backend 
 本服务把这套 OpenAI 形状的 HTTP 调用，翻译成本机三个**只有命令行接口**的 Agent：
 
   * piagent   —— @earendil-works/pi-coding-agent，用 node 直接跑包入口 cli.js，
-                 `--print -- <任务>`，工作目录 <home>\\pi-workspace。
+                 `--print -- <任务>`，工作目录 <WORKDIR>。
                  绕开 pi.cmd/pi.ps1 垫片 → 不踩 shell 转义坑（参考 pi-feishu-bridge/src/pi.js）。
   * claudecode —— **必须**走已有封装 claude_exec.py（它负责 HTTPS_PROXY=127.0.0.1:4780
                  + 清掉继承来的 ANTHROPIC_*；直连 api.anthropic.com 必 403）。
                  任务文本用 --file 传临时文件，避免超长命令行与引号转义。
-  * codex     —— Codex CLI 0.155 的 `codex exec -- <任务>`，工作目录 <work-dir>。
+  * codex     —— Codex CLI 0.155 的 `codex exec -- <任务>`，工作目录 <WORKDIR>。
                  它原本被配成 http://127.0.0.1:18789/v1 + model=openclaw/codex，但该网关只有
                  openclaw/default，实测 `Unknown agent 'codex'.`（HTTP 400）→ codex 根本没有
                  HTTP 接口，只能和上面两位一样本地 spawn CLI。
@@ -45,7 +45,7 @@ cli_backend.py —— 本机「CLI 成员后端」（给 a2a_svc.py 当 backend 
 
 用法：
     python cli_backend.py                          # 127.0.0.1:9970
-    python cli_backend.py --host 127.0.0.1 --port 9970 --key-file <home>\\agent-team\\cli-backend-key
+    python cli_backend.py --host 127.0.0.1 --port 9970 --key-file <PASS_FILE>
     python cli_backend.py --stub                   # 自测用：三个成员都换成内置回声桩
 """
 
@@ -73,22 +73,33 @@ DETAIL_MAX = 300           # 错误 detail 截断长度
 MAX_BODY_BYTES = 262144    # 请求体上限 256 KiB
 TASK_LOG_MAX = 40          # 日志里只记任务前 40 字，不记全文
 
-DEFAULT_KEY_FILE = r"<home>\agent-team\cli-backend-key"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or r"<home>\agent-team"
+
+DEFAULT_KEY_FILE = os.environ.get("AGENT_TEAM_PASS_FILE") or AGENT_TEAM_RUNTIME_DIR + r"\cli-backend-key"
 DEFAULT_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "logs", "cli_backend.log")
 
-PI_NODE = r"<home>\node22\node-v22.23.2-win-x64\node.exe"
-PI_CLI_JS = (r"<home>\node22\node-v22.23.2-win-x64\node_modules"
-             r"\@earendil-works\pi-coding-agent\dist\bundle\cli.js")
-PI_WORKDIR = r"<home>\pi-workspace"
-CLAUDE_EXEC = r"<home>\AppData\Local\hermes\scripts\claude_exec.py"
-CLAUDE_WORKDIR = r"<home>\claude-workspace"
+# PHASE2_TODO: 待节点注入 env 后删除（本机 node22 运行时路径）
+PI_NODE = os.environ.get("AGENT_TEAM_NODE_EXE") or r"<home>\node22\node-v22.23.2-win-x64\node.exe"
+# PHASE2_TODO: 待节点注入 env 后删除
+PI_CLI_JS = os.environ.get("AGENT_TEAM_PI_CLI_JS") or (
+    r"<home>\node22\node-v22.23.2-win-x64\node_modules"
+    r"\@earendil-works\pi-coding-agent\dist\bundle\cli.js")
+# PHASE2_TODO: 待节点注入 env 后删除
+PI_WORKDIR = os.environ.get("AGENT_TEAM_PI_WORKDIR") or r"<home>\pi-workspace"
+# PHASE2_TODO: 待节点注入 env 后删除
+CLAUDE_EXEC = os.environ.get("AGENT_TEAM_CLAUDE_EXEC") or r"<home>\AppData\Local\hermes\scripts\claude_exec.py"
+# PHASE2_TODO: 待节点注入 env 后删除
+CLAUDE_WORKDIR = os.environ.get("AGENT_TEAM_CLAUDE_WORKDIR") or r"<home>\claude-workspace"
 
 # codex：原生 exe 优先（不需要 shell），退回 PATH 上的 codex.cmd（配套 codex_launch.py 垫片，
 # 它 os.execv 到同一个原生 exe）。CODEX_CLI 环境变量可整体顶掉这两个。
-CODEX_EXE = r"<home>\.codex\packages\standalone\current\bin\codex.exe"
-CODEX_CMD = r"<home>\.local\bin\codex.cmd"
-CODEX_WORKDIR = os.environ.get("CODEX_WORKDIR") or r"<work-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+CODEX_EXE = os.environ.get("AGENT_TEAM_CODEX_EXE") or r"<home>\.codex\packages\standalone\current\bin\codex.exe"
+# PHASE2_TODO: 待节点注入 env 后删除
+CODEX_CMD = os.environ.get("AGENT_TEAM_CODEX_CMD") or r"<home>\.local\bin\codex.cmd"
+CODEX_WORKDIR = os.environ.get("AGENT_TEAM_CODEX_WORKDIR") or os.environ.get("CODEX_WORKDIR") or r"<work-dir>"
 
 # codex 拒绝在「非 git 仓库 / 未受信任目录」里跑时的报错特征 → 自动加 --skip-git-repo-check 重试
 CODEX_UNTRUSTED_RE = re.compile(

@@ -2,12 +2,20 @@
 # hacs-test-fixtures: 本文件为测试夹具，允许出现假凭据与网段边界值；危险类命中（真令牌/连接串/真实人名）仍按硬门禁拦截
 """P3 黑板跨机 e2e：从笔记本打龙虾 9940。判定从严，失败即失败。"""
 import json
+import os
 import pathlib
 import urllib.error
 import urllib.request
 
-BASE = "http://<host>:9940"
-TOK = pathlib.Path(r"<home>\agent-team\client-token").read_text(encoding="utf-8").strip()
+# ---------------------------------------------------------------------------
+# 测试夹具真值（硬编码清零 Phase 1.5）
+# PHASE2_TODO: 待节点注入 env 后删除
+# 默认值逐字等于改动前的真值；未注入 env 时测试行为与改动前完全等价。
+FIX_NODE_CLOUD_IP = os.environ.get("AGENT_TEAM_TEST_NODE_CLOUD_IP") or "<host>"
+FIX_MEMBER_CLOUD = os.environ.get("AGENT_TEAM_TEST_MEMBER_CLOUD") or "lobster"
+
+BASE = "http://" + FIX_NODE_CLOUD_IP + ":9940"
+TOK = pathlib.Path(os.environ.get("AGENT_TEAM_TOKEN_FILE") or r"<home>\agent-team\client-token").read_text(encoding="utf-8").strip()
 RESULTS = []
 
 
@@ -49,8 +57,8 @@ code_rb, rb = call("/entries?topic=e2e&limit=50")
 back = {e.get("entry_id"): e.get("author") for e in (rb.get("entries") or [])}
 check("作者取自 token（=hermes，非请求体）", back.get(eid) == "hermes", "读回 author=%r" % back.get(eid))
 
-# 3) 冒名：body 里塞 author=lobster，仍应以 hermes 落库
-code, r2 = call("/entries", "POST", {"topic": "e2e", "kind": "note", "content": "冒名尝试：声明自己是 lobster", "author": "lobster"})
+# 3) 冒名：body 里塞 author=<MEMBER_ID>，仍应以 hermes 落库
+code, r2 = call("/entries", "POST", {"topic": "e2e", "kind": "note", "content": "冒名尝试：声明自己是 " + FIX_MEMBER_CLOUD, "author": FIX_MEMBER_CLOUD})
 eid2 = r2.get("entry_id")
 code_rb2, rb2 = call("/entries?topic=e2e&limit=50")
 back2 = {e.get("entry_id"): e.get("author") for e in (rb2.get("entries") or [])}

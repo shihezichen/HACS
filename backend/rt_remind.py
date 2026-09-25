@@ -27,12 +27,12 @@ kind='defect' 的**缺席缺陷单**）里「还欠着且已经过期」的条�
 
 用法：
     # 演练：连库读逾期清单，打印汇总与点名文本，一个字节都不落库、一条消息都不发
-    python rt_remind.py --dry-run --dsn-file <deploy-dir>/pg.env
+    python rt_remind.py --dry-run --dsn-file <ETC_DIR>/pg.env
 
     # 正式跑（每天一次，交给 systemd timer / cron）
-    python rt_remind.py --commit --dsn-file <deploy-dir>/pg.env \\
-        --nats-host <host> --nats-user lobster \\
-        --nats-password-file /root/.nats-lobster.pass
+    python rt_remind.py --commit --dsn-file <ETC_DIR>/pg.env \\
+        --nats-host <NODE_IP> --nats-user <MEMBER_ID> \\
+        --nats-password-file <PASS_FILE>
 
     # 离线自测：从 JSON 读清单，**不连任何数据库、不联网**
     python rt_remind.py --dry-run --fixture tests/fixtures/overdue.json
@@ -56,7 +56,9 @@ UTC = datetime.timezone.utc
 ACTION_OPEN_STATUSES = ("open", "doing")        # 落实事项"还欠着"的状态
 ISSUE_OPEN_STATUSES = ("open", "watching")      # 遗留问题"还在跟踪"的状态
 
-DEFAULT_DSN_FILE = "<deploy-dir>/pg.env"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+DEFAULT_DSN_FILE = os.environ.get("AGENT_TEAM_PG_ENV_FILE") or (AGENT_TEAM_ETC_DIR + "/pg.env")
 DEFAULT_LIMIT = 200          # 单张表一次最多捞这么多条（逾期真到这个量级，问题不在提醒上）
 DEFAULT_TIMEOUT_S = 60.0
 MAX_TIMEOUT_S = 300.0
@@ -546,7 +548,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S,
                         help="单次点名等回包上限秒，默认 %d（最大 %d）"
                              % (DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S))
-    parser.add_argument("--nats-host", default="<host>", help="NATS 中枢地址")
+    parser.add_argument("--nats-host", default=os.environ.get("AGENT_TEAM_NATS_HOST") or "<host>", help="NATS 中枢地址")
     parser.add_argument("--nats-port", type=int, default=9930, help="NATS 端口，默认 9930")
     parser.add_argument("--nats-user", default=None, help="自己的 NATS 用户名")
     parser.add_argument("--nats-password-file", default=None, help="自己的 NATS 口令文件")
@@ -558,17 +560,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     out = lambda line: sys.stdout.write(line + "\n")  # noqa: E731
 
     commit = bool(args.commit) and not args.dry_run
-    # ── 停用开关（2026-09-20 刚哥指令）──────────────────────────────────────
-    # 刚哥：「旧的会议有个遗留提醒功能, 一直在发消息提醒各agent,你去把它停了」
+    # ── 停用开关（2026-09-20 <USER_ID>指令）──────────────────────────────────────
+    # <USER_ID>：「旧的会议有个遗留提醒功能, 一直在发消息提醒各agent,你去把它停了」
     # 本脚本 = 旧会议的「遗留问题 / 逾期提醒」，会按责任人逐个点名，往
     # a2a.v1.req.<owner> 发提醒消息给各成员。**发送路径现已被拒**：
     # 任何带 --commit（真发 + 写 reminder_log）的调用都直接返回，不发任何消息；
     # 只读演练（--dry-run / 不加 --commit）仍然可用，便于保留验证能力。
-    # 确需恢复：先经刚哥同意，再以 RT_REMIND_ENABLE=1 运行。
+    # 确需恢复：先经<USER_ID>同意，再以 RT_REMIND_ENABLE=1 运行。
     if commit and os.environ.get("RT_REMIND_ENABLE") != "1":
-        out("[已停用] rt_remind.py —— 按 2026-09-20 刚哥指令，旧会议的遗留/逾期提醒"
+        out("[已停用] rt_remind.py —— 按 2026-09-20 <USER_ID> 指令，旧会议的遗留/逾期提醒"
             "功能已停止：不再向任何成员点名发消息，--commit 路径被拒（不连库、不发消息）。"
-            "只读演练仍可用；确需恢复请先经刚哥同意，再以 RT_REMIND_ENABLE=1 运行。")
+            "只读演练仍可用；确需恢复请先经 <USER_ID> 同意，再以 RT_REMIND_ENABLE=1 运行。")
         return 0
     if args.fixture and commit:
         sys.stderr.write("--fixture 是离线自测用的假数据，不许配 --commit\n")

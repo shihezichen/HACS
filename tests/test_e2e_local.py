@@ -20,7 +20,17 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-SECRETS = r"<home>\AppData\Local\hermes\secrets\agent-team"
+
+# ---------------------------------------------------------------------------
+# 测试夹具真值（硬编码清零 Phase 1.5）
+# PHASE2_TODO: 待节点注入 env 后删除
+# 默认值逐字等于改动前的真值；未注入 env 时测试行为与改动前完全等价。
+FIX_MEMBER_CLOUD = os.environ.get("AGENT_TEAM_TEST_MEMBER_CLOUD") or "lobster"
+FIX_MEMBER_TOP001 = os.environ.get("AGENT_TEAM_TEST_MEMBER_TOP001") or "top001"
+FIX_NODE_LAPTOP = os.environ.get("AGENT_TEAM_TEST_NODE_LAPTOP") or "thinkbook"
+SECRETS = os.environ.get("AGENT_TEAM_TEST_SECRETS_DIR") or os.path.join(
+    os.environ.get("USERPROFILE") or r"C:\Users\<USER_ID>",
+    "AppData", "Local", "hermes", "secrets", "agent-team")
 PY = sys.executable
 SVC_PORT = 19920
 STUB_PORT = 19941
@@ -64,14 +74,14 @@ def http(method, url, token=None, body=None, timeout=30):
 def main():
     tokens = json.load(open(os.path.join(SECRETS, "tokens.json"), encoding="utf-8"))
     tmp = tempfile.mkdtemp(prefix="a2a-e2e-")
-    cfg = {"node_id": "thinkbook", "host": "127.0.0.1", "port": SVC_PORT,
+    cfg = {"node_id": FIX_NODE_LAPTOP, "host": "127.0.0.1", "port": SVC_PORT,
            "agents": {"hermes": {"backend": "http://127.0.0.1:%d/v1" % STUB_PORT,
                                  "model": "stub", "description": "本地联调用",
                                  "skills": ["echo"]}}}
     cfg_path = os.path.join(tmp, "agents.json")
     json.dump(cfg, open(cfg_path, "w", encoding="utf-8"), ensure_ascii=False)
     tok_path = os.path.join(tmp, "client-token")
-    open(tok_path, "w", encoding="utf-8").write(tokens["lobster"])
+    open(tok_path, "w", encoding="utf-8").write(tokens[FIX_MEMBER_CLOUD])
 
     procs = []
     try:
@@ -114,34 +124,35 @@ def main():
         check("错 token → 401", c == 401, t[:80])
 
         # 5 正确 token + stub backend → 200 且 reply 一致
-        c, t = http("POST", base + "/a2a/hermes/messages", token=tokens["lobster"],
+        c, t = http("POST", base + "/a2a/hermes/messages", token=tokens[FIX_MEMBER_CLOUD],
                     body={"text": "ping", "session_id": "s-1"})
         d = json.loads(t)
         check("正确 token → 200 且 reply 来自 backend",
               c == 200 and d.get("reply") == "stub-reply-OK", t[:140])
 
-        # 6 身份回填：token 属于 lobster，peer 必须是 lobster（不是请求体里的 from）
-        c, t = http("POST", base + "/a2a/hermes/messages", token=tokens["lobster"],
+        # 6 身份回填：token 属于 <MEMBER_ID>，peer 必须是 <MEMBER_ID>（不是请求体里的 from）
+        c, t = http("POST", base + "/a2a/hermes/messages", token=tokens[FIX_MEMBER_CLOUD],
                     body={"text": "ping", "from": "顶替者"})
         d = json.loads(t)
-        check("身份由 token 反查（peer=lobster，不信 body.from）",
-              d.get("peer") == "lobster", "peer=%r" % d.get("peer"))
+        check("身份由 token 反查（peer=%s，不信 body.from）" % FIX_MEMBER_CLOUD,
+              d.get("peer") == FIX_MEMBER_CLOUD, "peer=%r" % d.get("peer"))
 
         # 7 另一个 token → 身份随 token 变
-        c, t = http("POST", base + "/a2a/hermes/messages", token=tokens["top001"], body={"text": "ping"})
-        check("换 token 身份随之变化（peer=top001）", json.loads(t).get("peer") == "top001")
+        c, t = http("POST", base + "/a2a/hermes/messages", token=tokens[FIX_MEMBER_TOP001], body={"text": "ping"})
+        check("换 token 身份随之变化（peer=%s）" % FIX_MEMBER_TOP001,
+              json.loads(t).get("peer") == FIX_MEMBER_TOP001)
 
         # 8 未知 agent → 404
-        c, t = http("POST", base + "/a2a/nobody/messages", token=tokens["lobster"], body={"text": "ping"})
+        c, t = http("POST", base + "/a2a/nobody/messages", token=tokens[FIX_MEMBER_CLOUD], body={"text": "ping"})
         check("未知 agent → 404", c == 404, t[:80])
 
         # 9 空 text → 400
-        c, t = http("POST", base + "/a2a/hermes/messages", token=tokens["lobster"], body={"text": "  "})
+        c, t = http("POST", base + "/a2a/hermes/messages", token=tokens[FIX_MEMBER_CLOUD], body={"text": "  "})
         check("空 text → 400", c == 400, t[:80])
 
         # 10 /agents 需 token
         c1, _ = http("GET", base + "/agents")
-        c2, t2 = http("GET", base + "/agents", token=tokens["lobster"])
+        c2, t2 = http("GET", base + "/agents", token=tokens[FIX_MEMBER_CLOUD])
         check("/agents 无 token 401 / 有 token 200", c1 == 401 and c2 == 200, t2[:100])
 
         # 11 CLI 端到端：a2a_call.py 派活拿到纯文本 reply
@@ -168,7 +179,7 @@ def main():
             out = svc.communicate(timeout=10)[0].decode("utf-8", "replace")
         except Exception:
             out = ""
-        check("服务日志记录了 from=<成员>", "from=lobster" in out, out.strip().splitlines()[-1][:110] if out.strip() else "无日志")
+        check("服务日志记录了 from=<成员>", ("from=" + FIX_MEMBER_CLOUD) in out, out.strip().splitlines()[-1][:110] if out.strip() else "无日志")
 
     finally:
         for p in procs:

@@ -27,17 +27,17 @@ view_auth.py —— 只读看板（blackboard_view）的账号 / 会话 / 审计
 
 用法（服务器上）：
     # 会话签名密钥，只生成一次，权限 600
-    python3 view_auth.py init-key --key-file <deploy-dir>/view-session.key
+    python3 view_auth.py init-key --key-file <PASS_FILE>
 
     # 建账号：口令走 stdin，不进 shell 历史
-    printf '%s' "$PASS" | python3 view_auth.py adduser --user gangge --role owner \\
-        --password-stdin --dsn-file <deploy-dir>/pg.env
+    printf '%s' "$PASS" | python3 view_auth.py adduser --user <USER_ID> --role owner \\
+        --password-stdin --dsn-file <DSN_FILE>
 
-    python3 view_auth.py list --dsn-file <deploy-dir>/pg.env
-    python3 view_auth.py sessions --revoke-all --user guest1 --dsn-file <deploy-dir>/pg.env
-    python3 view_auth.py audit --limit 20 --dsn-file <deploy-dir>/pg.env
+    python3 view_auth.py list --dsn-file <DSN_FILE>
+    python3 view_auth.py sessions --revoke-all --user guest1 --dsn-file <DSN_FILE>
+    python3 view_auth.py audit --limit 20 --dsn-file <DSN_FILE>
 
---dsn-file 指向的是 **systemd 环境文件**（<deploy-dir>/pg.env），取值等价于
+--dsn-file 指向的是 **systemd 环境文件**（<DSN_FILE>），取值等价于
 `sed -n 's/^BB_PG_DSN=//p' <file> | head -1`。**绝不能 bash source 它** —— 值里带
 空格，shell 会把 DSN 截断成错值。
 """
@@ -63,8 +63,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 VERSION = "1.0"
 
-DEFAULT_DSN_FILE = "<deploy-dir>/pg.env"
-DEFAULT_KEY_FILE = "<deploy-dir>/view-session.key"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+DEFAULT_DSN_FILE = os.environ.get("AGENT_TEAM_PG_ENV_FILE") or AGENT_TEAM_ETC_DIR + "/pg.env"
+DEFAULT_KEY_FILE = os.environ.get("AGENT_TEAM_SESSION_KEY_FILE") or AGENT_TEAM_ETC_DIR + "/view-session.key"
 KEY_ENV = "BB_VIEW_SESSION_KEY"          # 备选：直接给 base64 的密钥（systemd 环境变量）
 
 # --- 角色与密级 -----------------------------------------------------

@@ -6,13 +6,20 @@
 对应条目必须排第一；同时核对 mode=semantic、score 合法、向量覆盖率 100%。
 """
 import json
+import os
 import pathlib
 import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE = "http://<host>:9940"
-TOK = pathlib.Path(r"<home>\agent-team\client-token").read_text(encoding="utf-8").strip()
+# ---------------------------------------------------------------------------
+# 测试夹具真值（硬编码清零 Phase 1.5）
+# PHASE2_TODO: 待节点注入 env 后删除
+# 默认值逐字等于改动前的真值；未注入 env 时测试行为与改动前完全等价。
+FIX_NODE_CLOUD_IP = os.environ.get("AGENT_TEAM_TEST_NODE_CLOUD_IP") or "<host>"
+
+BASE = "http://" + FIX_NODE_CLOUD_IP + ":9940"
+TOK = pathlib.Path(os.environ.get("AGENT_TEAM_TOKEN_FILE") or r"<home>\agent-team\client-token").read_text(encoding="utf-8").strip()
 results = []
 
 

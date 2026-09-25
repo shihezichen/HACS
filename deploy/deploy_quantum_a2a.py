@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""deploy_quantum_a2a.py —— 让量子可被点名（补上它缺的那半边：A2A 端点 + 入站订阅）
+"""deploy_quantum_a2a.py —— 让<MEMBER_ID>可被点名（补上它缺的那半边：A2A 端点 + 入站订阅）
 
-背景（2026-09-19 实测）：量子的 teamd 单元写死 `--no-inbound --no-admin`，机上也**没有**
-a2a 端点（9920 无监听），所以群发点名它会 100s 超时。刚哥拍板：给它装上；owner 不执行就
+背景（2026-09-19 实测）：<MEMBER_ID>的 teamd 单元写死 `--no-inbound --no-admin`，机上也**没有**
+a2a 端点（9920 无监听），所以群发点名它会 100s 超时。<USER_ID>拍板：给它装上；owner 不执行就
 由 Hermes 登入执行（本脚本即此举）。
 
 装什么：
-  1. <deploy-dir>/a2a_svc.py            纯标准库 A2A 端点，绑 <node-ip>:9920（只 tailnet）
-  2. <deploy-dir>/agents.json           quantum 的本机 agent 定义（backend 指本机 openclaw 网关）
-  3. <deploy-dir>/peers.json            token 的 sha256 反查表（决定谁调得动它）
-  4. <deploy-dir>/client-token          quantum 自己的明文 token，0600，只落盘不进日志
+  1. <RUNTIME_DIR>/a2a_svc.py              纯标准库 A2A 端点，绑 <NODE_IP>:9920（只 tailnet）
+  2. <ETC_DIR>/agents.json                 quantum 的本机 agent 定义（backend 指本机 openclaw 网关）
+  3. <ETC_DIR>/peers.json                  token 的 sha256 反查表（决定谁调得动它）
+  4. <ETC_DIR>/client-token                quantum 自己的明文 token，0600，只落盘不进日志
   5. agent-team-a2a.service                常驻
   6. agent-team-teamd.service              **改**：去掉 --no-inbound --no-admin，
                                             加 --a2a-base/--token-file/--admin-port
@@ -25,32 +25,46 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SECRETS = r"<home>\AppData\Local\hermes\secrets\agent-team"
+# PHASE2_TODO: 待节点注入 env 后删除
+SECRETS = os.environ.get("AGENT_TEAM_SECRETS") or r"<home>\AppData\Local\hermes\secrets\agent-team"
 NODE = "quantum"
-IP = "<node-ip>"
-NATS_HOST = "<host>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_NODES = dict(kv.split("=", 1) for kv in (os.environ.get("AGENT_TEAM_NODES")
+                        or "quantum=<node-ip>,lobster=<host>").split(","))
+IP = AGENT_TEAM_NODES[NODE]
+# PHASE2_TODO: 待节点注入 env 后删除
+NATS_HOST = os.environ.get("AGENT_TEAM_NATS_HOST") or AGENT_TEAM_NODES["lobster"]
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_LOG_DIR = os.environ.get("AGENT_TEAM_LOG_DIR") or "/var/log/agent-team"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_NATS_DIR = os.environ.get("AGENT_TEAM_NATS_DIR") or "/etc/nats"
 
 A2A_UNIT = """[Unit]
-Description=Agent Team A2A service endpoint (quantum, port 9920, tailnet only)
+Description=Agent Team A2A service endpoint (%(node)s, port 9920, tailnet only)
 After=network-online.target tailscaled.service
 Wants=network-online.target tailscaled.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 <deploy-dir>/a2a_svc.py --host %(ip)s --port 9920 \\
-  --config <deploy-dir>/agents.json --peers <deploy-dir>/peers.json
+ExecStart=/usr/bin/python3 %(run)s/a2a_svc.py --host %(ip)s --port 9920 \\
+  --config %(etc)s/agents.json --peers %(etc)s/peers.json
 Restart=always
 RestartSec=3
 User=root
-StandardOutput=append:/var/log/agent-team/a2a-svc.log
-StandardError=append:/var/log/agent-team/a2a-svc.log
+StandardOutput=append:%(log)s/a2a-svc.log
+StandardError=append:%(log)s/a2a-svc.log
 
 [Install]
 WantedBy=multi-user.target
-""" % {"ip": IP}
+""" % {"ip": IP, "node": NODE, "run": AGENT_TEAM_RUNTIME_DIR,
+       "etc": AGENT_TEAM_ETC_DIR, "log": AGENT_TEAM_LOG_DIR}
 
 TEAMD_UNIT = """[Unit]
-Description=agent-team teamd (quantum) - NATS 客户端/心跳/点名应答
+Description=agent-team teamd (%(node)s) - NATS 客户端/心跳/点名应答
 After=network-online.target tailscaled.service
 Wants=network-online.target
 
@@ -59,10 +73,10 @@ Type=simple
 User=root
 # 2026-09-19：去掉 --no-inbound --no-admin，让量子**可被点名**（原来纯出站，群发点名它必超时）。
 # 入站请求由本机 a2a_svc(9920) 兜住 → 转本机 openclaw 网关。
-ExecStart=/usr/bin/python3 <deploy-dir>/teamd.py --member quantum \\
-  --nats-host %(nats)s --nats-port 9930 --user quantum \\
-  --password-file /etc/nats/quantum.pass \\
-  --a2a-base http://%(ip)s:9920 --token-file <deploy-dir>/client-token \\
+ExecStart=/usr/bin/python3 %(run)s/teamd.py --member %(node)s \\
+  --nats-host %(nats)s --nats-port 9930 --user %(node)s \\
+  --password-file %(natsdir)s/%(node)s.pass \\
+  --a2a-base http://%(ip)s:9920 --token-file %(etc)s/client-token \\
   --admin-port 9960
 Restart=always
 RestartSec=5
@@ -71,7 +85,8 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-""" % {"nats": NATS_HOST, "ip": IP}
+""" % {"nats": NATS_HOST, "ip": IP, "node": NODE, "run": AGENT_TEAM_RUNTIME_DIR,
+       "etc": AGENT_TEAM_ETC_DIR, "natsdir": AGENT_TEAM_NATS_DIR}
 
 
 def run(script, stdin_bytes=None, timeout=180):
@@ -103,20 +118,20 @@ def main():
     peers = open(os.path.join(SECRETS, "peers.json"), "rb").read().replace(b"\r\n", b"\n")
 
     print("### 1/6 目录与权限")
-    rc, out, err = run("mkdir -p <deploy-dir> <deploy-dir> /var/log/agent-team && "
-                       "chmod 700 <deploy-dir> && echo READY")
+    rc, out, err = run(f"mkdir -p {AGENT_TEAM_ETC_DIR} {AGENT_TEAM_RUNTIME_DIR} {AGENT_TEAM_LOG_DIR} && "
+                       f"chmod 700 {AGENT_TEAM_ETC_DIR} && echo READY")
     print("  " + clean(out).strip()[:120])
 
     print("### 2/6 推 a2a_svc.py / agents.json / peers.json")
-    rc, out = push(os.path.join(HERE, "a2a_svc.py"), "<deploy-dir>/a2a_svc.py", "0755")
+    rc, out = push(os.path.join(HERE, "a2a_svc.py"), AGENT_TEAM_RUNTIME_DIR + "/a2a_svc.py", "0755")
     print("  a2a_svc.py -> %s 字节" % out)
-    rc, out = push(None, "<deploy-dir>/agents.json", "0600", agents)
+    rc, out = push(None, AGENT_TEAM_ETC_DIR + "/agents.json", "0600", agents)
     print("  agents.json -> %s 字节" % out)
-    rc, out = push(None, "<deploy-dir>/peers.json", "0600", peers)
+    rc, out = push(None, AGENT_TEAM_ETC_DIR + "/peers.json", "0600", peers)
     print("  peers.json -> %s 字节" % out)
 
-    print("### 3/6 落 quantum 自己的 token（stdin，0600）")
-    rc, out = push(None, "<deploy-dir>/client-token", "0600", (qtoken + "\n").encode("utf-8"))
+    print("### 3/6 落 %s 自己的 token（stdin，0600）" % NODE)
+    rc, out = push(None, AGENT_TEAM_ETC_DIR + "/client-token", "0600", (qtoken + "\n").encode("utf-8"))
     print("  client-token -> %s 字节" % out)
 
     print("### 4/6 装两个 systemd 单元（分两次写，一次一个文件）")
@@ -132,7 +147,7 @@ def main():
     print("### 5/6 起 a2a 端点")
     rc, out, err = run("systemctl enable --now agent-team-a2a 2>&1 | tail -1; sleep 2; "
                        "systemctl is-active agent-team-a2a; "
-                       "python3 -m py_compile <deploy-dir>/a2a_svc.py && echo COMPILE_OK; "
+                       f"python3 -m py_compile {AGENT_TEAM_RUNTIME_DIR}/a2a_svc.py && echo COMPILE_OK; "
                        "ss -lntp | grep 9920 || echo NO_LISTEN")
     print("  " + clean(out).strip()[:300])
 

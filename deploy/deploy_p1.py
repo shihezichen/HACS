@@ -12,23 +12,32 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SECRETS = r"<home>\AppData\Local\hermes\secrets\agent-team"
-NODES = {"lobster": "<host>", "top001": "<node-ip>"}
+# PHASE2_TODO: 待节点注入 env 后删除
+SECRETS = os.environ.get("AGENT_TEAM_SECRETS") or r"<home>\AppData\Local\hermes\secrets\agent-team"
+# PHASE2_TODO: 待节点注入 env 后删除
+NODES = dict(kv.split("=", 1) for kv in (os.environ.get("AGENT_TEAM_NODES")
+             or "lobster=<host>,top001=<node-ip>").split(","))
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_LOG_DIR = os.environ.get("AGENT_TEAM_LOG_DIR") or "/var/log/agent-team"
 SVC = os.path.join(HERE, "a2a_svc.py")
 
-UNIT = """[Unit]
+UNIT = f"""[Unit]
 Description=Agent Team A2A service endpoint (port 9920, tailnet only)
 After=network-online.target tailscaled.service
 Wants=network-online.target tailscaled.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 <deploy-dir>/a2a_svc.py --host {ip} --port 9920 --config <deploy-dir>/agents.json --peers <deploy-dir>/peers.json
+ExecStart=/usr/bin/python3 {AGENT_TEAM_RUNTIME_DIR}/a2a_svc.py --host {{ip}} --port 9920 --config {AGENT_TEAM_ETC_DIR}/agents.json --peers {AGENT_TEAM_ETC_DIR}/peers.json
 Restart=always
 RestartSec=3
 User=root
-StandardOutput=append:/var/log/agent-team/a2a-svc.log
-StandardError=append:/var/log/agent-team/a2a-svc.log
+StandardOutput=append:{AGENT_TEAM_LOG_DIR}/a2a-svc.log
+StandardError=append:{AGENT_TEAM_LOG_DIR}/a2a-svc.log
 
 [Install]
 WantedBy=multi-user.target
@@ -56,22 +65,22 @@ def main():
     for node, ip in NODES.items():
         print("=" * 70)
         print("### 部署 %s (%s)" % (node, ip))
-        rc, out, err = run(node, "mkdir -p <deploy-dir> <deploy-dir> /var/log/agent-team && "
-                                 "chmod 700 <deploy-dir> && echo READY")
+        rc, out, err = run(node, f"mkdir -p {AGENT_TEAM_ETC_DIR} {AGENT_TEAM_RUNTIME_DIR} {AGENT_TEAM_LOG_DIR} && "
+                                 f"chmod 700 {AGENT_TEAM_ETC_DIR} && echo READY")
         print("  目录准备:", out.strip() or err.strip())
 
         # 1) 代码
-        rc, out, _ = push(node, SVC, "<deploy-dir>/a2a_svc.py", "755")
+        rc, out, _ = push(node, SVC, AGENT_TEAM_RUNTIME_DIR + "/a2a_svc.py", "755")
         print("  推 a2a_svc.py:", out.strip() or "FAIL rc=%d" % rc)
 
         # 2) 本机配置 + peers（只含哈希）+ 自己的 token
         cfg = os.path.join(SECRETS, "agents-%s.json" % node)
-        rc, out, _ = push(node, cfg, "<deploy-dir>/agents.json", "644")
+        rc, out, _ = push(node, cfg, AGENT_TEAM_ETC_DIR + "/agents.json", "644")
         print("  推 agents.json:", out.strip() or "FAIL rc=%d" % rc)
-        rc, out, _ = run(node, "cat > <deploy-dir>/peers.json && chmod 600 <deploy-dir>/peers.json && wc -c < <deploy-dir>/peers.json", peers)
+        rc, out, _ = run(node, f"cat > {AGENT_TEAM_ETC_DIR}/peers.json && chmod 600 {AGENT_TEAM_ETC_DIR}/peers.json && wc -c < {AGENT_TEAM_ETC_DIR}/peers.json", peers)
         print("  推 peers.json:", out.strip() or "FAIL rc=%d" % rc)
         tok = tokens[node].encode()
-        rc, out, _ = run(node, "cat > <deploy-dir>/client-token && chmod 600 <deploy-dir>/client-token && wc -c < <deploy-dir>/client-token", tok)
+        rc, out, _ = run(node, f"cat > {AGENT_TEAM_ETC_DIR}/client-token && chmod 600 {AGENT_TEAM_ETC_DIR}/client-token && wc -c < {AGENT_TEAM_ETC_DIR}/client-token", tok)
         print("  推 client-token:", out.strip() or "FAIL rc=%d" % rc)
 
         # 3) systemd 单元

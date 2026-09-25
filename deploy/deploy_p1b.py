@@ -4,24 +4,43 @@
         ② 用各自真实的网关地址/token 重建 agents.json 并下发
         ③ 真实后端跨机端到端验证
 
-刚哥 2026-09-19 已批准（"可以"）。
+<USER_ID> 2026-09-19 已批准（"可以"）。
 """
 import json
+import os
 import pathlib
 import re
 import subprocess
 import sys
 import time
 
-SECRETS = pathlib.Path(r"<home>\AppData\Local\hermes\secrets\agent-team")
-AGENT_DIR = pathlib.Path(r"<repo>\agent-team")
-LOCAL_CFG = pathlib.Path(r"<home>\agent-team")
-PY = r"<home>/AppData/Roaming/uv/python/cpython-3.11-windows-x86_64-none/python.exe"
+# PHASE2_TODO: 待节点注入 env 后删除
+SECRETS = pathlib.Path(os.environ.get("AGENT_TEAM_SECRETS") or r"<home>\AppData\Local\hermes\secrets\agent-team")
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_DIR = pathlib.Path(os.environ.get("AGENT_TEAM_REPO_DIR") or r"<repo>\agent-team")
+# PHASE2_TODO: 待节点注入 env 后删除
+LOCAL_CFG = pathlib.Path(os.environ.get("AGENT_TEAM_LOCAL_DIR") or r"<home>\agent-team")
+# PHASE2_TODO: 待节点注入 env 后删除
+PY = os.environ.get("AGENT_TEAM_PY") or r"<home>/AppData/Roaming/uv/python/cpython-3.11-windows-x86_64-none/python.exe"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_TMP_DIR = os.environ.get("AGENT_TEAM_TMP_DIR") or r"<home>\AppData\Local\Temp"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_OPENCLAW_CFG = os.environ.get("AGENT_TEAM_OPENCLAW_CFG") or r"<home>\.openclaw\openclaw.json"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_BRIDGE_CFG = os.environ.get("AGENT_TEAM_BRIDGE_CFG") or r"<home>\.openclaw\agent-bridge\backends.json"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_PUBLIC_IP = os.environ.get("AGENT_TEAM_PUBLIC_IP") or "<node-ip>"
 
+# PHASE2_TODO: 待节点注入 env 后删除
+AGENT_TEAM_NODES = dict(kv.split("=", 1) for kv in (os.environ.get("AGENT_TEAM_NODES")
+                        or "lobster=<host>,top001=<node-ip>,"
+                           "quantum=<node-ip>,thinkbook=<node-ip>").split(","))
 NODES = {
-    "lobster": {"ssh": "lobster", "ip": "<host>", "agents": ["lobster"]},
-    "top001": {"ssh": "top001", "ip": "<node-ip>", "agents": ["top001"]},
-    "quantum": {"ssh": "quantum", "ip": "<node-ip>", "agents": ["quantum"]},
+    "lobster": {"ssh": "lobster", "ip": AGENT_TEAM_NODES["lobster"], "agents": ["lobster"]},
+    "top001": {"ssh": "top001", "ip": AGENT_TEAM_NODES["top001"], "agents": ["top001"]},
+    "quantum": {"ssh": "quantum", "ip": AGENT_TEAM_NODES["quantum"], "agents": ["quantum"]},
 }
 BACKUP = "/root/backup-openclaw-20260919"
 
@@ -118,7 +137,7 @@ def phase_a():
         if not ok:
             print("   ! 该机端点未通，后续 e2e 会失败，继续跑完再看")
     pathlib.Path("/tmp").mkdir(exist_ok=True)
-    json.dump(info, open(r"<home>\AppData\Local\Temp\node_gw.json", "w"), ensure_ascii=False)
+    json.dump(info, open(os.path.join(AGENT_TEAM_TMP_DIR, "node_gw.json"), "w"), ensure_ascii=False)
     return True
 
 
@@ -152,16 +171,16 @@ def phase_b(info):
         (SECRETS / f"agents-{name}.json").write_text(
             json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
         rc, out, err = run(meta["ssh"],
-                           "cat > <deploy-dir>/agents.json && systemctl restart a2a-svc && sleep 2 && systemctl is-active a2a-svc && echo WROTE")
+                           f"cat > {AGENT_TEAM_ETC_DIR}/agents.json && systemctl restart a2a-svc && sleep 2 && systemctl is-active a2a-svc && echo WROTE")
         print(f"  {name}: agents.json 已下发, a2a-svc = {out.strip() or err.strip()[:200]}")
     # 本机：hermes / openclaw-nb / codex
-    local_gw = json.load(open(r"<home>\.openclaw\openclaw.json", encoding="utf-8"))
+    local_gw = json.load(open(AGENT_TEAM_OPENCLAW_CFG, encoding="utf-8"))
     gw_tok = local_gw["gateway"]["auth"]["token"]
-    bridge = json.load(open(r"<home>\.openclaw\agent-bridge\backends.json", encoding="utf-8"))
+    bridge = json.load(open(AGENT_TEAM_BRIDGE_CFG, encoding="utf-8"))
     hermes_tok = bridge["backends"]["hermes"]["token"]
     think = {
         "node_id": "thinkbook",
-        "host": "<node-ip>",
+        "host": AGENT_TEAM_NODES["thinkbook"],
         "port": 9920,
         "agents": {
             "hermes": {"backend": "http://127.0.0.1:8642/v1", "model": "hermes-agent",
@@ -180,7 +199,7 @@ def phase_b(info):
     rc, out, err = local(["schtasks", "/run", "/tn", "AgentTeamA2ASvc"])
     time.sleep(3)
     rc, out, err = local(["curl", "-s", "-m", "6", "http://127.0.0.1:9920/healthz"])
-    print("  笔记本 agents.json 已更新, healthz =", out.strip() or err.strip()[:200])
+    print("  <HOST_LAPTOP> agents.json 已更新, healthz =", out.strip() or err.strip()[:200])
     return True
 
 
@@ -189,30 +208,30 @@ def phase_c():
     print("C. 真实后端跨机端到端（不是 stub）")
     tok_local = (LOCAL_CFG / "client-token").read_text(encoding="utf-8").strip()
     cases = [
-        ("笔记本→龙虾", ["ssh", "lobster"],
-         "curl -s -m 120 -X POST -H 'Authorization: Bearer $(cat <deploy-dir>/client-token)' "
+        ("<HOST_LAPTOP>→<HOST_CLOUD>", ["ssh", "lobster"],
+         f"curl -s -m 120 -X POST -H 'Authorization: Bearer $(cat {AGENT_TEAM_ETC_DIR}/client-token)' "
          "-H 'Content-Type: application/json' -d '{\"text\":\"自检：用一句话说明你是谁\",\"timeout_s\":110}' "
-         "http://<host>:9920/a2a/lobster/messages"),
-        ("笔记本→Top001", ["ssh", "top001"],
-         "curl -s -m 120 -X POST -H 'Authorization: Bearer $(cat <deploy-dir>/client-token)' "
+         f"http://{AGENT_TEAM_NODES['lobster']}:9920/a2a/lobster/messages"),
+        ("<HOST_LAPTOP>→<HOST_TOP001>", ["ssh", "top001"],
+         f"curl -s -m 120 -X POST -H 'Authorization: Bearer $(cat {AGENT_TEAM_ETC_DIR}/client-token)' "
          "-H 'Content-Type: application/json' -d '{\"text\":\"自检：用一句话说明你是谁\",\"timeout_s\":110}' "
-         "http://<node-ip>:9920/a2a/top001/messages"),
+         f"http://{AGENT_TEAM_PUBLIC_IP}:9920/a2a/top001/messages"),
     ]
     for label, ssh_args, cmd in cases:
         rc, out, err = local(ssh_args + [cmd], timeout=200)
         print(f"  {label}: {out.strip()[:300] or err.strip()[:200]}")
     # 反向：云机 → 笔记本（hermes）
     rc, out, err = local(["ssh", "lobster",
-                          "curl -s -m 120 -X POST -H 'Authorization: Bearer $(cat <deploy-dir>/client-token)' "
+                          f"curl -s -m 120 -X POST -H 'Authorization: Bearer $(cat {AGENT_TEAM_ETC_DIR}/client-token)' "
                           "-H 'Content-Type: application/json' -d '{\"text\":\"自检：用一句话说明你是谁\",\"timeout_s\":110}' "
-                          "http://<node-ip>:9920/a2a/hermes/messages"], timeout=200)
-    print(f"  龙虾→笔记本(hermes): {out.strip()[:300] or err.strip()[:200]}")
+                          f"http://{AGENT_TEAM_NODES['thinkbook']}:9920/a2a/hermes/messages"], timeout=200)
+    print(f"  <HOST_CLOUD>→<HOST_LAPTOP>(<MEMBER_ID>): {out.strip()[:300] or err.strip()[:200]}")
 
 
 if __name__ == "__main__":
     ok = phase_a()
     if ok:
-        info = json.load(open(r"<home>\AppData\Local\Temp\node_gw.json"))
+        info = json.load(open(os.path.join(AGENT_TEAM_TMP_DIR, "node_gw.json")))
         phase_b(info)
         phase_c()
     print("=" * 70)

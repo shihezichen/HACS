@@ -10,7 +10,7 @@
   4) 错误口令必须被拒（负例）
 
 用法：
-    python nats_probe.py --host <host> --port 9930 \\
+    python nats_probe.py --host <NODE_IP> --port 9930 \\
         --user hermes --password-file ~/.nats-pass --whoami hermes
 
 注：客户端本体已抽到 nats_client.py（与 teamd.py 共用），本文件只剩探针逻辑。
