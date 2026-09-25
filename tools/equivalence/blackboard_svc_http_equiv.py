@@ -326,6 +326,84 @@ CASES_DB_UP = [
     ("85 POST /entries 尾斜杠",   "POST", "/entries/",         "ok", b"{bad"),
 ]
 
+# ------------------------------------------------------------------ 刀7b 专项
+#
+# GET 的 13 组判定收进 L1 登记表（19 条路由）后新补的最小例。每条新登记的路由至少
+# 两个方向：**无 token**（按原样落 401 或 404）+ **有 token**（200/空结果集，或该支
+# 特有的 4xx 文案）。三处最容易改错的地方单列：
+#
+#   · **没挂全局鉴权钩子** —— 未知路径无 token 必须落 **404**（不是 401）；
+#     /healthz 有没有 token 都一样（根本不鉴权）。挂了钩子这两支就全变 401。
+#   · **两种 404 文案不许并** —— /sess/<id>/<非 turns> 是鉴权后带 `detail` 的 404，
+#     /sess/a/b/c 是鉴权前的裸 404，/api/shared/a/b/c 是鉴权后的裸 404（带 peer 记日志）。
+#   · **/sess 与 /sessions 不许互吃** —— 前缀路由 "/sess" 若写成裸 startswith，
+#     /sessions 会被它抢走（D5：会议与 Agent 会话是两套东西）。
+CASES_GET_7B = [
+    # ---- 1) /healthz（exact）：不鉴权，带不带 token 一个样 ----
+    ("G01 healthz 有 token",       "GET", "/healthz",            "ok",   None),
+    ("G02 healthz 坏 token",       "GET", "/healthz",            "bad",  None),
+    ("G03 healthz 未知子路径",      "GET", "/healthz/x",          "ok",   None),
+    # ---- 2) /msg（exact）----
+    ("G04 msg 收件箱 缺 token",     "GET", "/msg",                "none", None),
+    ("G05 msg 收件箱 坏 token",     "GET", "/msg",                "bad",  None),
+    # ---- 3) /msg/<id>（prefix）----
+    ("G06 msg 单条 缺 token",       "GET", "/msg/nope",           "none", None),
+    ("G07 msg 单条 #fragment",     "GET", "/msg/nope#x",         "ok",   None),
+    ("G08 msg 过深 缺 token",       "GET", "/msg/a/b",            "none", None),
+    ("G09 msg 过深 有 token",       "GET", "/msg/a/b",            "ok",   None),
+    # ---- 4) /entries（exact）：401 的四种口径已在 09~12，这里补尾斜杠 ----
+    ("G10 entries 尾斜杠 缺 token", "GET", "/entries/",           "none", None),
+    # ---- 5) /search（exact）----
+    ("G11 search 缺 token",        "GET", "/search",             "none", None),
+    ("G12 search 有 q 坏 token",   "GET", "/search?q=hello",     "bad",  None),
+    # ---- 6) /sessions（exact）+ /sessions/<id>（prefix）----
+    ("G13 sessions 缺 token",      "GET", "/sessions",           "none", None),
+    ("G14 sessions 详情 缺 token",  "GET", "/sessions/rt-1",      "none", None),
+    ("G15 sessions 过深 缺 token",  "GET", "/sessions/a/b",       "none", None),
+    ("G16 sessions 过深 有 token",  "GET", "/sessions/a/b",       "ok",   None),
+    # ---- 7/8/9) /actions、/issues、/tracking（exact ×3，共用处理函数）----
+    ("G17 actions 缺 token",       "GET", "/actions",            "none", None),
+    ("G18 issues 缺 token",        "GET", "/issues",             "none", None),
+    ("G19 tracking 缺 token",      "GET", "/tracking",           "none", None),
+    ("G20 tracking 坏 limit",      "GET", "/tracking?limit=abc", "ok",   None),
+    ("G21 actions 坏 limit",       "GET", "/actions?limit=abc",  "ok",   None),
+    ("G22 issues 坏 limit",        "GET", "/issues?limit=abc",   "ok",   None),
+    # ---- 10) /tmp（exact）+ /tmp/<name>（prefix）----
+    ("G23 tmp 清单 缺 token",       "GET", "/tmp",                "none", None),
+    ("G24 tmp 单条 缺 token",       "GET", "/tmp/not-an-id",      "none", None),
+    ("G25 tmp 过深 缺 token",       "GET", "/tmp/a/b",            "none", None),
+    ("G26 tmp 过深 有 token",       "GET", "/tmp/a/b",            "ok",   None),
+    # ---- 11) /sess（exact）+ /sess/<id>[/turns]（prefix）：两种 404 文案的分界 ----
+    ("G27 sess 列表 缺 token",      "GET", "/sess",               "none", None),
+    ("G28 sess 详情 缺 token",      "GET", "/sess/nope",          "none", None),
+    ("G29 sess turns 缺 token",    "GET", "/sess/nope/turns",    "none", None),
+    ("G30 sess turns 尾斜杠",       "GET", "/sess/nope/turns/",   "ok",   None),
+    ("G31 sess 非法子路径 缺token",  "GET", "/sess/nope/zzz",      "none", None),
+    ("G32 sess 非法子路径 有token",  "GET", "/sess/nope/zzz",      "ok",   None),
+    ("G33 sess 过深 缺 token",      "GET", "/sess/a/b/c",         "none", None),
+    ("G34 sess 过深 有 token",      "GET", "/sess/a/b/c",         "ok",   None),
+    # ---- /sess 与 /sessions 不许互吃，近似路径一律裸 404 ----
+    ("G35 近似 /sessionx",         "GET", "/sessionx",           "ok",   None),
+    ("G36 近似 /ses",              "GET", "/ses",                "ok",   None),
+    ("G37 近似 /sessions2/x",      "GET", "/sessions2/x",        "ok",   None),
+    # ---- 12) 共享内容：/api/shared 与 /shared 两条前缀各自成立 ----
+    ("G38 shared(api) 缺 token",   "GET", "/api/shared",         "none", None),
+    ("G39 shared(无前缀) 缺token",  "GET", "/shared",             "none", None),
+    ("G40 shared 无前缀 tasks",     "GET", "/shared/tasks",       "ok",   None),
+    ("G41 shared 无前缀 search",    "GET", "/shared/search",      "ok",   None),
+    ("G42 shared 无前缀 详情",      "GET", "/shared/zz",          "ok",   None),
+    ("G43 shared 无前缀 过深",      "GET", "/shared/a/b/c",       "ok",   None),
+    ("G44 shared 无前缀过深缺token", "GET", "/shared/a/b/c",       "none", None),
+    ("G45 shared api 过深缺 token", "GET", "/api/shared/a/b/c",   "none", None),
+    ("G46 shared 空段+尾斜杠",      "GET", "//api//shared//",     "ok",   None),
+    ("G47 近似 /api/sharedx",      "GET", "/api/sharedx",        "ok",   None),
+    ("G48 近似 /sharedx",          "GET", "/sharedx",            "ok",   None),
+    ("G49 单段 /api",              "GET", "/api",                "ok",   None),
+    # ---- 13) 兜底：不鉴权、不带 peer 的裸 404（挂了全局鉴权钩子这两条就会变 401）----
+    ("G50 未知路径 缺 token",       "GET", "/nope",               "none", None),
+    ("G51 根路径 缺 token",         "GET", "/",                   "none", None),
+]
+
 # DB 不可用（Runtime.db_query = None）时的那几条：/healthz 503 + 业务口 503
 CASES_DB_DOWN = [
     ("D1 healthz DB 不可用",      "GET",  "/healthz",   "none", None),
@@ -426,6 +504,8 @@ def main():
     total = 0
     bad += run("业务口 · 假后端在位", CASES_DB_UP, p_old, p_new)
     total += len(CASES_DB_UP)
+    bad += run("业务口 · GET 路由登记表（刀7b 新增）", CASES_GET_7B, p_old, p_new)
+    total += len(CASES_GET_7B)
     bad += run("本机健康口 AdminHandler", CASES_ADMIN, a_old, a_new)
     total += len(CASES_ADMIN)
     bad += run_keepalive(p_old, p_new)

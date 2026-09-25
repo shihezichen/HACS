@@ -101,7 +101,7 @@ import sys
 import threading
 import time
 import urllib.parse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import embedder  # 同目录模块；导入只读环境变量，不会加载模型
@@ -2744,17 +2744,28 @@ def parse_owner(raw: str) -> Tuple[Optional[str], Optional[str]]:
 #   · 每个响应一行 `<方法> <路径> -> <码> from=<成员> ip=<ip>` 的日志（要带鉴权成员名）；
 #   · `sys_version=""` + HTTP/1.1（保住 `Server: blackboard_svc/<VERSION>` 与 keep-alive）。
 #
-# **非 GET 方法的分派**也一并登记进 L1（下面的登记表）：POST 的七条业务路径 + /entries、
-# DELETE 的 /tmp/<id>；PUT/PATCH 本来就没有可登记的路径（「不是共享路径就 501」）。
-# **do_GET 的 1250 行 if/elif 仍留在本件内**，留给阶段2 刀7b。
+# **路由分派**也全部登记进 L1（下面的登记表）：非 GET 是 POST 的七条业务路径 + /entries、
+# DELETE 的 /tmp/<id>（阶段2 刀7a，7 条）；GET 是 13 组判定 → 13 个处理函数 → 16 条
+# 登记（10 条精确 + 6 条前缀，阶段2 刀7b），
+# PUT/PATCH 本来就没有可登记的路径（「不是共享路径就 501」）。
+#
+# 迁移前 do_GET 是一串**有序的 if/elif**，L1 的分派是「精确表优先 → 前缀表按长度降序」。
+# 两者等价的理由：13 组判定的 `parts[0]` 两两不相交（healthz/msg/entries/search/
+# sessions/actions/issues/tracking/tmp/sess 与 api|shared），任一路径最多命中一组，
+# **顺序无歧义**；`/sess` 与 `/sessions`（D5 要求分开）靠 L1 的前缀规则天然分开 ——
+# 前缀只认「等于前缀」或「以 前缀+'/' 开头」，`/sessions` 不以 `/sess/` 开头。
+# 各组内部「形状不对」的兜底仍各自判：`/msg/a/b`、`/sessions/a/b`、`/tmp/a/b`、
+# `/sess/a/b/c` 照旧落**裸 404**（走 `_gw_not_found` 的 GET 支，不鉴权、不带 peer），
+# 而 `/sess/<id>/<非 turns>` 是**鉴权之后**那条带 `detail` 文案的 404 —— 两种文案不能并。
 
 JSON_CT = "application/json; charset=utf-8"
 
 GW = web_gateway.Gateway("blackboard_svc", version=VERSION, quiet=True)
 
-# 登记的处理函数一律**自己调 `_send_json()` 直接写出**（迁移前的推式出口一个字节没动，
-# 因为同一批叶子方法还被 do_GET 复用，刀7b 之前不能改成返式），回这个占位信封；
-# `_handle()` 看见 `self._sent` 为真就把它丢掉，绝不会再发第二份响应。
+# 登记的处理函数一律**自己调 `_send_json()` 直接写出**（迁移前的推式出口一个字节没动：
+# 叶子方法有四十来个、各自还会在中途多次早退写 400/404/503，改成返式等于把它们全重写，
+# 那就不是「收路由」而是改业务了），回这个占位信封；`_handle()` 看见 `self._sent`
+# 为真就把它丢掉，绝不会再发第二份响应。
 _SENT = (204, None, {})  # type: Tuple[int, Any, Dict[str, Any]]
 
 
@@ -2770,16 +2781,21 @@ def _gw_peer(req: "web_gateway.Request") -> Optional[str]:
 
 @GW.pre
 def _gw_pre(req: "web_gateway.Request") -> Any:
-    """非 GET 方法的公共前奏（迁移前每个 do_<METHOD> 开头那两行）。
+    """所有方法的公共前奏（迁移前每个 do_<METHOD> 开头那一两行）。
 
     1. **先读完请求体**：哪怕接下来就 405/501，也要把 socket 排空，否则 keep-alive
-       连接会错位（超限排空与断连由 `_read_body()` 自己处理）。
+       连接会错位（超限排空与断连由 `_read_body()` 自己处理）。迁移前 do_GET 开头
+       那句光秃秃的 `self._read_body()`（读完即弃）就是这一步，GET 照走。
     2. 共享内容只读纪律：写请求打到 /api/shared、/shared 一律 405，一个字节不碰库。
        迁移前 DELETE 是「先判 /tmp/<id> 再 _reject_write()」，这里提到前面等价 ——
        `_is_shared_path()` 只认 api/shared 与 shared 两种开头，`/tmp` 不在其中。
+       **GET 必须绕开这一步**：迁移前 do_GET 从不调 `_reject_write()`，共享内容本来
+       就只许 GET 读；不绕开的话 `GET /api/shared` 会从 200 变成 405。
     """
     svc = req.svc
     req.raw, req.too_large = svc._read_body()
+    if req.method == "GET":
+        return None
     if svc._reject_write():
         return _SENT
     return None
@@ -2787,9 +2803,14 @@ def _gw_pre(req: "web_gateway.Request") -> Any:
 
 @GW.not_found
 def _gw_not_found(req: "web_gateway.Request") -> Any:
-    """没登记的路径：POST 落 404 信封，其余写方法照旧落基类的 501（迁移前逐字一致）。"""
+    """没登记的路径：GET / POST 落**裸** 404 信封（不鉴权、不带 peer，与迁移前
+    do_GET 末尾那一行、do_POST 末尾那一行逐字一致），其余写方法照旧落基类的 501。
+
+    带 `detail` 文案的那条 404（`/sess/<id>/<非 turns>`）**不在这里** —— 它是鉴权
+    之后的业务判定，留在 `_gw_get_sess_sub()` 里，两种文案绝不能并成一条。
+    """
     svc = req.svc
-    if req.method == "POST":
+    if req.method in ("GET", "POST"):
         svc._send_json(404, {"ok": False, "error": "not_found"})
     else:
         svc._send_501(req.method)
@@ -2877,14 +2898,201 @@ def _gw_post_entries(req: "web_gateway.Request") -> Any:
     return _SENT
 
 
+# --- GET 的路由登记表（阶段2 刀7b）：13 组判定 → 16 条登记 ----------------------
+#
+# **不挂 `@GW.auth` 全局鉴权钩子**：/healthz 与「未知路径」这两支迁移前根本不鉴权，
+# 挂上去会把未知路径从 404 变成 401（顺序行为就变了）。所以 2~12 组每支自己先
+# `_gw_peer()`，1 与 13 不鉴权 —— 这正是迁移前那 11 次重复的三行的归属。
+#
+# 「列表 / 单条」这类一组两形状的，一律**精确登记管列表、前缀登记管带 id 的**：
+# L1 先查精确表，前缀只在精确表落空时才轮到，于是 `/msg` → 列表、`/msg/<id>` → 单条，
+# 与迁移前 `parts == ["msg"]` / `len(parts) == 2 and parts[0] == "msg"` 一一对上。
+# 形状不对的（段数超了）一律在**鉴权之前**转 `_gw_not_found()`，落裸 404。
+
+
+@GW.route("/healthz")
+def _gw_get_healthz(req: "web_gateway.Request") -> Any:
+    """GET /healthz —— **不鉴权**：探活得能匿名打（k8s/监控没有成员令牌）。"""
+    svc = req.svc
+    code, payload = svc._health_payload()
+    svc._send_json(code, payload)
+    return _SENT
+
+
+@GW.route("/msg")
+def _gw_get_msg(req: "web_gateway.Request") -> Any:
+    """GET /msg?to=<自己>&state=queued,processing —— 收件箱 / 补拉。"""
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._msg_list(peer, req.svc._query())
+    return _SENT
+
+
+@GW.route("/msg", prefix=True)
+def _gw_get_msg_one(req: "web_gateway.Request") -> Any:
+    """GET /msg/<id> —— 查单条：发送方靠它知道「送没送到、对方开没开工」。"""
+    parts = req.parts
+    if len(parts) != 2:                      # /msg/a/b：迁移前落到末尾的裸 404
+        return _gw_not_found(req)
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._msg_get(peer, parts[1])
+    return _SENT
+
+
+@GW.route("/entries")
+def _gw_get_entries(req: "web_gateway.Request") -> Any:
+    """GET /entries —— 黑板条目列表（只读）。"""
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._get_entries(peer)
+    return _SENT
+
+
+@GW.route("/search")
+def _gw_get_search(req: "web_gateway.Request") -> Any:
+    """GET /search?q= —— 黑板检索（只读）。"""
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._get_search(peer)
+    return _SENT
+
+
+@GW.route("/sessions")
+def _gw_get_sessions(req: "web_gateway.Request") -> Any:
+    """GET /sessions —— **会议**（roundtable 场次）列表。与 /sess 是两套东西（D5）。"""
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._get_sessions(peer)
+    return _SENT
+
+
+@GW.route("/sessions", prefix=True)
+def _gw_get_session_detail(req: "web_gateway.Request") -> Any:
+    """GET /sessions/<session_id> —— 一场会议 + 逐条发言。"""
+    parts = req.parts
+    if len(parts) != 2:                      # /sessions/a/b：迁移前落末尾的裸 404
+        return _gw_not_found(req)
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._get_session_detail(peer, parts[1])
+    return _SENT
+
+
+@GW.route("/actions")
+@GW.route("/issues")
+@GW.route("/tracking")
+def _gw_get_tracking(req: "web_gateway.Request") -> Any:
+    """GET /actions | /issues | /tracking —— 迁移前共用一个 `parts in (...)` 块，
+    所以这里也共用一个处理函数，靠 `parts[0]` 分道，语义与文案一个字没动。"""
+    peer = _gw_peer(req)
+    if peer is None:
+        return _SENT
+    kind = req.parts[0]
+    if kind == "tracking":
+        req.svc._get_tracking(peer)
+    else:
+        req.svc._get_tracking_list(peer, kind)
+    return _SENT
+
+
+@GW.route("/tmp")
+def _gw_get_tmp(req: "web_gateway.Request") -> Any:
+    """GET /tmp —— 临时共享区清单（契约 §3.2）。`/tmp` 不在 `_is_shared_path()` 里，
+    所以不会被 `_reject_write()` 的 405 拦掉。"""
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._tmp_list(peer)
+    return _SENT
+
+
+@GW.route("/tmp", prefix=True)
+def _gw_get_tmp_read(req: "web_gateway.Request") -> Any:
+    """GET /tmp/<name> —— 临时共享区取文（契约 §3.3）。"""
+    parts = req.parts
+    if len(parts) != 2:                      # /tmp/a/b：迁移前落末尾的裸 404
+        return _gw_not_found(req)
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._tmp_read(peer, parts[1])
+    return _SENT
+
+
+@GW.route("/sess")
+def _gw_get_sess(req: "web_gateway.Request") -> Any:
+    """GET /sess —— **Agent 会话**列表（契约 §5）。别和 /sessions（会议）混（D5）。"""
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._sess_list(peer)
+    return _SENT
+
+
+@GW.route("/sess", prefix=True)
+def _gw_get_sess_sub(req: "web_gateway.Request") -> Any:
+    """GET /sess/<id> —— 会话详情；GET /sess/<id>/turns —— 逐轮流水。
+
+    `/sess/<id>/<别的>` 落**带 detail 文案**的 404（且带 peer）—— 这是鉴权后的业务
+    判定，和末尾那条裸 404 是两回事；段数超过 3 的才是裸 404（鉴权之前就转走）。
+    """
+    parts = req.parts
+    if len(parts) > 3:                       # /sess/a/b/c：迁移前落末尾的裸 404
+        return _gw_not_found(req)
+    peer = _gw_peer(req)
+    if peer is None:
+        return _SENT
+    svc = req.svc
+    if len(parts) == 2:
+        svc._sess_detail(peer, parts[1])
+    elif parts[2] == "turns":
+        svc._sess_turns(peer, parts[1])
+    else:
+        svc._send_json(404, {"ok": False, "error": "not_found",
+                             "detail": "只有 /sess/<id>/turns 这一个子路径"}, peer)
+    return _SENT
+
+
+@GW.route("/api/shared", prefix=True)
+@GW.route("/shared", prefix=True)
+def _gw_get_shared(req: "web_gateway.Request") -> Any:
+    """GET /api/shared[/tasks|/search|/<id>] —— 共享内容（只读）。
+
+    **两种写法都要通**：看板（blackboard_view）按无前缀口径转发，所以 `/shared...`
+    与 `/api/shared...` 各登记一条前缀路由，`rest` 的切法沿用 `_is_shared_path()`
+    那一套（`parts[2:]` / `parts[1:]`）。这是最宽的一组，但 `parts[0]` 与前 11 组
+    互不相交，前缀表里也没有别的路由会抢 —— 迁移前「放最后判」的语义因此成立。
+
+    没有有效 token 一律 401：共享内容里有主人画像与节点 IP，不给匿名读
+    （sensitive 也好 public 也好）。过深路径落**裸** 404，但带 peer。
+    """
+    peer = _gw_peer(req)
+    if peer is None:
+        return _SENT
+    parts = req.parts
+    svc = req.svc
+    rest = parts[2:] if parts[0] == "api" else parts[1:]
+    if not rest:
+        svc._get_shared_list(peer, "list")
+    elif rest == ["tasks"]:
+        svc._get_shared_tasks(peer)
+    elif rest == ["search"]:
+        svc._get_shared_list(peer, "search")
+    elif len(rest) == 1:
+        svc._get_shared_detail(peer, rest[0])
+    else:
+        svc._send_json(404, {"ok": False, "error": "not_found"}, peer)
+    return _SENT
+
+
 # 必须在全部 @GW.route 之后取：handler_class() 会按「已登记的方法」删掉多余的
-# do_<METHOD>，只剩 POST/DELETE —— GET/PUT/PATCH 由下面的子类自己定义，
-# HEAD/OPTIONS/TRACE 则落回基类 501，与迁移前逐字一致。
+# do_<METHOD>，只剩 GET/POST/DELETE —— PUT/PATCH 由下面的子类自己定义（没有
+# 可登记的路径，但必须把请求体读完），HEAD/OPTIONS/TRACE 则落回基类 501，
+# 与迁移前逐字一致。
 _GatewayHandler = GW.handler_class()
 
 
 class BlackboardHandler(_GatewayHandler):
-    """L1 网关处理器 + 本件特有的差异；应答出口与非 GET 分派全部沿用 L1（阶段2 刀7a）。
+    """L1 网关处理器 + 本件特有的差异；应答出口与**全部**路由分派都沿用 L1
+    （非 GET 是阶段2 刀7a，GET 是刀7b）。
 
     1. **响应形态**：`sys_version=""` + HTTP/1.1，保住 `Server: blackboard_svc/<VERSION>`
        与 keep-alive 语义（L1 默认 HTTP/1.0 且不清 sys_version）。
@@ -2892,14 +3100,13 @@ class BlackboardHandler(_GatewayHandler):
        socket 那一段（写头 / end_headers / 写体 / 吞异常）全在 L1 的 `_reply()` 里。
     3. **路径归一**：沿用迁移前的 `_path_parts()`（剥 #fragment、吃掉空段与尾斜杠），
        比 L1 的 `partition("?")` + `rstrip("/")` 宽，`/msg//x` 照样认。
-    4. **do_GET 仍是本件内的 if/elif**（1250 行，刀7b 再收进登记表）。
     """
 
     server_version = "blackboard_svc/" + VERSION
     sys_version = ""
     protocol_version = "HTTP/1.1"
 
-    _sent = False       # 本次请求是否已经写出响应（do_GET 走推式出口，不经 _handle）
+    _sent = False       # 本次请求是否已经写出响应（登记的处理函数一律推式出口）
 
     # --- 基础工具 -------------------------------------------------
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -2907,7 +3114,7 @@ class BlackboardHandler(_GatewayHandler):
         return
 
     def _handle(self) -> None:
-        """L1 的统一入口（**只有非 GET 方法走这里**）：请求交给 GW.dispatch。
+        """L1 的统一入口（**所有方法都走这里**）：请求交给 GW.dispatch。
 
         登记的处理函数一律自己调 `_send_json()` 写出，回来的是占位信封 —— 所以
         `self._sent` 为真时直接丢掉，不发第二份响应。
@@ -3001,125 +3208,12 @@ class BlackboardHandler(_GatewayHandler):
         return health_payload()
 
     # --- 路由 -----------------------------------------------------
+    # GET 的分派也在 L1 了（模块顶部的 @GW.route 登记表，阶段2 刀7b）：这里只把方法
+    # 接上 L1 的统一入口。基类其实已经有一份同样的 do_GET（GET 有登记路由，
+    # handler_class() 就不会删它），这里显式留一行是为了和 do_PUT/do_PATCH 一样
+    # 「本件支持哪些方法」一眼看得见。
     def do_GET(self) -> None:  # noqa: N802
-        self._read_body()
-        parts = self._path_parts()
-
-        if parts == ["healthz"]:
-            code, payload = self._health_payload()
-            self._send_json(code, payload)
-            return
-
-        if parts == ["msg"]:
-            # 收件箱 / 补拉：GET /msg?to=<自己>&state=queued,processing
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._msg_list(peer, self._query())
-            return
-
-        if len(parts) == 2 and parts[0] == "msg":
-            # 查单条：发送方靠它知道「送没送到、对方开没开工」
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._msg_get(peer, parts[1])
-            return
-
-        if parts == ["entries"]:
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._get_entries(peer)
-            return
-
-        if parts == ["search"]:
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._get_search(peer)
-            return
-
-        if parts and parts[0] == "sessions" and len(parts) <= 2:
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            if len(parts) == 1:
-                self._get_sessions(peer)
-            else:
-                self._get_session_detail(peer, parts[1])
-            return
-
-        if parts in (["actions"], ["issues"], ["tracking"]):
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            if parts == ["actions"]:
-                self._get_tracking_list(peer, "actions")
-            elif parts == ["issues"]:
-                self._get_tracking_list(peer, "issues")
-            else:
-                self._get_tracking(peer)
-            return
-
-        if parts and parts[0] == "tmp" and len(parts) <= 2:
-            # 临时共享区（契约 §3.2/3.3）。`/tmp` 不在 _is_shared_path() 里，
-            # 所以不会被 _reject_write() 的 405 拦掉。
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            if len(parts) == 1:
-                self._tmp_list(peer)
-            else:
-                self._tmp_read(peer, parts[1])
-            return
-
-        if parts and parts[0] == "sess" and len(parts) <= 3:
-            # Agent 会话（契约 §5）。**路径是 /sess**：/sessions 是会议（roundtable 场次），
-            # 两套东西绝不能混（D5），所以这里一眼看去相近也要分开判。
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            if len(parts) == 1:
-                self._sess_list(peer)
-            elif len(parts) == 2:
-                self._sess_detail(peer, parts[1])
-            elif parts[2] == "turns":
-                self._sess_turns(peer, parts[1])
-            else:
-                self._send_json(404, {"ok": False, "error": "not_found",
-                                      "detail": "只有 /sess/<id>/turns 这一个子路径"}, peer)
-            return
-
-        if self._is_shared_path(parts):
-            peer = self._auth_peer()
-            if peer is None:
-                # sensitive 也好 public 也好，没有有效 token 一律拿不到 —— 共享内容里
-                # 有主人画像与节点 IP，不给匿名读。
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            rest = parts[2:] if parts[0] == "api" else parts[1:]
-            if not rest:
-                self._get_shared_list(peer, "list")
-            elif rest == ["tasks"]:
-                self._get_shared_tasks(peer)
-            elif rest == ["search"]:
-                self._get_shared_list(peer, "search")
-            elif len(rest) == 1:
-                self._get_shared_detail(peer, rest[0])
-            else:
-                self._send_json(404, {"ok": False, "error": "not_found"}, peer)
-            return
-
-        self._send_json(404, {"ok": False, "error": "not_found"})
+        self._handle()
 
     @staticmethod
     def _is_shared_path(parts: Sequence[str]) -> bool:

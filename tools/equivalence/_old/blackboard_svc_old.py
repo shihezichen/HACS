@@ -105,6 +105,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import embedder  # 同目录模块；导入只读环境变量，不会加载模型
+import web_gateway  # L1 通行层：HTTP 应答出口与非 GET 方法的路由分发
 
 VERSION = "1.9"
 # 兜底默认值集中到 L0 node_paths（env 优先）
@@ -2734,31 +2735,213 @@ def parse_owner(raw: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 # ---------------------------------------------------------------- HTTP 处理
+#
+# 「应答出口」这层**传输职责**交给 L1 `web_gateway`（阶段2 刀7a）：`send_response` →
+# 逐条写头 → `end_headers` → 写 socket → 客户端早断时吞异常，全在 L1 的 `_reply()`
+# 里；JSON 编码与 `Content-Type` 默认值走 L1 的 `_envelope()`。本件只剩三样 L1
+# 给不了的东西：
+#   · **本次特有的头**（目前只有 405 那条 `Allow: GET`）与它们相对 Content-Length 的顺序；
+#   · 每个响应一行 `<方法> <路径> -> <码> from=<成员> ip=<ip>` 的日志（要带鉴权成员名）；
+#   · `sys_version=""` + HTTP/1.1（保住 `Server: blackboard_svc/<VERSION>` 与 keep-alive）。
+#
+# **非 GET 方法的分派**也一并登记进 L1（下面的登记表）：POST 的七条业务路径 + /entries、
+# DELETE 的 /tmp/<id>；PUT/PATCH 本来就没有可登记的路径（「不是共享路径就 501」）。
+# **do_GET 的 1250 行 if/elif 仍留在本件内**，留给阶段2 刀7b。
 
-class BlackboardHandler(BaseHTTPRequestHandler):
+JSON_CT = "application/json; charset=utf-8"
+
+GW = web_gateway.Gateway("blackboard_svc", version=VERSION, quiet=True)
+
+# 登记的处理函数一律**自己调 `_send_json()` 直接写出**（迁移前的推式出口一个字节没动，
+# 因为同一批叶子方法还被 do_GET 复用，刀7b 之前不能改成返式），回这个占位信封；
+# `_handle()` 看见 `self._sent` 为真就把它丢掉，绝不会再发第二份响应。
+_SENT = (204, None, {})  # type: Tuple[int, Any, Dict[str, Any]]
+
+
+# --- 非 GET 的路由登记表：路径 → 处理函数（语义全在 BlackboardHandler 的同名方法里）---
+
+def _gw_peer(req: "web_gateway.Request") -> Optional[str]:
+    """取鉴权成员；不通过就地回 401（迁移前每个分支重复的那三行）。"""
+    peer = req.svc._auth_peer()
+    if peer is None:
+        req.svc._send_json(401, {"ok": False, "error": "unauthorized"})
+    return peer
+
+
+@GW.pre
+def _gw_pre(req: "web_gateway.Request") -> Any:
+    """非 GET 方法的公共前奏（迁移前每个 do_<METHOD> 开头那两行）。
+
+    1. **先读完请求体**：哪怕接下来就 405/501，也要把 socket 排空，否则 keep-alive
+       连接会错位（超限排空与断连由 `_read_body()` 自己处理）。
+    2. 共享内容只读纪律：写请求打到 /api/shared、/shared 一律 405，一个字节不碰库。
+       迁移前 DELETE 是「先判 /tmp/<id> 再 _reject_write()」，这里提到前面等价 ——
+       `_is_shared_path()` 只认 api/shared 与 shared 两种开头，`/tmp` 不在其中。
+    """
+    svc = req.svc
+    req.raw, req.too_large = svc._read_body()
+    if svc._reject_write():
+        return _SENT
+    return None
+
+
+@GW.not_found
+def _gw_not_found(req: "web_gateway.Request") -> Any:
+    """没登记的路径：POST 落 404 信封，其余写方法照旧落基类的 501（迁移前逐字一致）。"""
+    svc = req.svc
+    if req.method == "POST":
+        svc._send_json(404, {"ok": False, "error": "not_found"})
+    else:
+        svc._send_501(req.method)
+    return _SENT
+
+
+@GW.route("/msg", methods=("POST",))
+def _gw_post_msg(req: "web_gateway.Request") -> Any:
+    """POST /msg —— 落库（=送达）。from 取鉴权结果，不采信请求体。"""
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._msg_write(peer, req.raw, req.too_large)
+    return _SENT
+
+
+@GW.route("/msg", methods=("POST",), prefix=True)
+def _gw_post_msg_action(req: "web_gateway.Request") -> Any:
+    """POST /msg/<id>/ack —— 收件方回「已收到并开始处理」；
+    POST /msg/<id>/done —— 收件方报「处理完了/失败了」。别的形状照旧落 404。"""
+    parts = req.parts
+    if len(parts) != 3 or parts[2] not in ("ack", "done"):
+        return _gw_not_found(req)
+    peer = _gw_peer(req)
+    if peer is not None:
+        if parts[2] == "ack":
+            req.svc._msg_ack(peer, parts[1])
+        else:
+            req.svc._msg_done(peer, parts[1], req.raw, req.too_large)
+    return _SENT
+
+
+@GW.route("/tmp", methods=("POST",))
+def _gw_post_tmp(req: "web_gateway.Request") -> Any:
+    """POST /tmp —— 临时共享区：存长文本，换一个短 id（契约 §3.1）。"""
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._tmp_write(peer, req.raw, req.too_large)
+    return _SENT
+
+
+@GW.route("/tmp", methods=("DELETE",), prefix=True)
+def _gw_delete_tmp(req: "web_gateway.Request") -> Any:
+    """DELETE /tmp/<id> —— 临时共享区：仅 owner 能主动销毁（契约 §3.4）。
+
+    形状不是 /tmp/<id> 的（/tmp、/tmp/a/b）照旧落基类 501，与迁移前逐字一致。
+    """
+    parts = req.parts
+    if len(parts) != 2:
+        return _gw_not_found(req)
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._tmp_delete(peer, parts[1])
+    return _SENT
+
+
+@GW.route("/sess", methods=("POST",))
+def _gw_post_sess(req: "web_gateway.Request") -> Any:
+    """POST /sess —— 开一个 Agent 会话（契约 §5）。owner 一律取鉴权结果（防冒名）。"""
+    peer = _gw_peer(req)
+    if peer is not None:
+        req.svc._sess_open(peer, req.raw, req.too_large)
+    return _SENT
+
+
+@GW.route("/sess", methods=("POST",), prefix=True)
+def _gw_post_sess_action(req: "web_gateway.Request") -> Any:
+    """POST /sess/<id>/close —— 关闭 + 归档（契约 §5/§4.3）。**没有 DELETE 路径**：流水不可删。
+    POST /sess/<id>/turns —— 追加一轮会话流水（契约 §5）。先落库，回放才有权威可依。"""
+    parts = req.parts
+    if len(parts) != 3 or parts[2] not in ("close", "turns"):
+        return _gw_not_found(req)
+    peer = _gw_peer(req)
+    if peer is not None:
+        if parts[2] == "close":
+            req.svc._sess_close(peer, parts[1], req.raw, req.too_large)
+        else:
+            req.svc._sess_turn_write(peer, parts[1], req.raw, req.too_large)
+    return _SENT
+
+
+@GW.route("/entries", methods=("POST",))
+def _gw_post_entries(req: "web_gateway.Request") -> Any:
+    """POST /entries —— 往黑板 append 一条（本件唯一的黑板写路径）。"""
+    req.svc._post_entry(req.raw, req.too_large)
+    return _SENT
+
+
+# 必须在全部 @GW.route 之后取：handler_class() 会按「已登记的方法」删掉多余的
+# do_<METHOD>，只剩 POST/DELETE —— GET/PUT/PATCH 由下面的子类自己定义，
+# HEAD/OPTIONS/TRACE 则落回基类 501，与迁移前逐字一致。
+_GatewayHandler = GW.handler_class()
+
+
+class BlackboardHandler(_GatewayHandler):
+    """L1 网关处理器 + 本件特有的差异；应答出口与非 GET 分派全部沿用 L1（阶段2 刀7a）。
+
+    1. **响应形态**：`sys_version=""` + HTTP/1.1，保住 `Server: blackboard_svc/<VERSION>`
+       与 keep-alive 语义（L1 默认 HTTP/1.0 且不清 sys_version）。
+    2. **应答出口**：`_send_json()` 只管 JSON 编码、本次特有的头与那一行日志，
+       socket 那一段（写头 / end_headers / 写体 / 吞异常）全在 L1 的 `_reply()` 里。
+    3. **路径归一**：沿用迁移前的 `_path_parts()`（剥 #fragment、吃掉空段与尾斜杠），
+       比 L1 的 `partition("?")` + `rstrip("/")` 宽，`/msg//x` 照样认。
+    4. **do_GET 仍是本件内的 if/elif**（1250 行，刀7b 再收进登记表）。
+    """
+
     server_version = "blackboard_svc/" + VERSION
     sys_version = ""
     protocol_version = "HTTP/1.1"
+
+    _sent = False       # 本次请求是否已经写出响应（do_GET 走推式出口，不经 _handle）
 
     # --- 基础工具 -------------------------------------------------
     def log_message(self, fmt: str, *args: Any) -> None:
         """屏蔽默认 stderr 日志，统一由 _send_json 打一行。"""
         return
 
+    def _handle(self) -> None:
+        """L1 的统一入口（**只有非 GET 方法走这里**）：请求交给 GW.dispatch。
+
+        登记的处理函数一律自己调 `_send_json()` 写出，回来的是占位信封 —— 所以
+        `self._sent` 为真时直接丢掉，不发第二份响应。
+        """
+        self._sent = False
+        req = web_gateway.Request(self)
+        req.svc = self
+        req.parts = self._path_parts()
+        req.path = "/" + "/".join(req.parts)
+        req.raw, req.too_large = b"", False     # _gw_pre 会覆盖；这里只保证属性存在
+        status, body, headers = GW.dispatch(req)
+        if not self._sent:                      # 兜底：理论上走不到（每条路径都写过）
+            self._reply(status, body, headers)
+
+    def _send_501(self, method: str) -> None:
+        """未支持的方法：沿用基类的 send_error 页面，不自行发明 JSON 信封。"""
+        self._sent = True
+        self.send_error(501, "Unsupported method (%s)" % method)
+
     def _send_json(self, code: int, payload: Dict[str, Any],
                    peer: Optional[str] = None,
                    headers: Optional[Sequence[Tuple[str, str]]] = None) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
+        """本件唯一的 JSON 应答出口；socket 那一段全在 L1 的 `_reply()` 里。
+
+        头的顺序就是发出去的字节顺序：Content-Type（L1 的 `_envelope()` 补）→
+        Content-Length → 本次特有的头。Content-Length **必须自己补在这里**：
+        交给 L1 的 `_reply()` 补会排到特有头后面，`Allow: GET` 那一例字节就变了。
+        """
+        code, body, out = web_gateway._envelope(code, payload)
+        out["Content-Length"] = str(len(body))
         for name, value in (headers or ()):
-            self.send_header(name, value)
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except Exception:
-            pass
+            out[name] = value
+        self._sent = True
+        self._reply(code, body, out)
         # 日志只记方法/路径/状态/成员名/来源 IP —— 不记 token、不记 body、不记 DSN。
         LOG.info("%s %s -> %d from=%s ip=%s", self.command,
                  urllib.parse.urlsplit(self.path).path, code,
@@ -4076,104 +4259,18 @@ class BlackboardHandler(BaseHTTPRequestHandler):
                         None, [("Allow", "GET")])
         return True
 
+    # 非 GET 方法的分派全在 L1（模块顶部的 @GW.route 登记表）：这里只把方法接上
+    # L1 的统一入口。PUT/PATCH 一条可登记的路径都没有（「不是共享路径就 501」），
+    # 但 do_<METHOD> 必须留着 —— 否则落回基类 501 时**请求体不会被读完**，
+    # keep-alive 连接就错位了。
     def do_PUT(self) -> None:     # noqa: N802
-        self._read_body()
-        if not self._reject_write():
-            self.send_error(501, "Unsupported method (PUT)")
+        self._handle()
 
     def do_PATCH(self) -> None:   # noqa: N802
-        self._read_body()
-        if not self._reject_write():
-            self.send_error(501, "Unsupported method (PATCH)")
+        self._handle()
 
-    def do_DELETE(self) -> None:  # noqa: N802
-        self._read_body()          # DELETE 一般没有 body，带了也要排空，免得连接错位
-        parts = self._path_parts()
-        if len(parts) == 2 and parts[0] == "tmp":
-            # 临时共享区：仅 owner 能主动销毁（契约 §3.4）
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._tmp_delete(peer, parts[1])
-            return
-        if not self._reject_write():
-            self.send_error(501, "Unsupported method (DELETE)")
-
-    def do_POST(self) -> None:  # noqa: N802
-        raw, too_large = self._read_body()
-        parts = self._path_parts()
-
-        if self._reject_write():
-            return
-
-        if parts == ["msg"]:
-            # 落库（=送达）：POST /msg。from 取鉴权结果，不采信请求体
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._msg_write(peer, raw, too_large)
-            return
-
-        if len(parts) == 3 and parts[0] == "msg" and parts[2] == "ack":
-            # 收件方回「已收到并开始处理」
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._msg_ack(peer, parts[1])
-            return
-
-        if len(parts) == 3 and parts[0] == "msg" and parts[2] == "done":
-            # 收件方报「处理完了/失败了」
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._msg_done(peer, parts[1], raw, too_large)
-            return
-
-        if parts == ["tmp"]:
-            # 临时共享区：存长文本，换一个短 id（契约 §3.1）
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._tmp_write(peer, raw, too_large)
-            return
-
-        if parts == ["sess"]:
-            # Agent 会话：开一个会话（契约 §5）。owner 一律取鉴权结果（防冒名）。
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._sess_open(peer, raw, too_large)
-            return
-
-        if len(parts) == 3 and parts[0] == "sess" and parts[2] == "close":
-            # 关会话 = 关闭 + 归档（契约 §5/§4.3）。**没有 DELETE 路径**：流水不可删。
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._sess_close(peer, parts[1], raw, too_large)
-            return
-
-        if len(parts) == 3 and parts[0] == "sess" and parts[2] == "turns":
-            # 追加一轮会话流水（契约 §5）。先落库，回放才有权威可依。
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            self._sess_turn_write(peer, parts[1], raw, too_large)
-            return
-
-        if parts != ["entries"]:
-            self._send_json(404, {"ok": False, "error": "not_found"})
-            return
-
+    def _post_entry(self, raw: bytes, too_large: bool) -> None:
+        """POST /entries 的正体（迁移前内联在 do_POST 尾部，一行没动）。"""
         peer = self._auth_peer()
         if peer is None:
             self._send_json(401, {"ok": False, "error": "unauthorized"})
@@ -4225,31 +4322,46 @@ class BlackboardHandler(BaseHTTPRequestHandler):
                               "ts": result["ts"]}, peer)
 
 
-class AdminHandler(BaseHTTPRequestHandler):
-    """只绑 127.0.0.1 的最小健康口：只有 /healthz，不碰任何业务数据。"""
+# --- 本机健康口：整件收进 L1（阶段2 刀7a）-----------------------------
+
+ADMIN_GW = web_gateway.Gateway("blackboard_admin", version=VERSION, quiet=True)
+
+
+@ADMIN_GW.route("/healthz")
+def _admin_healthz(req: "web_gateway.Request") -> Any:
+    """唯一的路径；JSON 编码与 Content-Type 由 L1 的 `_envelope()` 出。"""
+    return health_payload()
+
+
+@ADMIN_GW.not_found
+def _admin_not_found(req: "web_gateway.Request") -> Any:
+    """404 体是**手写的紧凑字节**（没有 json.dumps 的那两个空格），一个字节都不许动，
+    所以直接给 bytes —— L1 见 bytes 原样发出，Content-Type 由本件自己带。"""
+    return 404, b'{"ok":false,"error":"not_found"}', {"Content-Type": JSON_CT}
+
+
+_AdminGatewayHandler = ADMIN_GW.handler_class()
+
+
+class AdminHandler(_AdminGatewayHandler):
+    """只绑 127.0.0.1 的最小健康口：只有 /healthz，不碰任何业务数据。
+
+    传输职责全在 L1；本件只留两处差异：`sys_version=""` + HTTP/1.1（保住
+    `Server: blackboard_admin/<VERSION>` 与 keep-alive），以及**路径归一**——
+    迁移前是 `urlsplit(path).path != "/healthz"` 的严格比对，L1 默认还会 rstrip
+    尾斜杠、且不剥 #fragment，两边口径不同（`/healthz/` 迁移前是 404、
+    `/healthz#x` 迁移前是 200），所以这里照迁移前的口径重算一次 req.path。
+    """
 
     server_version = "blackboard_admin/" + VERSION
     sys_version = ""
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, fmt: str, *args: Any) -> None:
-        return
-
-    def do_GET(self) -> None:  # noqa: N802
-        if urllib.parse.urlsplit(self.path).path != "/healthz":
-            body = b'{"ok":false,"error":"not_found"}'
-            code = 404
-        else:
-            code, payload = health_payload()
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except Exception:
-            pass
+    def _handle(self) -> None:
+        req = web_gateway.Request(self)
+        req.path = urllib.parse.urlsplit(self.path).path
+        status, body, headers = ADMIN_GW.dispatch(req)
+        self._reply(status, body, headers)
 
 
 # ---------------------------------------------------------------- 入口

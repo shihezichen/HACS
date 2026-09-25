@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HACS 分层规划 · Handoff v1</title>
+<title>HACS 分层规划 · Handoff v9</title>
 <style>
   :root{
     --ink:#1b2430; --ink2:#43536a; --ink3:#6b7c95;
@@ -77,8 +77,36 @@
     <h1>HACS 分层规划 · Handoff</h1>
     <div class="sub">Human-Agent Communication System — 分层与解耦方案（资深架构评审结论）</div>
     <div class="verline">
-      <b>v8</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5，刀 5 升 v6，刀 6 升 v7，刀 7a 升 v8<br>
+      <b>v9</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5，刀 5 升 v6，刀 6 升 v7，刀 7a 升 v8，刀 7b 升 v9<br>
       本次内容：对「通行层 / 前台层」两分法的评审 → 五层 + 三横切 + 组合根的目标划分 → 七条解耦判据 → 四处最痛耦合 → 六阶段落地计划<br>
+      <b>v9 变更（仅进度标注，方案未改）：</b>刀 <b>7b</b> 落地 —— 把 L3 <code>blackboard_svc.py</code> 的
+      <b><code>do_GET</code> 路由判定收进 L1 <code>web_gateway.py</code></b>，刀 7 两刀合起来<b>收完</b>：本件的 HTTP 面
+      现在只剩「路径 → 处理函数」的登记表加三处差异覆盖（响应形态 / 应答出口 / 路径归一），
+      一条 <code>if/elif</code> 路由分派都没有了。
+      已做：① <code>do_GET</code> 里那串<b>有序的 13 组 <code>if/elif</code></b>（119 行，含重复 11 次的「取 peer，没有就 401」三行）
+      换成 <b>13 个处理函数 / 16 条 <code>@GW.route</code> 登记</b>（10 条精确 + 6 条前缀），
+      方法体本身缩成 <code>self._handle()</code> 一行；
+      ② <code>@GW.pre</code> 补 GET 支 —— GET 照走「读完请求体保 keep-alive」，但<b>必须绕开</b>
+      <code>_reject_write()</code>（共享内容只读纪律只管写方法；不绕开 <code>GET /api/shared</code> 会从 200 变 405）；
+      ③ <code>@GW.not_found</code> 补 GET 支，落与 POST 同形的<b>裸</b> 404；
+      ④ 删掉已无引用的 <code>BaseHTTPRequestHandler</code> 导入。
+      <b>三条硬约束照做</b>：<b>不挂 <code>@GW.auth</code> 全局鉴权钩子</b>（挂了「未知路径无 token」会从 404 变 401，顺序行为就变了），
+      鉴权归属仍是「第 1 组 <code>/healthz</code> 与第 13 组兜底不鉴权、第 2~12 组每支自己先取 peer」；
+      <b>三种 404 文案不合并</b>（<code>/sess/&lt;id&gt;/&lt;非 turns&gt;</code> 是鉴权<b>后</b>带
+      <code>detail:"只有 /sess/&lt;id&gt;/turns 这一个子路径"</code> 的 404、<code>/sess/a/b/c</code> 是鉴权<b>前</b>的裸 404、
+      <code>/api/shared/a/b/c</code> 是鉴权<b>后</b>的裸 404）；
+      <b><code>/sess</code> 与 <code>/sessions</code> 不互吃</b>（D5：Agent 会话 ≠ 会议）——
+      L1 的前缀规则只认「等于前缀」或「以 前缀+<code>/</code> 开头」，<code>/sessions</code> 不以 <code>/sess/</code> 开头，天然分开。
+      迁移前是<b>有序</b> if/elif、L1 是「精确表优先 → 前缀表按长度降序」，两者等价的理由是
+      <b>13 组判定的 <code>parts[0]</code> 两两不相交</b>，任一路径最多命中一组，顺序无歧义。
+      <b>业务函数一行没动</b>：<code>_health_payload / _msg_* / _get_entries / _get_search / _get_sessions* /
+      _get_tracking* / _tmp_* / _sess_* / _get_shared_*</code> 及其下游、SQL、掩码、文案全照旧。
+      证据：等价矩阵扩到 <b>155/155 一致</b>（原 104 例全留 + 新增 <b>51</b> 例专测 GET 登记表，
+      每条新登记路由至少「无 token / 有 token」两个方向）、<code>tests/test_blackboard_svc.py</code> <b>149 例全过</b>（与改前同集合）、
+      全量回归红点 <b>39 条与改前逐行一致</b>、<code>tools/check_layers.py</code> 退出 0（例外仍 1 条）。
+      <b>代价（如实记）：</b>本件从 4475 行涨到 <b>4569</b> 行（台账口径，+94）—— 登记表的每条路由带了契约注释，
+      比原来挤在一处的 <code>if/elif</code> 长；换来的是路由表<b>可枚举</b>（运行期能把 16 条登记打出来核对）
+      与鉴权/404 归属<b>写在各自路由上</b>而不是靠读 119 行顺序推断。<br>
       <b>v8 变更（仅进度标注，方案未改）：</b>刀 <b>7a</b> 落地 —— 把 L3 <code>blackboard_svc.py</code>（团队黑板·记忆网关，端口 9940）
       的 <b>应答出口与非 GET 方法的分派收进 L1 <code>web_gateway.py</code></b>。本件 4362 行、
       <code>do_GET</code> 一条方法里就压着约 1250 行路由，所以<b>刻意切成两刀</b>：
@@ -103,7 +131,7 @@
       状态码/正文全比，只归一 Date、Content-Length 与 <code>ts</code>/<code>latency_ms</code> 等天然漂移；
       DB 走既有接缝 <code>install_pg_backend</code> 注入假驱动，<b>一个字节都不真连</b>）、
       <code>tests/test_blackboard_svc.py</code> 149 例全过（与改前同集合）、全量回归红点 <b>39 条与改前逐行一致</b>、
-      <code>tools/check_layers.py</code> 退出 0。<b>7b 待办</b>：<code>do_GET</code> 里 13 组仍用 <code>if/elif</code> 的路由
+      <code>tools/check_layers.py</code> 退出 0。<b>7b 待办</b>（已于 v9 完成）：<code>do_GET</code> 里 13 组仍用 <code>if/elif</code> 的路由
       （healthz / msg×2 / entries / search / sessions×2 / actions / issues / tracking / tmp×2 / sess×3 / shared×4 / 兜底 404）。<br>
       <b>v7 变更（仅进度标注，方案未改）：</b>刀 6 落地 —— 把 L3/L4 <code>blackboard_view.py</code>（团队黑板只读看板 + 公网登录门户，端口 9941）
       的 <b>HTTP 应答出口与路由分发收进 L1 <code>web_gateway.py</code></b>：方法内那条长 <code>if/elif</code> 分派
@@ -578,7 +606,7 @@
 </table>
 
 <footer>
-  HACS 分层规划 · Handoff v8 · 2026-09-25 · 性质：规划中（阶段 1 刀 1+2+3、阶段 2 刀 1+2、阶段 4 刀 4、刀 5、刀 6、刀 7a 已落地）<br>
+  HACS 分层规划 · Handoff v9 · 2026-09-25 · 性质：规划中（阶段 1 刀 1+2+3、阶段 2 刀 1+2、阶段 4 刀 4、刀 5、刀 6、刀 7a+7b 已落地）<br>
   数字来自当日代码快照，会漂移；落地前请复核。本文件即该规划的唯一权威版本，改动请升版本号。
 </footer>
 
