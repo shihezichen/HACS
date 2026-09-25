@@ -77,8 +77,23 @@
     <h1>HACS 分层规划 · Handoff</h1>
     <div class="sub">Human-Agent Communication System — 分层与解耦方案（资深架构评审结论）</div>
     <div class="verline">
-      <b>v5</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5<br>
+      <b>v6</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5，刀 5 升 v6<br>
       本次内容：对「通行层 / 前台层」两分法的评审 → 五层 + 三横切 + 组合根的目标划分 → 七条解耦判据 → 四处最痛耦合 → 六阶段落地计划<br>
+      <b>v6 变更（仅进度标注，方案未改）：</b>刀 5 落地 —— 把 L2 <code>cli_backend.py</code>（本机 CLI 成员后端，端口 9970）
+      的 <b>HTTP 面收进 L1 <code>web_gateway.py</code></b>：自建的 <code>BaseHTTPRequestHandler</code> 路由
+      （<code>_send_json / _read_body / _authed / _path / do_GET / do_POST</code>，约 178 行）换成
+      <code>Gateway.route / auth / not_found / dispatch</code>，本件只留「路径 → 处理函数」。
+      这是 <code>web_gateway.py</code> 立件时点名的「7~8 个件各自造 <code>BaseHTTPRequestHandler</code>」
+      那条重复的第 <b>2</b> 处消解（第 1 处：teamd 管理口）。
+      <b>业务逻辑与入口面一字未动</b>：<code>Runtime / run_cli / RUNNERS / build_parser / main / make_server</code> 现名现签名现语义，
+      <code>CLIBackendHandler</code> 这个模块级名字保留（改为继承 <code>Gateway.handler_class()</code>）。
+      三处刻意保留的差异覆盖在子类里：<b>响应形态</b>（<code>sys_version=""</code> + HTTP/1.1 → <code>Server: cli_backend/1.0</code> 与 keep-alive）、
+      <b>预读请求体</b>（keep-alive 必须读完，且保住本件自带的 256 KiB 上限）、<b>路径归一</b>（沿用 <code>urlsplit</code>，多剥 <code>#fragment</code>）；
+      鉴权钩子按「<b>路径白名单之后、解析 body 之前</b>」的原次序放行，未登记路径照样落 404 而非 401。
+      依赖方向 L2→L1 是合法下行，<b>分层表与例外条数不变</b>。
+      证据：<code>tools/equivalence/cli_backend_http_equiv.py</code> 新旧双起逐例字节对照 <b>29/29 一致</b>
+      （线上采的 22 例基线 + 200/504/502/503 + 未注册方法 501 ×2 + <code>#fragment</code> 归一 ×1）、
+      <code>tests/test_cli_backend.py</code> 24/24、全量回归红点集合与改前逐行一致<br>
       <b>v5 变更（仅进度标注，方案未改）：</b>刀 4 落地 —— 修「<b>模型通道把本机真值当目标主机真值用</b>」：
       L2 <code>agent_model.py</code> 的远端执行器路径改经 L0 <code>node_paths.target_claude_exec(目标)</code> 取，
       不再拿本机 <code>claude_exec()</code> 冒充远端路径（chat_svc 从 thinkbook 迁到 lobster 后该通道静默失效的根因）。
@@ -517,7 +532,7 @@
 </table>
 
 <footer>
-  HACS 分层规划 · Handoff v4 · 2026-09-25 · 性质：规划中（阶段 1 刀 1+2+3、阶段 2 刀 1+2 已落地）<br>
+  HACS 分层规划 · Handoff v6 · 2026-09-25 · 性质：规划中（阶段 1 刀 1+2+3、阶段 2 刀 1+2、阶段 4 刀 4、刀 5 已落地）<br>
   数字来自当日代码快照，会漂移；落地前请复核。本文件即该规划的唯一权威版本，改动请升版本号。
 </footer>
 

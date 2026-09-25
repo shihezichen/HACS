@@ -62,9 +62,10 @@ import threading
 import time
 import urllib.parse
 import uuid
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
+import web_gateway  # L1 通行层：HTTP 入口（传输职责外置）
 
 VERSION = "1.0"
 DEFAULT_TIMEOUT_S = 300.0
@@ -578,28 +579,171 @@ RUNNERS = {"piagent": run_piagent, "claudecode": run_claudecode, "codex": run_co
 
 # ---------------------------------------------------------------- HTTP
 
-class CLIBackendHandler(BaseHTTPRequestHandler):
+# 传输职责（读体 / JSON 信封 / 路由 / 404 / 未注册方法 501）交给 L1 `web_gateway`，
+# 本件只登记「路径 → 处理函数」。形态与迁移前**逐字一致**：
+#   · Server 头仍是 `cli_backend/<VERSION>`（server_version + sys_version="")，
+#     protocol_version 仍是 HTTP/1.1（keep-alive → 请求体必须读完）；
+#   · 每个响应仍只打一行 `<方法> <原始路径> -> <码> ip=<ip>`（见 CLIBackendHandler._reply）；
+#   · 鉴权在**路径白名单之后、解析 body 之前**：迁移前是「先查路径 → 再 401 → 再解析 body」，
+#     所以钩子只对 AUTH_PATHS 里的 (方法, 归一化路径) 校验 —— 未登记路径照样落 404 而不是 401。
+GW = web_gateway.Gateway("cli_backend", version=VERSION, quiet=True)
+
+# 需要鉴权的 (方法, 归一化路径)，与下面的 @GW.route 一一对应；/healthz 公开。
+AUTH_PATHS = frozenset((
+    ("GET", "/v1/models"), ("GET", "/models"),
+    ("POST", "/v1/chat/completions"), ("POST", "/chat/completions"),
+))
+
+
+def _authed(req: "web_gateway.Request") -> bool:
+    """Bearer key 比对；key 只在内存里，日志绝不打印。"""
+    header = req.headers.get("Authorization") or ""
+    if not header.startswith("Bearer "):
+        return False
+    token = header[7:].strip()
+    if not token:
+        return False
+    return hmac.compare_digest(token, Runtime.api_key)
+
+
+@GW.auth
+def _auth_hook(req):
+    if (req.method, req.path) in AUTH_PATHS and not _authed(req):
+        return 401, {"ok": False, "error": "unauthorized"}
+    return None
+
+
+@GW.not_found
+def _not_found(req):
+    """本件的 404 不带 path 字段（L1 的默认信封带），照迁移前的字面量回。"""
+    return 404, {"ok": False, "error": "not_found"}
+
+
+@GW.route("/healthz")
+def _healthz(req):  # 公开，不鉴权
+    return 200, {"ok": True, "service": "cli_backend",
+                 "version": VERSION, "members": list(MEMBERS),
+                 "busy": dict(Runtime.busy), "ts": int(time.time())}
+
+
+@GW.route("/v1/models")
+@GW.route("/models")
+def _models(req):
+    now = int(time.time())
+    data = [{"id": mid, "object": "model", "created": now, "owned_by": "cli_backend"}
+            for mid in MODEL_IDS]
+    return 200, {"object": "list", "data": data}
+
+
+# a2a_svc 配 backend=http://127.0.0.1:9970/v1 → 打到 /v1/chat/completions；
+# 裸 /chat/completions 也一并接受，省得配错前缀就整条链路断。
+@GW.route("/v1/chat/completions", methods=("POST",))
+@GW.route("/chat/completions", methods=("POST",))
+def _chat_completions(req):
+    try:
+        body = json.loads(req.body.decode("utf-8"))
+    except Exception:
+        return 400, {"ok": False, "error": "bad_request", "detail": "invalid json"}
+    if not isinstance(body, dict):
+        return 400, {"ok": False, "error": "bad_request"}
+
+    model = body.get("model")
+    if not isinstance(model, str) or not model.strip():
+        return 400, {"ok": False, "error": "bad_request", "detail": "missing model"}
+    resolved = resolve_model(model)
+    if resolved is None:
+        return 404, {"ok": False, "error": "unknown_model",
+                     "detail": "supported: " + ",".join(MODEL_IDS)}
+    member, cli_model = resolved
+
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return 400, {"ok": False, "error": "bad_request", "detail": "missing messages"}
+    prompt = build_prompt(messages)
+    if not prompt:
+        return 400, {"ok": False, "error": "bad_request", "detail": "no user content"}
+
+    try:
+        timeout_s = float(body.get("timeout_s") or DEFAULT_TIMEOUT_S)
+    except (TypeError, ValueError):
+        return 400, {"ok": False, "error": "bad_request", "detail": "bad timeout_s"}
+    timeout_s = max(1.0, min(timeout_s, MAX_TIMEOUT_S))
+
+    session_key = body.get("user")
+    if not isinstance(session_key, str) or not session_key.strip():
+        session_key = None  # 一次性会话
+
+    return _dispatch(member, cli_model, model, prompt, session_key, timeout_s)
+
+
+def _dispatch(member: str, cli_model: str, model: str, prompt: str,
+              session_key: Optional[str], timeout_s: float) -> Tuple[int, Dict[str, Any]]:
+    """同一成员串行（各自一把锁，成员之间可并行）；排队等不到 → 503 busy。"""
+    lock = Runtime.locks[member]
+    if not lock.acquire(timeout=Runtime.busy_wait_s):
+        LOG.info("model=%s member=%s task=%s code=503 rc=- pid=- elapsed_ms=0 busy",
+                 model, member, _task_head(prompt))
+        return 503, {"ok": False, "error": "busy",
+                     "detail": "%s 正在执行其它任务" % member}
+    Runtime.busy[member] = True
+    try:
+        res = RUNNERS[member](prompt, cli_model, session_key, timeout_s)
+    except Exception as exc:
+        LOG.exception("model=%s member=%s 执行异常", model, member)
+        return 502, {"ok": False, "error": "backend_error",
+                     "detail": str(exc)[:DETAIL_MAX]}
+    finally:
+        Runtime.busy[member] = False
+        lock.release()
+
+    code = 200
+    if res["timed_out"]:
+        code = 504
+    elif res["rc"] != 0 or not res["stdout"]:
+        code = 502
+    LOG.info("model=%s member=%s task=%s elapsed_ms=%d code=%d rc=%s pid=%s",
+             model, member, _task_head(prompt), res["elapsed_ms"], code,
+             res["rc"], res["pid"])
+
+    if code == 504:
+        return 504, {"ok": False, "error": "backend_timeout",
+                     "detail": "%s 超时 %.0fs，已杀进程树 pid=%s"
+                               % (member, timeout_s, res["pid"])}
+    if code == 502:
+        # 绝不编造回复：非零退出或空输出一律如实报错，detail 带 stderr 尾部
+        detail = res["stderr"][-DETAIL_MAX:] or ("rc=%s 且输出为空" % res["rc"])
+        return 502, {"ok": False, "error": "backend_error", "detail": detail}
+
+    return 200, {
+        "id": "chatcmpl-cli-%s" % uuid.uuid4().hex[:16],
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "finish_reason": "stop",
+                     "message": {"role": "assistant", "content": res["stdout"]}}],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
+# 必须在全部 @GW.route 之后取：handler_class() 会按「已登记的方法」删掉多余的
+# do_<METHOD>，只剩 GET/POST —— 其余方法回基类 501，与迁移前逐字一致。
+_GatewayHandler = GW.handler_class()
+
+
+class CLIBackendHandler(_GatewayHandler):
+    """L1 网关处理器 + 本件特有的三处差异，其余（路由/信封/501/日志静默）全部沿用 L1。
+
+    1. **响应形态**：`sys_version=""` + HTTP/1.1，保住 `Server: cli_backend/1.0` 与
+       keep-alive 语义（L1 默认 HTTP/1.0 且不清 sys_version）。
+    2. **请求体**：keep-alive 下必须读完，否则连接错位；且沿用本件自带的 MAX_BODY_BYTES
+       上限 —— L1 的惰性 `Request.body` 不带上限，所以在 _handle 里**预读**并塞回缓存。
+    3. **路径归一**：沿用 `urlsplit(...).path`（比 L1 的 partition("?") 多剥 #fragment），
+       归一化口径与迁移前逐字一致。
+    """
+
     server_version = "cli_backend/" + VERSION
     sys_version = ""
     protocol_version = "HTTP/1.1"
-
-    # --- 基础工具 -------------------------------------------------
-    def log_message(self, fmt: str, *args: Any) -> None:
-        """屏蔽默认 stderr 日志，统一由 _send_json 打一行。"""
-        return
-
-    def _send_json(self, code: int, payload: Dict[str, Any]) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except Exception:
-            pass
-        LOG.info("%s %s -> %d ip=%s", self.command, self.path, code,
-                 self.client_address[0] if self.client_address else "-")
 
     def _read_body(self) -> bytes:
         """必须读完请求体，否则 keep-alive 连接会错位。"""
@@ -613,148 +757,22 @@ class CLIBackendHandler(BaseHTTPRequestHandler):
             length = MAX_BODY_BYTES
         return self.rfile.read(length)
 
-    def _authed(self) -> bool:
-        """Bearer key 比对；key 只在内存里，日志绝不打印。"""
-        header = self.headers.get("Authorization") or ""
-        if not header.startswith("Bearer "):
-            return False
-        token = header[7:].strip()
-        if not token:
-            return False
-        return hmac.compare_digest(token, Runtime.api_key)
+    def _handle(self) -> None:
+        req = web_gateway.Request(self)
+        # 归一化口径对齐迁移前的 _path()
+        req.path = urllib.parse.urlsplit(self.path).path.rstrip("/") or "/"
+        # 预读写进 Request 的惰性缓存：处理函数用 req.body 时不会再去碰 socket
+        req._body = self._read_body()
+        # 不再兜 HttpError：GW.dispatch 已把钩子/处理函数抛出的 HttpError 全转成回复，
+        # 本件自身也不抛它 —— 留个空 except 只会掩盖真异常。
+        status, body, headers = GW.dispatch(req)
+        self._reply(status, body, headers)
 
-    def _path(self) -> str:
-        return urllib.parse.urlsplit(self.path).path.rstrip("/") or "/"
-
-    # --- 路由 -----------------------------------------------------
-    def do_GET(self) -> None:  # noqa: N802
-        self._read_body()
-        path = self._path()
-
-        if path == "/healthz":  # 公开，不鉴权
-            self._send_json(200, {"ok": True, "service": "cli_backend",
-                                  "version": VERSION, "members": list(MEMBERS),
-                                  "busy": dict(Runtime.busy), "ts": int(time.time())})
-            return
-
-        if path in ("/v1/models", "/models"):
-            if not self._authed():
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            now = int(time.time())
-            data = [{"id": mid, "object": "model", "created": now, "owned_by": "cli_backend"}
-                    for mid in MODEL_IDS]
-            self._send_json(200, {"object": "list", "data": data})
-            return
-
-        self._send_json(404, {"ok": False, "error": "not_found"})
-
-    def do_POST(self) -> None:  # noqa: N802
-        raw = self._read_body()
-        path = self._path()
-        # a2a_svc 配 backend=http://127.0.0.1:9970/v1 → 打到 /v1/chat/completions；
-        # 裸 /chat/completions 也一并接受，省得配错前缀就整条链路断。
-        if path not in ("/v1/chat/completions", "/chat/completions"):
-            self._send_json(404, {"ok": False, "error": "not_found"})
-            return
-
-        if not self._authed():
-            self._send_json(401, {"ok": False, "error": "unauthorized"})
-            return
-
-        try:
-            body = json.loads(raw.decode("utf-8"))
-        except Exception:
-            self._send_json(400, {"ok": False, "error": "bad_request", "detail": "invalid json"})
-            return
-        if not isinstance(body, dict):
-            self._send_json(400, {"ok": False, "error": "bad_request"})
-            return
-
-        model = body.get("model")
-        if not isinstance(model, str) or not model.strip():
-            self._send_json(400, {"ok": False, "error": "bad_request", "detail": "missing model"})
-            return
-        resolved = resolve_model(model)
-        if resolved is None:
-            self._send_json(404, {"ok": False, "error": "unknown_model",
-                                  "detail": "supported: " + ",".join(MODEL_IDS)})
-            return
-        member, cli_model = resolved
-
-        messages = body.get("messages")
-        if not isinstance(messages, list) or not messages:
-            self._send_json(400, {"ok": False, "error": "bad_request", "detail": "missing messages"})
-            return
-        prompt = build_prompt(messages)
-        if not prompt:
-            self._send_json(400, {"ok": False, "error": "bad_request", "detail": "no user content"})
-            return
-
-        try:
-            timeout_s = float(body.get("timeout_s") or DEFAULT_TIMEOUT_S)
-        except (TypeError, ValueError):
-            self._send_json(400, {"ok": False, "error": "bad_request", "detail": "bad timeout_s"})
-            return
-        timeout_s = max(1.0, min(timeout_s, MAX_TIMEOUT_S))
-
-        session_key = body.get("user")
-        if not isinstance(session_key, str) or not session_key.strip():
-            session_key = None  # 一次性会话
-
-        self._dispatch(member, cli_model, model, prompt, session_key, timeout_s)
-
-    def _dispatch(self, member: str, cli_model: str, model: str, prompt: str,
-                  session_key: Optional[str], timeout_s: float) -> None:
-        """同一成员串行（各自一把锁，成员之间可并行）；排队等不到 → 503 busy。"""
-        lock = Runtime.locks[member]
-        if not lock.acquire(timeout=Runtime.busy_wait_s):
-            LOG.info("model=%s member=%s task=%s code=503 rc=- pid=- elapsed_ms=0 busy",
-                     model, member, _task_head(prompt))
-            self._send_json(503, {"ok": False, "error": "busy",
-                                  "detail": "%s 正在执行其它任务" % member})
-            return
-        Runtime.busy[member] = True
-        try:
-            res = RUNNERS[member](prompt, cli_model, session_key, timeout_s)
-        except Exception as exc:
-            LOG.exception("model=%s member=%s 执行异常", model, member)
-            self._send_json(502, {"ok": False, "error": "backend_error",
-                                  "detail": str(exc)[:DETAIL_MAX]})
-            return
-        finally:
-            Runtime.busy[member] = False
-            lock.release()
-
-        code = 200
-        if res["timed_out"]:
-            code = 504
-        elif res["rc"] != 0 or not res["stdout"]:
-            code = 502
-        LOG.info("model=%s member=%s task=%s elapsed_ms=%d code=%d rc=%s pid=%s",
-                 model, member, _task_head(prompt), res["elapsed_ms"], code,
-                 res["rc"], res["pid"])
-
-        if code == 504:
-            self._send_json(504, {"ok": False, "error": "backend_timeout",
-                                  "detail": "%s 超时 %.0fs，已杀进程树 pid=%s"
-                                            % (member, timeout_s, res["pid"])})
-            return
-        if code == 502:
-            # 绝不编造回复：非零退出或空输出一律如实报错，detail 带 stderr 尾部
-            detail = res["stderr"][-DETAIL_MAX:] or ("rc=%s 且输出为空" % res["rc"])
-            self._send_json(502, {"ok": False, "error": "backend_error", "detail": detail})
-            return
-
-        self._send_json(200, {
-            "id": "chatcmpl-cli-%s" % uuid.uuid4().hex[:16],
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": model,
-            "choices": [{"index": 0, "finish_reason": "stop",
-                         "message": {"role": "assistant", "content": res["stdout"]}}],
-            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-        })
+    def _reply(self, status: int, body: bytes, headers: Dict[str, str]) -> None:
+        """回复后补一行日志（迁移前由 _send_json 打，格式/字段/取值一字不改）。"""
+        _GatewayHandler._reply(self, status, body, headers)
+        LOG.info("%s %s -> %d ip=%s", self.command, self.path, status,
+                 self.client_address[0] if self.client_address else "-")
 
 
 def _task_head(prompt: str) -> str:
