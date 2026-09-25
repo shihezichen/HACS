@@ -69,6 +69,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple  # noqa: F401
 import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
+import web_gateway  # L1 通行层：HTTP 入口（传输职责外置）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -375,47 +376,32 @@ class Config(object):
 
 # ---------------------------------------------------------------- 管理口
 
-class AdminHandler(BaseHTTPRequestHandler):
-    """只读管理口。daemon 由 make_admin_server 注入到类属性上。"""
-
-    server_version = "teamd/" + VERSION
-    daemon_ref = None  # type: Any
-
-    def log_message(self, fmt, *args):
-        return  # 管理口不刷日志，健康检查会很频繁
-
-    def _reply(self, status, obj):
-        # type: (int, Dict[str, Any]) -> None
-        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except Exception:
-            pass
-
-    def do_GET(self):
-        path = (self.path or "/").split("?", 1)[0].rstrip("/") or "/"
-        daemon = self.__class__.daemon_ref
-        if daemon is None:
-            self._reply(503, {"ok": False, "error": "not_ready"})
-            return
-        if path == "/healthz":
-            self._reply(200, daemon.healthz())
-        elif path == "/varz":
-            self._reply(200, daemon.varz())
-        else:
-            self._reply(404, {"ok": False, "error": "not_found", "path": path})
-
-
 def make_admin_server(daemon, host, port):
     # type: (TeamDaemon, str, int) -> ThreadingHTTPServer
-    handler = type("BoundAdminHandler", (AdminHandler,), {"daemon_ref": daemon})
-    server = ThreadingHTTPServer((host, port), handler)
-    server.daemon_threads = True
-    return server
+    """只读管理口：传输职责交给 L1 `web_gateway`，本件只登记「路径 → 处理函数」。
+
+    形态与迁移前**逐字一致**：server_version 同为 `teamd/<VERSION>`、不刷访问日志、
+    daemon 未就绪时任何路径都回 503、/healthz 与 /varz 原样透传、其余 404 信封同构、
+    未注册方法保持基类 501。
+    """
+    gw = web_gateway.Gateway("teamd", version=VERSION, quiet=True)
+
+    @gw.pre
+    def _not_ready(req):
+        if daemon is None:
+            return 503, {"ok": False, "error": "not_ready"}
+        return None
+
+    @gw.route("/healthz")
+    def _healthz(req):
+        return 200, daemon.healthz()
+
+    @gw.route("/varz")
+    def _varz(req):
+        return 200, daemon.varz()
+
+    return gw.serve(host, port)
+
 
 
 # ---------------------------------------------------------------- 单成员连接状态
