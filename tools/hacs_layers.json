@@ -1,0 +1,112 @@
+{
+  "_readme": [
+    "阶段 0 台账的机器可读部分：层归属表。check_layers.py 读它做依赖方向与判据门禁。",
+    "层的定义见 docs/HACS-分层规划-handoff.html（五层 + 三横切）。",
+    "layer 取值：L0 平台 / L1 通行 / L2 适配 / L3 协作域 / L4 呈现 / X 横切 / T 工具面",
+    "约定：只允许 L4→L3→L2→L1→L0 方向依赖（上层依赖下层）；同层可互依；X 横切可被任意层引用。"
+  ],
+  "layers": {
+    "L0": "平台层 Host（进程监管 / 路径 / 凭据 / 日志 / 探针 / 部署件）",
+    "L1": "通行层 Transport（投信封 / 保投到 / 不重复 / 可观测 / 成员入网控制面）",
+    "L2": "适配层 Adapter（Agent 差异唯一落脚点：调用 / 能力 / 上下文用量）",
+    "L3": "协作域 Domain（群聊 / 待回应账 / 任务 / 会议 / 黑板 / 共享内容）",
+    "L4": "呈现层 Experience（静态壳 / 业务视图 / 网关：同源托管 · 反代 · 鉴权跳转 · SSE 聚合）",
+    "X":  "横切（身份与授权 / 契约与事件总线 / 可观测与门禁）",
+    "T":  "工具面（巡检 / 驱动 / 验收 / 一次性脚本；不属于运行路径）"
+  },
+  "files": {
+    "agent-team/nats_client.py":          {"layer": "L1", "port": null,  "note": "极简 NATS 客户端（纯标准库）"},
+    "agent-team/teamd.py":                {"layer": "L1", "port": 9960,  "note": "成员守护：订阅点名 → 转本机 A2A；管理口只绑回环"},
+    "agent-team/a2a_svc.py":              {"layer": "L1", "port": 9920,  "note": "A2A 边缘端点 —— ⚠️ 同时承担 L2 后端分派（拆分点）"},
+    "agent-team/a2a_call.py":             {"layer": "L1", "port": null,  "note": "A2A 调用客户端"},
+    "agent-team/team.py":                 {"layer": "L1", "port": null,  "note": "成员侧命令行客户端"},
+    "agent-team/team_call.py":            {"layer": "L1", "port": null,  "note": "点对点调用封装"},
+    "agent-team/team_roster.py":          {"layer": "L1", "port": null,  "note": "名册收集（订阅心跳）"},
+    "agent-team/team_broadcast.py":       {"layer": "L1", "port": null,  "note": "广播投递"},
+    "agent-team/nats_probe.py":           {"layer": "T",  "port": 9930,  "note": "NATS 连通性探针"},
+    "agent-team/gen_nats_conf.py":        {"layer": "L1", "port": 9930,  "note": "服务端权限白名单生成 —— 入网动态化的现成「角色模板」来源"},
+
+    "agent-team/ctx_watermark.py":        {"layer": "L2", "port": null,  "note": "上下文用量渲染器（读各 Agent 真源）"},
+    "agent-team/cli_backend.py":          {"layer": "L2", "port": 9970,  "note": "CLI 类 Agent 的统一后端"},
+
+    "agent-team/chat_svc.py":             {"layer": "L3", "port": 9980,  "note": "对话台 —— ⚠️ 一文件承载 L4+L3+L2 细节（拆分点）"},
+    "agent-team/blackboard_svc.py":       {"layer": "L3", "port": 9940,  "note": "黑板服务"},
+    "agent-team/blackboard_view.py":      {"layer": "L3", "port": 9941,  "note": "看板只读视图 + 公网登录门户 —— ⚠️ 兼 L4（拆分点）"},
+    "agent-team/task_svc.py":             {"layer": "L3", "port": 9981,  "note": "群任务清单"},
+    "agent-team/task_sys/task_svc.py":    {"layer": "L3", "port": 9981,  "note": "任务清单（另一份实现，需核对是否同源）"},
+    "agent-team/roundtable.py":           {"layer": "L3", "port": 9930,  "note": "圆桌会议（经 NATS 推流）"},
+    "agent-team/rt_remind.py":            {"layer": "L3", "port": 9930,  "note": "会议提醒"},
+    "agent-team/shared_content.py":       {"layer": "L3", "port": null,  "note": "临时共享区"},
+    "agent-team/embedder.py":             {"layer": "L3", "port": null,  "note": "语义检索向量化 —— ⚠️ 模型调用，宜归 L2"},
+    "agent-team/backfill_embeddings.py":  {"layer": "L3", "port": null,  "note": "向量回填"},
+    "agent-team/group_watch.py":          {"layer": "L3", "port": null,  "note": "群→点名投递桥（轮询）—— ⚠️ 应改事件驱动"},
+    "agent-team/group_transcript_archiver.py": {"layer": "L3", "port": null, "note": "群记录归档"},
+    "agent-team/session_ctx_archiver.py": {"layer": "L3", "port": null,  "note": "会话上下文归档"},
+
+    "agent-team/ui/serve.py":             {"layer": "L4", "port": 8080,  "note": "前端开发服务器（生产不用）"},
+    "agent-team/ui/group.html":           {"layer": "L4", "port": null,  "note": "群聊前端单文件 —— ⚠️ 壳/视图/传输三合一（拆分点）"},
+    "agent-team/task_sys/patch_group_html.py": {"layer": "L4", "port": null, "note": "往群页注入任务面板的补丁脚本"},
+
+    "agent-team/view_auth.py":            {"layer": "X",  "port": null,  "note": "账号 / 会话 / 角色 / 密级（横切身份）"},
+
+    "agent-team/deploy_auth.py":          {"layer": "L0", "port": 9942,  "note": "公网入口认证部署件"},
+    "agent-team/deploy_p1.py":            {"layer": "L0", "port": null,  "note": "一次性部署脚本"},
+    "agent-team/deploy_p1b.py":           {"layer": "L0", "port": null,  "note": "一次性部署脚本"},
+    "agent-team/deploy_p4_embed.py":      {"layer": "L0", "port": null,  "note": "一次性部署脚本"},
+    "agent-team/deploy_quantum_a2a.py":   {"layer": "L0", "port": null,  "note": "一次性部署脚本"},
+    "agent-team/accept_auth.py":          {"layer": "L0", "port": null,  "note": "认证入口验收"},
+    "agent-team/repair_gateway.py":       {"layer": "L0", "port": null,  "note": "网关修复"},
+    "agent-team/tunnel.py":               {"layer": "L0", "port": null,  "note": "公网命名隧道"},
+    "agent-team/snap_portal.py":          {"layer": "L0", "port": null,  "note": "门户快照"},
+    "agent-team/verify_portal_public.py": {"layer": "L0", "port": null,  "note": "公网门户验收"},
+    "agent-team/lenserver_probe.py":      {"layer": "T",  "port": null,  "note": "远端主机探针"},
+
+    "agent-team/ledger_patrol.py":        {"layer": "T",  "port": null,  "note": "台账巡检"},
+    "agent-team/taskctl.py":              {"layer": "T",  "port": null,  "note": "任务清单命令行"},
+    "agent-team/post_group.py":           {"layer": "T",  "port": null,  "note": "往群里发消息"},
+    "agent-team/probe_chat_turn.py":      {"layer": "T",  "port": null,  "note": "单轮对话探针"},
+    "agent-team/verify_chat_e2e.py":      {"layer": "T",  "port": null,  "note": "端到端验收"},
+    "agent-team/verify_group_page.py":    {"layer": "T",  "port": null,  "note": "群页面验收"},
+    "agent-team/fix_agents_json.py":      {"layer": "T",  "port": null,  "note": "成员配置修复（静态入网的典型手工作业）"},
+    "agent-team/calc/calc_svc.py":        {"layer": "T",  "port": 9985,  "note": "团队计算器后端（前后台配合实验件）"},
+    "agent-team/calc/regression_calc.py": {"layer": "T",  "port": null,  "note": "计算器回归"},
+    "agent-team/calc/curve_evidence.py":  {"layer": "T",  "port": null,  "note": "曲线取证"},
+    "agent-team/hacs_api/server.py":      {"layer": "T",  "port": 8787,  "note": "HACS 数据层骨架（内存假数据，未接真源）"},
+    "agent-team/task_sys/seed_tasks.py":  {"layer": "T",  "port": null,  "note": "任务种子"},
+    "agent-team/task_sys/verify_task_sys.py": {"layer": "T", "port": null, "note": "任务系统验收"}
+  },
+  "rules": {
+    "layer_order": ["L4", "L3", "L2", "L1", "L0"],
+    "allowed_import": {
+      "_readme": "src 层依赖 dst 层是否允许：同层允许；X 横切可被任意层引用；工具面 T 不受限（不属运行路径）",
+      "same": true,
+      "cross_allowed": ["X"],
+      "exempt_src_layers": ["T"]
+    },
+    "transport_business_words": ["群聊", "会话", "待办", "会议", "黑板", "共享区", "圆桌", "任务队列"],
+    "storage_handle_forbidden_layers": ["L0", "L1", "L2", "L4"],
+    "host_hardcode_patterns": [
+      "IP 字面量（内网/尾网）",
+      "绝对路径常量（/etc|/opt|/home|/root|/var 开头，或盘符开头）"
+    ]
+  },
+  "ports": {
+    "_readme": "端口登记（全节点同号；绑定面见各件源码的 --host）",
+    "9920": "A2A 边缘端点（每节点一份，只绑尾网地址）",
+    "9930": "NATS 客户端口（明文 + 用户口令）",
+    "9931": "NATS 集群路由",
+    "9932": "NATS 管理口（只绑回环）",
+    "9940": "黑板服务（尾网）",
+    "9941": "看板只读视图（尾网）",
+    "9942": "看板公网入口实例（只绑回环，由隧道暴露）",
+    "9950": "PostgreSQL（黑板块库）",
+    "9960": "成员守护管理口（只绑回环）",
+    "9970": "CLI 类 Agent 统一后端",
+    "9980": "对话台后端 · 公网入口实例（只绑回环）",
+    "9981": "群任务清单",
+    "9984": "对话台后端 · 尾网实例（默认文档 = 群聊页）",
+    "9985": "团队计算器后端（只绑回环）",
+    "8787": "HACS 数据层骨架（本地实验，未接真源）",
+    "8080": "前端开发服务器（仅本机开发用）"
+  }
+}

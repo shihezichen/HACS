@@ -1,0 +1,566 @@
+# -*- coding: utf-8 -*-
+"""从 tools/hacs_layers.json + 实测数据生成《HACS 分层台账》单文件 HTML。
+
+为什么用脚本生成：台账是长期参考件，表格必须与机器可读的层归属表同源，
+人肉拷贝必然漂移。改层归属 → 改 json → 重跑本脚本 → 文档同步。
+"""
+import io, json, os, re, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+OUT = os.path.join(ROOT, 'HACS-分层台账.html')
+
+M = json.load(io.open(os.path.join(HERE, 'hacs_layers.json'), encoding='utf-8'))
+FILES = M['files']
+LAYERS = M['layers']
+PORTS = M['ports']
+
+LAYER_TITLES = [
+    ('L4', 'L4 呈现层 Experience'),
+    ('L3', 'L3 协作域 Domain'),
+    ('L2', 'L2 适配层 Adapter'),
+    ('L1', 'L1 通行层 Transport'),
+    ('L0', 'L0 平台层 Host'),
+    ('X',  'X 横切（身份与授权）'),
+    ('T',  'T 工具面（不属运行路径）'),
+]
+
+
+def lines_of(rel):
+    p = os.path.join(ROOT, rel.replace('/', os.sep))
+    if not os.path.isfile(p):
+        return None
+    with io.open(p, 'rb') as fh:
+        return fh.read().count(b'\n') + 1
+
+
+def deps_of(rel, all_mods):
+    p = os.path.join(ROOT, rel.replace('/', os.sep))
+    if not os.path.isfile(p):
+        return []
+    src = io.open(p, encoding='utf-8', errors='replace').read()
+    me = os.path.splitext(os.path.basename(rel))[0]
+    found = re.findall(r'^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)', src, re.M)
+    return sorted({x for x in found if x in all_mods and x != me})
+
+
+ALL_MODS = {os.path.splitext(k.split('/')[-1])[0] for k in FILES}
+
+
+def esc(s):
+    return (s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
+
+
+# ---------- 第二章：按层分组的件清单 ----------
+def layer_table(layer):
+    rows, tot = [], 0
+    for rel, meta in sorted(FILES.items()):
+        if meta['layer'] != layer:
+            continue
+        ln = lines_of(rel) or 0
+        tot += ln
+        name = rel.replace('agent-team/', '')
+        port = meta.get('port')
+        deps = deps_of(rel, ALL_MODS)
+        note = esc(meta['note'])
+        rows.append(
+            '<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % (
+                esc(name), ln, ('<b>%s</b>' % port) if port else '—',
+                esc(', '.join(deps)) or '—', note))
+    head = ('<table><thead><tr><th>件</th><th>行数</th><th>端口</th>'
+            '<th>层内/跨层依赖</th><th>一句话职责 · 台账备注</th></tr></thead><tbody>'
+            + ''.join(rows) + '</tbody></table>')
+    return len(rows), tot, head
+
+
+# ---------- 第四章：实测数字（check_layers 基线）----------
+BASELINE = {
+    'files': 53, 'edges': 17, 'direction': 0, 'bizwords': 48,
+    'hardcode_files': 25, 'storage': 11, 'storage_over': 2,
+}
+HARDCODE_TOP = [
+    ('blackboard_view.py', 'L3', 19, 6, '注释里的隧道/deployment 说明 + 运行目录常量'),
+    ('cli_backend.py', 'L2', 8, 11, '各 CLI 的代理地址、node.exe 绝对路径'),
+    ('teamd.py', 'L1', 6, 7, '管理口/示例地址、运行目录常量'),
+    ('blackboard_svc.py', 'L3', 9, 4, 'DSN 示例、健康口、日志路径'),
+    ('chat_svc.py', 'L3', 4, 6, 'DSN 示例、默认绑址、claude_exec 绝对路径'),
+    ('ui/serve.py', 'L4', 5, 5, '开发用后端地址、本机目录'),
+    ('team.py', 'L1', 3, 4, '默认 NATS 入口、留痕文件路径'),
+    ('a2a_svc.py', 'L1', 4, 1, '示例绑定地址'),
+    ('task_svc.py', 'L3', 2, 4, '默认绑址、库路径'),
+    ('group_watch.py', 'L3', 3, 2, '轮询目标地址'),
+]
+STORAGE_ROWS = [
+    ('a2a_svc.py', 'L1', 'sqlite3', True),
+    ('ctx_watermark.py', 'L2', 'sqlite3', True),
+    ('blackboard_svc.py', 'L3', 'PostgreSQL', False),
+    ('task_svc.py', 'L3', 'sqlite3', False),
+    ('task_sys/task_svc.py', 'L3', 'sqlite3', False),
+    ('roundtable.py', 'L3', 'PostgreSQL', False),
+    ('rt_remind.py', 'L3', 'PostgreSQL', False),
+    ('shared_content.py', 'L3', 'PostgreSQL + sqlite3', False),
+    ('backfill_embeddings.py', 'L3', 'PostgreSQL', False),
+    ('session_ctx_archiver.py', 'L3', 'sqlite3', False),
+    ('view_auth.py', 'X', 'PostgreSQL + sqlite3', False),
+]
+PORT_ROWS = [(k, v) for k, v in PORTS.items() if not k.startswith('_')]
+
+BIG = [('chat_svc.py', 'L3', 4588), ('blackboard_svc.py', 'L3', 4362),
+       ('blackboard_view.py', 'L3', 3824), ('roundtable.py', 'L3', 2425),
+       ('teamd.py', 'L1', 1504), ('shared_content.py', 'L3', 1431),
+       ('view_auth.py', 'X', 1396), ('team.py', 'L1', 1040),
+       ('task_svc.py', 'L3', 1016), ('ledger_patrol.py', 'T', 944),
+       ('a2a_svc.py', 'L1', 894), ('cli_backend.py', 'L2', 869)]
+
+# ---------- 组装 ----------
+secs = []
+secs.append("""<h2>一、这份台账怎么用</h2>
+<div class="callout">
+  <b>本文件是《HACS 分层规划》的阶段 0 产出，是层归属与门禁基线的唯一权威版本。</b>
+  规划文档（<code>docs/HACS-分层规划-handoff.html</code>）回答「该怎么分、为什么这么分」；本台账回答
+  「<b>现在每个件实际站在哪一层、依赖谁、踩了哪条判据、怎么复查</b>」。动结构之前先对台账，
+  偏离先升版本再动码。
+</div>
+<h3>1.1 三个口径</h3>
+<ul>
+  <li><b>层归属是人判的，不是推的。</b>判断法则沿用规划文档：<i>通信层四节点对等、业务层中枢独有</i>。
+      一个件若同时干两层的活，台账里记两个层并打 <span class="badge b-warn">拆分点</span>，
+      <b>不为它硬凑一个层</b>。</li>
+  <li><b>数字全部来自实测</b>，可复跑：件数/行数 来自 <code>wc -l</code>；门禁四项来自
+      <code>python tools/check_layers.py</code>；进程与启动方式来自本机进程与计划任务实查。
+      标注 <span class="badge b-plan">会漂移</span> 的，落地前复核。</li>
+  <li><b>提示级 vs 硬级。</b>只有「依赖方向」是硬门禁（退出码 1）。业务词、宿主硬编码、存储句柄
+      是提示级：它们的命中<b>必须人判</b>（注释里提到「会话」不算越层，真去读别人库算）。</li>
+</ul>
+<h3>1.2 台账的机器可读孪生体</h3>
+<p>本文件的所有表格由 <code>tools/gen_ledger_doc.py</code> 从 <code>tools/hacs_layers.json</code>
+生成。<b>要改层归属，改 json 再重跑生成脚本</b>，别直接编辑 HTML 表格 —— 否则文档与门禁读的那份口径分家，
+门禁就白跑了。</p>""")
+
+# 二、件清单
+per_layer = []
+total_lines = 0
+for code, title in LAYER_TITLES:
+    n, ln, table = layer_table(code)
+    per_layer.append((code, title, n, ln, table))
+    total_lines += ln
+
+body2 = ['<h2>二、件清单总表（按层）</h2>',
+         '<p>共登记 <b>%d 个件</b>、<b>%s 行</b>。已排除 <code>tests/</code>、'
+         '<code>__pycache__</code> 与归档目录。端口为「全节点同号」的约定值，实际绑定面见各件源码的 '
+         '<code>--host</code>。</p>' % (len(FILES), format(total_lines, ','))]
+body2.append('<h3>2.1 层规模一览</h3>')
+body2.append('<table><thead><tr><th>层</th><th>件数</th><th>行数</th><th>占运行件比重</th>'
+             '<th>层定位</th></tr></thead><tbody>')
+for code, title, n, ln, _ in per_layer:
+    pct = 100.0 * ln / total_lines
+    body2.append('<tr><td><b>%s</b></td><td>%d</td><td>%s</td><td>%.1f%%</td><td>%s</td></tr>'
+                 % (esc(title), n, format(ln, ','), pct, esc(LAYERS[code])))
+body2.append('</tbody></table>')
+for i, (code, title, n, ln, table) in enumerate(per_layer):
+    body2.append('<h3>2.%d %s（%d 件 / %s 行）</h3>' % (i + 2, esc(title), n, format(ln, ',')))
+    body2.append(table)
+body2.append('<h3>2.9 台账口径下的「大件」</h3>')
+body2.append('<p>规划文档点名的三处最痛耦合，都长在这几只大件里 —— 这一列是拆分的<b>排队依据</b>，'
+             '不是美观指标。</p>')
+body2.append('<table><thead><tr><th>件</th><th>层</th><th>行数</th><th>为什么它大</th></tr></thead><tbody>')
+why = {
+    'chat_svc.py': '一个文件同时是网关（静态托管/反代/登录跳转/SSE 聚合）+ 协作域（群/会话/待办）+ 适配细节',
+    'blackboard_svc.py': '黑板服务 + PG 层 + 富化 + 检索，全塞一件',
+    'blackboard_view.py': '只读视图 + 公网登录门户 + 鉴权，L3 与 L4 同体',
+    'roundtable.py': '会议编排 + NATS 推流 + PG 落库',
+    'teamd.py': '成员守护 + 多成员身份托管 + 管理口 + 重投语义',
+    'shared_content.py': '共享区 + PG + sqlite 双句柄',
+    'view_auth.py': '账号/会话/角色/密级/审计的横切实现，被三层共用（正确的大）',
+    'team.py': '成员侧 CLI，含点对点/群发/「会议召集」—— 后者是业务语义长在通行层里',
+    'task_svc.py': '群任务清单 + 直接持 sqlite',
+    'ledger_patrol.py': '台账巡检，规则内嵌',
+    'a2a_svc.py': 'A2A 边缘端点（L1）+ 后端分派与上下文自愈（L2），两层的活一件干',
+    'cli_backend.py': '各 CLI 的统一后端，代理/路径差异内嵌（L2 该有的样子，但硬编码要收）',
+}
+for f, l, n in BIG:
+    body2.append('<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>'
+                 % (esc(f), l, format(n, ','), esc(why.get(f, ''))))
+body2.append('</tbody></table>')
+secs.append('\n'.join(body2))
+
+# 三、依赖方向
+secs.append("""<h2>三、依赖方向实测（门禁检查 1）</h2>
+<div class="callout now">
+  <b>结论：现有 import 图与五层方向一致 —— 零反向依赖。</b>
+  这不代表解耦没问题，而是说明<b>耦合不长在「谁 import 谁」上</b>。真正的越层是三处：
+  语义越层（业务词长在通行层）、句柄越层（通行/适配件直读别人的库）、配置静态（改动靠改文件+重启）。
+  后两处见第四、七节。
+</div>
+<h3>3.1 判据与门禁规则</h3>
+<ul>
+  <li>允许方向：<b>L4 → L3 → L2 → L1 → L0</b>（上层依赖下层）；<b>同层可互依</b>；
+      <b>横切 X 可被任意层引用</b>；工具面 T 不受限（不属运行路径）。</li>
+  <li>反向依赖（下层 import 上层）= <b>硬违规</b>，退出码 1，必须改。</li>
+  <li>工具面缺席会让结果失真：<code>ledger_patrol.py</code> 这类巡检件 import 域件是正常的，
+      把它当运行件就会报假违规。</li>
+</ul>
+<h3>3.2 今日基线</h3>
+<table><thead><tr><th>指标</th><th>实测</th><th>含义</th></tr></thead><tbody>
+<tr><td>登记件数</td><td><b>53</b></td><td>运行件 + 工具件，不含测试</td></tr>
+<tr><td>层间 import 边</td><td><b>17</b></td><td>边少 = 件之间靠「跨进程 + 配置」耦合，而非代码引用</td></tr>
+<tr><td>方向违规</td><td><b>0</b></td><td>硬门禁今日通过</td></tr>
+</tbody></table>
+<p class="kpi">「边只有 17 条」这件事本身值得记一笔：<b>件与件之间主要不是通过函数调用耦合，而是通过
+端口、文件、数据库和启动参数耦合</b>。所以「解耦」在这套系统里的主战场不是重构调用关系，
+而是<b>把配置与数据通道也纳入契约</b>。</p>""")
+
+# 四、配置面
+h4 = ['<h2>四、配置面实测（门禁检查 3 与 4）</h2>']
+h4.append('<h3>4.1 宿主硬编码（判据 4：配置零硬编码）</h3>')
+h4.append('<p>运行件里共 <b>%d 件</b>出现 IP 字面量或绝对路径常量。命中<b>不都是错的</b>：'
+          '文档字符串里的示例地址无害，运行时兜底常量才是要收的。按「IP + 路径」条数排：</p>' % BASELINE['hardcode_files'])
+h4.append('<table><thead><tr><th>件</th><th>层</th><th>IP</th><th>路径</th><th>主要来源</th></tr></thead><tbody>')
+for f, l, ip, pa, why_ in HARDCODE_TOP:
+    h4.append('<tr><td><code>%s</code></td><td>%s</td><td>%d</td><td>%d</td><td>%s</td></tr>'
+              % (esc(f), l, ip, pa, esc(why_)))
+h4.append('</tbody></table>')
+h4.append('<div class="callout warn"><b>要收的口径：</b>'
+          '「<code>os.environ.get(X) or &lt;字面量&gt;</code>」这种写法是<b>可接受的过渡形态</b>'
+          '（环境变量优先，字面量只是兜底），但它必须满足两条：'
+          '① 兜底值不得是本机专属绝对路径（如 <code>node.exe</code> 的安装路径）；'
+          '② 兜底值出现在宿主层（L0）或该件的 profile 里，不出现在 L2/L3 源码中。'
+          '现在违反的是第①条：<code>cli_backend.py</code> 里写死了 node 安装路径。</div>')
+h4.append('<h3>4.2 直接持存储句柄的件（判据 1 的前置检查）</h3>')
+h4.append('<p>规则：<b>只有协作域（L3）与横切身份（X）可以持库句柄</b>；'
+          '通行层、适配层、呈现层、平台层只能通过接口拿数据。共 %d 件持句柄，其中 '
+          '<b>%d 件越层</b>（下表打 ⚠）：</p>' % (BASELINE['storage'], BASELINE['storage_over']))
+h4.append('<table><thead><tr><th></th><th>件</th><th>层</th><th>句柄</th><th>判定</th></tr></thead><tbody>')
+for f, l, k, over in STORAGE_ROWS:
+    judge = ('<b>越层</b>：所在层不该持句柄' if over else '在本层允许范围')
+    h4.append('<tr><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>'
+              % ('⚠' if over else '·', esc(f), l, esc(k), judge))
+h4.append('</tbody></table>')
+h4.append("""<div class="callout warn"><b>这两条越层命中不是巧合 —— 它们正是规划文档里「上下文水位三处口径」
+那处最痛耦合的硬证据：</b><code>a2a_svc.py</code>（L1 边缘端点）与 <code>ctx_watermark.py</code>
+（L2 适配件）各自用 <code>sqlite3</code> 直读 Agent 的会话库来算上下文占用。同一件事在三处实现、
+三处口径，任一处改了另两处不知情。收口方向就是规划文档写的：<b>统一收进 L2 的
+<code>/usage</code> 能力</b>，L1 与 L3 一律走接口。</div>
+<h3>4.3 层 × 违例矩阵（一眼看哪里最脏）</h3>
+<table><thead><tr><th>层</th><th>件数</th><th>方向违规</th><th>L1 业务词</th><th>宿主硬编码件</th><th>越层持句柄</th></tr></thead><tbody>""")
+for code, title in LAYER_TITLES:
+    cnt = sum(1 for f, m in FILES.items() if m['layer'] == code)
+    hc = sum(1 for f, l, *_ in HARDCODE_TOP if l == code)
+    ov = sum(1 for f, l, k, o in STORAGE_ROWS if l == code and o)
+    biz = BASELINE['bizwords'] if code == 'L1' else 0
+    h4.append('<tr><td><b>%s</b></td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td></tr>'
+              % (esc(title), cnt, 0, biz, hc, ov))
+h4.append('</tbody></table>')
+h4.append('<p class="kpi">读法：<b>L1 的「业务词 48 行」与 L3 的「硬编码 17 件」是两条主战线</b>。'
+          '前者是语义越层，后者是配置面。表中数字为 top 榜口径（各层前 10 件），全量数字以门禁脚本输出为准。</p>')
+secs.append('\n'.join(h4))
+
+# 五、端口登记
+body5 = ['<h2>五、端口登记表</h2>',
+         '<p>规划文档判据 3 定的规矩：<b>一进程一端口一职责</b>。这张表是全集群同号约定，'
+         '改动必须同步登记，否则「一端口多职责」会在无人察觉处复发。'
+         '<span class="badge b-plan">会漂移</span> 落地前以各件源码的默认值为准。</p>',
+         '<table><thead><tr><th>端口</th><th>职责</th></tr></thead><tbody>']
+for k, v in sorted(PORT_ROWS, key=lambda x: -int(x[0])):
+    body5.append('<tr><td><b>%s</b></td><td>%s</td></tr>' % (k, esc(v)))
+body5.append('</tbody></table>')
+body5.append("""<div class="callout"><b>登记表暴露的一个空位：</b>端口已登记，但<b>「哪个节点跑哪些件、怎么自启」
+没有对应登记</b>。实查证据见第七节：仓库里只入了 3 个系统服务单元，本机实跑 6 个计划任务 ——
+「跑着的」与「入仓的」不一致，这是静态入网的另一面。</div>""")
+secs.append('\n'.join(body5))
+
+# 六、入网接口契约
+secs.append("""<h2>六、成员入网接口契约（草案 v0）</h2>
+<div class="callout">
+  <b>为什么放在阶段 0 一起评：</b>入网接口<b>本来就是通行层契约的一个成员</b>（它管的是「谁有资格收到信封」）。
+  先定它，才不会在阶段 1–4 把适配层、网关、契约各做一遍之后，发现入网还要回头改通行层的边界。
+  本草案是<b>接口形状</b>，不含实现；标注 <span class="badge b-plan">规划中（尚未落地）</span>。
+</div>
+<h3>6.1 三类调用者与信任级别</h3>
+<table><thead><tr><th>调用者</th><th>拿什么证明</th><th>能用哪些端点</th><th>信任级别</th></tr></thead><tbody>
+<tr><td>未入网成员</td><td>一次性邀请码</td><td>申请注册 / 查询进度 / 取引导包</td><td>最低：只能证明「有人给了我这串码」</td></tr>
+<tr><td>待批准成员</td><td>自持私钥签名</td><td>查询进度 / 取引导包 / 自报上线</td><td>中：身份已登记，尚未授权</td></tr>
+<tr><td>已入网成员</td><td>自持私钥签名</td><td>正式通道 + 名册只读</td><td>高：按角色模板授权</td></tr>
+<tr><td>管理员</td><td>既有账号体系（横切身份）</td><td>批准 / 驳回 / 吊销 / 名册全量</td><td>最高：<b>不新造一套</b>，复用现有实现</td></tr>
+</tbody></table>
+<h3>6.2 端点清单（7 个）</h3>
+<table><thead><tr><th>端点</th><th>方法</th><th>用途</th><th>幂等性</th></tr></thead><tbody>
+<tr><td><code>/enroll/request</code></td><td>POST</td><td>提交注册申请：成员标识 + <b>公钥</b> + 声明能力 + 邀请码</td><td>幂等键 = 成员标识 + 公钥指纹；重复提交返回<b>同一</b>受理号</td></tr>
+<tr><td><code>/enroll/{id}</code></td><td>GET</td><td>查进度：待批准 / 已批准 / 已驳回（附原因）</td><td>只读</td></tr>
+<tr><td><code>/enroll/{id}/approve</code></td><td>POST</td><td>管理员批准（可选保留人工一环）</td><td>重复批准不改变结果</td></tr>
+<tr><td><code>/enroll/{id}/deny</code></td><td>POST</td><td>管理员驳回（附原因，写入审计）</td><td>重复驳回不改变结果</td></tr>
+<tr><td><code>/bootstrap/{bid}</code></td><td>GET</td><td>取引导包：一次性、短时效、<b>绑定公钥指纹</b></td><td>一包一次；取过即失效</td></tr>
+<tr><td><code>/enroll/{id}/activate</code></td><td>POST</td><td>成员自报上线（带签名）→ 转「已入网」+ 写入网台账</td><td>重复上报返回首次上线时间</td></tr>
+<tr><td><code>/members/{mid}/revoke</code></td><td>POST</td><td>吊销：即时失效于新连接</td><td>重复吊销不报错</td></tr>
+</tbody></table>
+<h3>6.3 数据形状（三个关键结构）</h3>
+<table><thead><tr><th>结构</th><th>字段</th><th>说明</th></tr></thead><tbody>
+<tr><td>注册请求</td><td>成员标识 · 公钥（ed25519）· 节点提示 · 声明能力 {后端类型, 模型, 工具体} · 客户端版本 · 邀请码</td><td><b>没有私钥、没有口令</b>。声明能力只是「自称」，不据此授权</td></tr>
+<tr><td>签发结果</td><td>成员标识 · 通道参数 {模式, 端点, 主题前缀, 角色模板} · 同伴信息 · 引导包 {地址, 校验和, 版本, 有效期} · 签发时间 · 有效期</td><td>通道参数里<b>只有角色模板名，没有口令</b> —— 口令由成员侧用自持私钥向通道换取</td></tr>
+<tr><td>引导包</td><td>通行层客户端件 · 本成员档案片段 · 自启模板 · 校验和清单</td><td>一次性 + 短时效 + 绑公钥。包内含<b>模板</b>不含生产凭据</td></tr>
+</tbody></table>
+<h3>6.4 七条硬约束（逐条可校验）</h3>
+<table><thead><tr><th>#</th><th>约束</th><th>怎么校验</th></tr></thead><tbody>
+<tr><td>1</td><td><b>私钥永不出机</b>：成员本机生成密钥对，只上报公钥</td><td>注册请求体里搜不到私钥字段；抓包/日志里无<code>私钥头标记</code></td></tr>
+<tr><td>2</td><td><b>数据面与控制面分离</b>：控制面不可用时，已在网成员通信不受影响</td><td>停掉注册服务，跑一轮既有成员的点对点与群发，应全通</td></tr>
+<tr><td>3</td><td><b>幂等注册</b>：同 (成员标识, 公钥) 重复申请返回同一身份</td><td>连发两次申请，比对受理号与最终签发结果一致</td></tr>
+<tr><td>4</td><td><b>授权与登记分离</b>：登记 = 身份落库；授权 = 通道侧按角色模板放行</td><td>登记后未授权时，通道应拒绝其连接（而非接受后不投递）</td></tr>
+<tr><td>5</td><td><b>吊销即时生效于新连接</b>，已建立连接在下一轮重连时失效</td><td>吊销后立刻发起重连，应被拒；旧连接的下一条消息应失败</td></tr>
+<tr><td>6</td><td><b>引导包一次性</b>：过期/重复取用均拒绝</td><td>同一包连取两次，第二次应拒</td></tr>
+<tr><td>7</td><td><b>不新造身份体系</b>：管理员鉴权复用横切身份实现</td><td>管理端点不出现第二套账号表；权限判定走既有角色</td></tr>
+</tbody></table>
+<h3>6.5 与现有件的对位（不用从零设计）</h3>
+<ul>
+  <li><b>角色模板的来源已有现成实现</b>：<code>gen_nats_conf.py</code> 现在就在为每个成员生成
+      「只能发自己的心跳、收则放开」的权限白名单。<b>动态化 = 把这套生成逻辑从「部署时写进配置」
+      搬到「注册时按需签发」</b>，模板形状照抄，不用重新发明。</li>
+  <li><b>多成员托管已是既成事实</b>：本机一个守护进程托管 5 个成员身份（见第七节），
+      所以入网服务要按<b>成员</b>粒度设计，不是按<b>进程</b>粒度 —— 否则同机的 5 个身份没法各入各的网。</li>
+  <li><b>名册真源需要一次迁移</b>：现在名册靠订阅心跳动态收集；目标的 <code>/members</code>
+      是登记库 + 心跳的合成视图，<b>不能两套并存</b>，否则「谁在网」有两个答案。</li>
+  <li><b>通道侧需要一次性配置</b>：签发侧需要通道服务端开一次「外部授权」开关并指向本服务 ——
+      实测通道服务端版本 <b>2.14.5</b>，满足外部授权方案的最低版本要求，
+      <b>这条路在现网走得通，不必先升级</b>（探测方式：只读连客户端口读服务端握手信息；日期 2026-09-25）。</li>
+</ul>
+<h3>6.6 失败模式与兜底</h3>
+<p>六种失败模式（引导包被截获 / 注册服务挂 / 伪装注册 / 重复注册 / 授权服务故障 / 版本漂移）
+的逐条兜底见规划文档 6.2 节，本草案不重复。此处只加一条与台账相关的：<b>version 漂移必须可观测</b> ——
+台账登记每个在网成员的客户端版本，注册服务拒收低于最低兼容版本的申请，并写审计。</p>""")
+
+# 七、静态入网现场证据
+secs.append("""<h2>七、静态入网的现场证据</h2>
+<h3>7.1 一条启动参数里的全部耦合</h3>
+<p>实查本机正在运行的成员守护进程（<code>Get-CimInstance Win32_Process</code> 读到的真实命令行，
+此处按占位符口径改写，<b>不含真实口令</b>）：</p>
+<pre><code>teamd.py --member "&lt;成员A&gt;,&lt;成员B&gt;,&lt;成员C&gt;,&lt;成员D&gt;,&lt;成员E&gt;"
+        ↔ 每成员 1 组通道令牌参数   ← 5 个文件，逐个写进命令行
+        ↔ 每成员 1 组通道口令参数   ← 5 个文件，逐个写进命令行
+        --nats-host       "&lt;中枢&gt;:9930,&lt;第二入口&gt;:9930"  --nats-port 9930
+        --a2a-base        "http://&lt;本机尾网地址&gt;:9920"   --admin-port 9960
+        --blackboard-base "http://&lt;中枢&gt;:9940"           --workers 8</code></pre>
+<table><thead><tr><th>观察</th><th>数字</th><th>含义</th></tr></thead><tbody>
+<tr><td>一个进程托管的成员身份</td><td><b>5</b></td><td>同机多身份，入网服务必须按成员粒度设计</td></tr>
+<tr><td>每个成员需要的凭据文件</td><td><b>2</b>（通道令牌 + 口令）</td><td>共 <b>10 个文件</b>手工摆放，无一处自取</td></tr>
+<tr><td>启动参数里写死的拓扑</td><td>2 个通道入口 + 1 个黑板入口 + 1 个本机地址</td><td>换节点 = 改命令行</td></tr>
+<tr><td>成员名与展示名的硬编码</td><td>出现在 <code>chat_svc.py</code> 的固定清单里</td><td>新增成员要改展示名清单，第 4 处要改</td></tr>
+</tbody></table>
+<h3>7.2 新增 / 删除一个成员的实际动作数</h3>
+<table><thead><tr><th>动作</th><th>现在（静态配置）</th><th>目标（动态入网）</th></tr></thead><tbody>
+<tr><td>1</td><td>通道服务端配置里加用户与口令</td><td>—（角色模板按需签发）</td></tr>
+<tr><td>2</td><td>为本成员生成 2 个凭据文件并摆到各台机</td><td>—（引导包自取）</td></tr>
+<tr><td>3</td><td>改成员守护的启动参数（成员名 + 2 组凭据 + 计数）</td><td>—（守护读名册）</td></tr>
+<tr><td>4</td><td>改展示名硬编码清单</td><td>—（按能力声明渲染）</td></tr>
+<tr><td>5</td><td><b>重启守护进程</b></td><td><b>一条注册请求</b>（守护无需重启）</td></tr>
+<tr><td><b>合计</b></td><td><b>5 步、7 处改动、1 次重启</b></td><td><b>1 步、1 处、0 重启</b></td></tr>
+</tbody></table>
+<h3>7.3 为什么「重启会掐断别人」</h3>
+<div class="callout warn">因为<b>一个守护进程托管 5 个成员身份</b>：为了给第 6 个成员加凭据而重启，
+会把已经在网的 4 个成员的通道<b>一起断掉</b>。所以静态入网不只是「麻烦」——
+它把<b>新增成员的代价转嫁给了存量成员</b>。这一条是规划文档把它列为「第四处最痛耦合」的实证依据，
+也是阶段 5 优先级的来源。</div>
+<h3>7.4 部署件与实跑件不一致（顺带查出的缺口）</h3>
+<table><thead><tr><th>侧</th><th>实跑</th><th>入仓登记</th></tr></thead><tbody>
+<tr><td>本机（Windows 节点）</td><td><b>6 个计划任务</b>：A2A 端点 / 成员守护 / 群投递桥 / CLI 后端 / 会话归档 / 台账巡检</td><td>0</td></tr>
+<tr><td>Linux 节点</td><td>按同一套启动约定</td><td><b>3 个系统服务单元</b>（对话台 / 对话台公网实例 / 看板）</td></tr>
+</tbody></table>
+<p class="kpi">这张表说明：<b>「怎么起的」没有单一登记处</b>。阶段 0 台账先把它们记下来；
+阶段 4（平台层 L0）要做的正是把「启动方式」也变成登记项，而不是散在计划任务与 shell 脚本里。</p>""")
+
+# 八、门禁
+secs.append("""<h2>八、门禁怎么跑（工具与基线）</h2>
+<h3>8.1 两个新增工具件</h3>
+<table><thead><tr><th>工具</th><th>作用</th><th>性质</th></tr></thead><tbody>
+<tr><td><code>tools/hacs_layers.json</code></td><td>层归属表（机器可读）：件 → 层 / 端口 / 备注；层定义、端口登记、门禁规则</td><td>台账的孪生体，<b>唯一可编辑真源</b></td></tr>
+<tr><td><code>tools/check_layers.py</code></td><td>四条检查的门禁脚本；<code>--json</code> 出机器可读报告，<code>--only 1,2</code> 跑子集</td><td>新增件，<b>零业务码改动</b></td></tr>
+<tr><td><code>tools/gen_ledger_doc.py</code></td><td>从层归属表生成本台账 HTML（表格同源，防漂移）</td><td>新增件</td></tr>
+</tbody></table>
+<pre><code>python tools/check_layers.py           # 全量报告，退出码 0/1
+python tools/check_layers.py --only 1  # 只跑硬门禁
+python tools/check_layers.py --json    # 机器可读</code></pre>
+<h3>8.2 四条检查 ↔ 七条判据</h3>
+<table><thead><tr><th>检查</th><th>对应判据</th><th>级别</th><th>今日基线</th></tr></thead><tbody>
+<tr><td>1 依赖方向</td><td>判据 2 依赖严格单向</td><td><b>硬（退出码 1）</b></td><td><b>0 违规</b></td></tr>
+<tr><td>2 传输不含语义</td><td>判据 5 传输层不含业务词</td><td>提示级（需人判）</td><td><b>48 行命中</b>（多为注释；实质命中见 8.3）</td></tr>
+<tr><td>3 配置零硬编码</td><td>判据 4 配置零硬编码</td><td>提示级</td><td><b>25 件</b>带字面量</td></tr>
+<tr><td>4 存储句柄</td><td>判据 1 的前置检查</td><td>提示级</td><td><b>11 件</b>持句柄，<b>2 件越层</b></td></tr>
+</tbody></table>
+<h3>8.3 提示级命中的人判结论（今日）</h3>
+<ul>
+  <li><b>检查 2 的 48 行命中里，实质越层只有两处</b>：成员 CLI 里的「会议召集」子命令
+      （业务语义长在通行层）与边缘端点里的「上下文自愈 / 会话头注入」（适配逻辑长在通行层）。
+      其余多为文档字符串与帮助文本 —— 这也是<b>它们只能是提示级</b>的原因。</li>
+  <li><b>检查 3 最该先收的一条</b>：适配件里写死的运行时绝对路径（node 可执行文件路径）。
+      这条会直接阻断「换 OS 部署」，属于判据 6。</li>
+  <li><b>检查 4 的 2 件越层</b>：与规划文档「上下文水位三处口径」完全对位，见 4.2 的说明。</li>
+</ul>
+<h3>8.4 怎么用才不会变成形式</h3>
+<ul>
+  <li>硬门禁（检查 1）<b>进提交前检查</b>；提示级只在阶段收口时看趋势，<b>不要为了清零而清零</b>。</li>
+  <li>每次拆件（阶段 1–5）后重跑，把 <code>--json</code> 结果按日期留档，用「越层数是否单调下降」
+      衡量重构是否真的推进 —— 比「代码更好看了」可核。</li>
+  <li>门禁报的件名以层归属表为准；<b>新增件必须先登记再写码</b>，否则门禁看不见它。</li>
+</ul>""")
+
+# 九、待确认
+secs.append("""<h2>九、待确认（每项附推荐默认）</h2>
+<table><thead><tr><th>#</th><th>待确认</th><th>推荐默认</th><th>不定的代价</th></tr></thead><tbody>
+<tr><td>1</td><td>层归属表里那 4 个「跨两层」的件，拆分点是<b>现在就标注</b>还是先跑通业务再拆？</td><td><b>先标注、不拆</b>（本台账已标）—— 标注零成本，拆分有风险，先把边界说清</td><td>不标 = 每次讨论都重新吵一遍它属于哪层</td></tr>
+<tr><td>2</td><td>提示级命中要不要进提交前检查？</td><td><b>暂不进</b>，先只做趋势登记</td><td>过早进 = 每次提交都在处理注释里的假命中</td></tr>
+<tr><td>3</td><td>入网接口的「人工批准」一环保留还是全自动？</td><td><b>保留</b>（管理员一次点击），但设计成可一键关掉的开关</td><td>全自动 = 邀请码泄露即等于入网；永久人工 = 达不到你要的「零人工」</td></tr>
+<tr><td>4</td><td>引导包要不要包含通行层客户端件本身？</td><td><b>包含</b>（否则新节点仍要人工放文件），但包必须一次性 + 短时效 + 绑公钥</td><td>不含 = 「自取文件」这一环落空</td></tr>
+<tr><td>5</td><td>名册真源切换（心跳收集 → 登记库合成）的时机</td><td><b>阶段 5 内一次性切换</b>，不留两套并存期</td><td>并存 = 「谁在网」两个答案，排障时互相打架</td></tr>
+<tr><td>6</td><td>本台账与规划文档的关系，是否要合并成一份？</td><td><b>分开</b>：规划是稳定的「为什么」，台账是高频变化的「现状与工具」</td><td>合并 = 每次改层归属都要动权威设计文档</td></tr>
+<tr><td>7</td><td>下一步先做哪期？</td><td><b>阶段 1 抽适配层</b>（台账已把越层点指出来，改动面最小、收益最直接）</td><td>先做网关或通行层 = 动的面更大，回滚更贵</td></tr>
+</tbody></table>
+<div class="callout"><b>本台账不含任何真实凭据。</b>文中出现的地址、成员名一律为占位符口径；
+第七节的进程实参为改写后的等价形式（结构与参数个数真实，<b>口令/令牌值已剔除</b>）。
+台账与规划文档同属长期参考件，<b>正文不含密钥、口令、令牌、连接串</b>，凭据一律只记录「在哪个路径」。</div>""")
+
+# SVG：入网六步（注意：SVG 的 text 里不能出现 HTML 标签，强调只许用 tspan）
+svg_steps = [
+    ('1', '身份本机生成', '成员本机生成密钥对；', '私钥永不出机', '，只上报公钥与声明能力'),
+    ('2', '提交注册申请', '带一次性邀请码 → 幂等键 = 成员标识 + 公钥指纹；', '重复申请返回同一受理号', ''),
+    ('3', '按角色模板授权', '批准后由登记库向通道侧签发角色（', '模板形状复用现有白名单生成逻辑', '）'),
+    ('4', '引导包自取', '一次性 + 短时效 + 绑定公钥：', '通行层客户端件 + 本成员档案 + 自启模板', ''),
+    ('5', '自报上线 + 入台账', '带签名自报 → 名册转「已入网」→ ', '写入网台账（含客户端版本）', ''),
+    ('6', '吊销 = 一条请求', '即时失效于新连接；旧连接在下一轮重连时失效；', '不重启任何守护进程', ''),
+]
+_svg_rows = []
+y0 = 62
+for i, (no, title, pre, hl, post) in enumerate(svg_steps):
+    y = y0 + i * 56
+    if hl:
+        desc = ('<tspan>%s</tspan><tspan font-weight="700" fill="#1f4e79">%s</tspan>'
+                '<tspan>%s</tspan>' % (pre, hl, post))
+    else:
+        desc = '<tspan>%s</tspan>' % pre
+    _svg_rows.append(
+        '<rect x="24" y="%d" width="46" height="40" rx="10" fill="#2b6cb0"/>'
+        '<text x="47" y="%d" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">%s</text>'
+        '<rect x="84" y="%d" width="1130" height="40" rx="8" fill="#f7fafd" stroke="#dfe6ef"/>'
+        '<text x="104" y="%d" font-size="14" font-weight="700" fill="#1f4e79">%s</text>'
+        '<text x="360" y="%d" font-size="12.5" fill="#43536a">%s</text>'
+        % (y, y + 26, no, y, y + 26, title, y + 26, desc))
+SVG = ('<figure><svg viewBox="0 0 1240 456" role="img" aria-label="成员入网六步">'
+       '<rect x="0" y="0" width="1240" height="456" fill="#ffffff"/>'
+       '<text x="24" y="30" font-size="17" font-weight="700" fill="#1f4e79">成员入网六步 · 目标形态</text>'
+       '<text x="24" y="50" font-size="12" fill="#6b7c95">'
+       '全程无人工配置；每条都对应第六节的硬约束与校验方法（规划中，尚未落地）</text>'
+       + ''.join(_svg_rows)
+       + '<rect x="84" y="%d" width="1130" height="46" rx="8" fill="#fdf3e0" stroke="#eccf9a"/>'
+         '<text x="104" y="%d" font-size="13" font-weight="700" fill="#8a5300">'
+         '唯一的一次性改动</text>'
+         '<text x="360" y="%d" font-size="12.5" fill="#5a4620">'
+         '由通道服务端开一次「外部授权」开关并指向本服务；实测服务端版本满足要求，不必先升级</text>'
+       % (y0 + 5 * 56 + 50, y0 + 5 * 56 + 80, y0 + 5 * 56 + 80)
+       + '</svg><figcaption>图 1 · 成员入网六步（目标形态）</figcaption></figure>')
+secs_doc = []
+
+HTML_HEAD = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HACS 分层台账 · 阶段 0 产出</title>
+<style>
+  :root{
+    --ink:#1b2430; --ink2:#43536a; --ink3:#6b7c95;
+    --line:#dfe6ef; --bg:#f5f7fa; --card:#ffffff;
+    --accent:#2b6cb0; --accent2:#1f4e79;
+    --ok:#1f7a4d; --okbg:#e6f5ec;
+    --plan:#8a5300; --planbg:#fdf3e0;
+    --warn:#8a1f1f; --warnbg:#fbeaea;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:0 0 60px;
+    background:var(--bg); color:var(--ink);
+    font:15px/1.75 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+  header{
+    background:linear-gradient(135deg,#1f4e79,#2b6cb0);
+    color:#fff; padding:34px 0 26px; margin-bottom:26px;
+  }
+  header h1{margin:0 0 8px;font-size:27px;letter-spacing:.5px}
+  header .sub{opacity:.92;font-size:14px}
+  .verline{
+    margin:16px 0 0; padding:11px 14px; border-radius:8px;
+    background:rgba(255,255,255,.13); font-size:13px; line-height:1.9;
+  }
+  h2{
+    font-size:20px; margin:34px 0 12px; padding:8px 0 8px 12px;
+    border-left:5px solid var(--accent); background:#fff;
+    border-radius:0 6px 6px 0;
+  }
+  h3{font-size:16px;margin:22px 0 8px;color:var(--accent2)}
+  p{margin:9px 0}
+  ul,ol{margin:8px 0 8px 4px;padding-left:22px}
+  li{margin:5px 0}
+  code{
+    font:13px/1.5 Consolas,"Cascadia Mono",monospace;
+    background:#eef2f7;padding:1px 5px;border-radius:4px;color:#1f4e79;
+  }
+  pre{
+    background:#1b2430;color:#e6edf5;padding:14px 16px;border-radius:8px;
+    overflow-x:auto;font:12.5px/1.7 Consolas,"Cascadia Mono",monospace;
+  }
+  pre code{background:none;color:inherit;padding:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+  table{width:100%;border-collapse:collapse;margin:12px 0;background:#fff;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 10px;vertical-align:top;text-align:left}
+  th{background:#eef2f7;color:var(--accent2);font-weight:600;white-space:nowrap}
+  tbody tr:nth-child(even){background:#fafcfe}
+  .badge{
+    display:inline-block;padding:1px 8px;border-radius:20px;
+    font-size:12px;font-weight:600;white-space:nowrap;
+  }
+  .b-plan{background:var(--planbg);color:var(--plan);border:1px solid #eccf9a}
+  .b-ok{background:var(--okbg);color:var(--ok);border:1px solid #a9dcc0}
+  .b-warn{background:var(--warnbg);color:var(--warn);border:1px solid #eebdbd}
+  .b-info{background:#e8f1fb;color:var(--accent2);border:1px solid #b9d4ee}
+  .callout{border-left:4px solid var(--accent);background:#eef5fc;padding:12px 15px;border-radius:0 8px 8px 0;margin:14px 0}
+  .callout.warn{border-color:#c05621;background:#fdf6ec}
+  .callout.now{border-color:#1f7a4d;background:#effaf3}
+  figure{margin:18px 0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px}
+  figure svg{display:block;width:100%;height:auto}
+  figcaption{font-size:13px;color:var(--ink3);margin-top:8px;text-align:center}
+  .kpi{font-size:13px;color:var(--ink2)}
+  .kpi b{color:var(--accent2);font-size:15px}
+  footer{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font-size:13px;color:var(--ink3)}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>HACS 分层台账</h1>
+    <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
+    <div class="verline">
+      版本 <b>v1</b> · 2026-09-25 首版 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更：首次建立台账 —— 登记 53 件、17 条层间依赖、16 项端口；新增层归属表与四条门禁（<b>零业务码改动</b>）；
+      并把「成员入网接口契约（草案 v0）」纳入本次评审（原属阶段 5，因它是通行层契约的成员，提前到阶段 0 定形状）<br>
+      本文件由 <code>tools/gen_ledger_doc.py</code> 从 <code>tools/hacs_layers.json</code> 生成
+    </div>
+  </div>
+</header>
+<div class="wrap">
+"""
+HTML_FOOT = """
+<footer>
+  HACS 分层台账 · v1 · 2026-09-25 · 阶段 0 产出 ·
+  规划文档：<code>docs/HACS-分层规划-handoff.html</code> ·
+  机器可读孪生体：<code>tools/hacs_layers.json</code> · 门禁：<code>tools/check_layers.py</code> ·
+  生成器：<code>tools/gen_ledger_doc.py</code><br>
+  台账随件变化，正文只记口径与「凭据在哪个路径」，不含任何真实口令 / 令牌 / 连接串。
+</footer>
+</div>
+</body>
+</html>
+"""
+
+html = HTML_HEAD + '\n'.join(secs[:6]) + '\n' + SVG + '\n' + '\n'.join(secs[6:]) + HTML_FOOT
+io.open(OUT, 'w', encoding='utf-8', newline='\n').write(html)
+n = html.count('<h2>')
+print('已生成:', OUT)
+print('字节:', len(html.encode('utf-8')), '| 行数:', html.count('\n') + 1)
+print('h2 章节数:', n, '| table 数:', html.count('<table>'), '| svg 数:', html.count('<svg'))
