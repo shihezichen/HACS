@@ -77,6 +77,10 @@ def layer_table(layer):
 BASELINE = {
     'files': 53, 'edges': 17, 'direction': 0, 'bizwords': 48,
     'hardcode_files': 25, 'storage': 11, 'storage_over': 2,
+    # 刀 3 后：宿主字面量拆成「真硬编码（路径）」与「提示级（IP/端口默认值）」两个口径。
+    'host_path_files': 42, 'host_path_sites_before': 111, 'host_path_sites_after': 80,
+    'host_path_prod_files_before': 16, 'host_path_prod_sites_before': 27, 'host_path_prod_sites_after': 0,
+    'net_files': 19, 'net_sites': 42,
 }
 HARDCODE_TOP = [
     ('blackboard_view.py', 'L3', 19, 6, '注释里的隧道/deployment 说明 + 运行目录常量'),
@@ -215,8 +219,21 @@ secs.append("""<h2>三、依赖方向实测（门禁检查 1）</h2>
 # 四、配置面
 h4 = ['<h2>四、配置面实测（门禁检查 3 与 4）</h2>']
 h4.append('<h3>4.1 宿主硬编码（判据 4：配置零硬编码）</h3>')
-h4.append('<p>运行件里共 <b>%d 件</b>出现 IP 字面量或绝对路径常量。命中<b>不都是错的</b>：'
-          '文档字符串里的示例地址无害，运行时兜底常量才是要收的。按「IP + 路径」条数排：</p>' % BASELINE['hardcode_files'])
+h4.append('<p>原口径（IP 与路径混算）为 <b>%d 件</b>，但混算会把 URL 里的 <code>p:/</code> 误判成盘符、'
+          '并把大量<b>合法的</b> loopback / 兜底基址算进来，看不出真实进度。刀 3 已把本项拆成两个口径：'
+          '<b>①真硬编码 = 宿主路径字面量</b>（应当单调趋 0，唯一合法去处 = 层归属表声明的 '
+          '<code>%s</code>）；<b>②提示级 = IP / 端口默认值</b>（大量属合法默认，只提示不设门禁）。'
+          '文档字符串与注释里的示例一律不计。</p>' % (BASELINE['hardcode_files'], 'L0 <code>agent-team/node_paths.py</code>'))
+h4.append('<table><thead><tr><th>口径</th><th>刀 3 前</th><th>刀 3 后</th><th>说明</th></tr></thead><tbody>'
+          '<tr><td>真硬编码（宿主路径，全仓 .py）</td><td>%d 处</td><td><b>%d 处</b></td>'
+          '<td>剩余集中在一批一次性脚本/测试/历史 docs（不跑生产，未纳入本刀）</td></tr>'
+          '<tr><td>真硬编码（本次改造的 %d 个生产件）</td><td>%d 处</td><td><b>%d 处</b></td>'
+          '<td>全部改走 env &gt; 平台惯例，默认值集中到 L0</td></tr>'
+          '<tr><td>提示级（IP/端口默认值）</td><td>%d 件 / %d 处</td><td colspan="2">保持提示级：'
+          'loopback 与兜底基址属合法默认，强收反而降低可读性</td></tr></tbody></table>'
+          % (BASELINE['host_path_sites_before'], BASELINE['host_path_sites_after'],
+             BASELINE['host_path_prod_files_before'], BASELINE['host_path_prod_sites_before'],
+             BASELINE['host_path_prod_sites_after'], BASELINE['net_files'], BASELINE['net_sites']))
 h4.append('<table><thead><tr><th>件</th><th>层</th><th>IP</th><th>路径</th><th>主要来源</th></tr></thead><tbody>')
 for f, l, ip, pa, why_ in HARDCODE_TOP:
     h4.append('<tr><td><code>%s</code></td><td>%s</td><td>%d</td><td>%d</td><td>%s</td></tr>'

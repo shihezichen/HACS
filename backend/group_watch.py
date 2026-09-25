@@ -29,6 +29,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -36,12 +37,12 @@ if HERE not in sys.path:
 
 from team import call_one, REQ_FMT  # noqa: E402  复用现成的 A2A 信封与点名实现
 
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_CHAT_BASE = os.environ.get("AGENT_TEAM_CHAT_BASE") or "http://<host>:9984"
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_NATS_HOST = os.environ.get("AGENT_TEAM_NATS_HOST") or os.environ.get("AGENT_TEAM_NATS") or "<host>:9930,<node-ip>:9930"
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or r"<home>\agent-team"
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime_dir()
 
 CHAT_BASE_DEFAULT = AGENT_TEAM_CHAT_BASE
 NATS_HOST_DEFAULT = AGENT_TEAM_NATS_HOST
@@ -60,7 +61,7 @@ def default_pass_file():
 
 CTX_LIMIT = 12          # 喂给 Agent 的上下文条数
 MAX_PER_ROUND = 1       # 每轮每个 (群,成员) 最多回几条
-# PHASE2_TODO: 待节点注入 env 后删除（"人"的成员 id 列表，逗号分隔）
+# 兜底默认值集中到 L0 node_paths（env 优先）（"人"的成员 id 列表，逗号分隔）
 HUMAN_IDS = tuple(x.strip() for x in (os.environ.get("AGENT_TEAM_HUMAN_IDS") or "<human-id>").split(",") if x.strip())   # 谁是"人"：只有人发的消息才触发 Agent 回应（防死循环）
 
 

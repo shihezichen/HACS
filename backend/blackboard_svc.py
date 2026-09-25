@@ -88,6 +88,7 @@ blackboard_svc.py —— 团队黑板·记忆网关（统一端口 9940）
 
 import argparse
 import base64
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 import datetime
 import hashlib
 import hmac
@@ -106,10 +107,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import embedder  # 同目录模块；导入只读环境变量，不会加载模型
 
 VERSION = "1.9"
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime_dir()
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
 MAX_BODY_BYTES = 262144      # 请求体上限 256 KiB，与 a2a_svc 对齐
 DRAIN_MAX = 4 * 1024 * 1024  # 超限请求最多排空这么多字节，再多就直接断连接
 DETAIL_MAX = 200             # 错误 detail 截断长度

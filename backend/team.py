@@ -61,6 +61,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -74,9 +75,9 @@ except Exception:
 
 MAX_TIMEOUT = 300.0
 DEFAULT_TIMEOUT = 120.0
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<home>\agent-team"
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime_dir()
+# 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_NATS_HOST = (os.environ.get("AGENT_TEAM_NATS_HOST")
                         or "<host>:9930,<node-ip>:9930")  # <NODE_IP_1> 主 / <NODE_IP_2> 备
 DEFAULT_NATS_HOSTS = AGENT_TEAM_NATS_HOST
@@ -87,7 +88,7 @@ DEDUP_WINDOW_SECONDS = 30 * 60
 DEFAULT_DEDUP_FILE = os.path.join(os.path.expanduser("~"), ".team_broadcast_dedup.json")
 DEFAULT_MEETINGS_FILE = os.path.join(os.path.expanduser("~"), ".team_meetings.jsonl")
 #: 人机对话台（群的家）—— 群消息走 HTTP 落库，NATS 只管唤醒通知（契约 §I）
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
 DEFAULT_CHAT_BASE = os.environ.get("AGENT_TEAM_CHAT_BASE") or os.environ.get("TEAM_CHAT_BASE") or "http://<host>:9984"
 
 
@@ -187,7 +188,7 @@ class TeamCliError(Exception):
 
 def _infer_member_linux():
     # type: () -> str
-    d = os.environ.get("AGENT_TEAM_NATS_DIR") or "/etc/nats"  # PHASE2_TODO: 待节点注入 env 后删除
+    d = _np.nats_dir()  # 兜底默认值集中到 L0 node_paths（env 优先）
     names = []
     if os.path.isdir(d):
         for f in glob.glob(os.path.join(d, "*.pass")):
@@ -202,7 +203,7 @@ def _infer_member_linux():
 
 def _infer_member_windows():
     # type: () -> str
-    # PHASE2_TODO: 待节点注入 env 后删除（无凭据时的兜底身份）
+    # 兜底默认值集中到 L0 node_paths（env 优先）（无凭据时的兜底身份）
     default = os.environ.get("AGENT_TEAM_MEMBER_ID") or "openclaw-nb"
     d = os.environ.get("AGENT_TEAM_NATS_DIR") or AGENT_TEAM_RUNTIME_DIR
     if os.path.isdir(d):
@@ -227,7 +228,7 @@ def resolve_password_file(args, member):
         return args.password_file
     if sys.platform == "win32":
         return "%s\\nats-%s.pass" % (os.environ.get("AGENT_TEAM_NATS_DIR") or AGENT_TEAM_RUNTIME_DIR, member)
-    return "%s/%s.pass" % (os.environ.get("AGENT_TEAM_NATS_DIR") or "/etc/nats", member)
+    return "%s/%s.pass" % (_np.nats_dir(), member)
 
 
 def resolve_member_and_password(args):

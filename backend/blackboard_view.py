@@ -88,6 +88,7 @@ import argparse
 import http.cookies
 import ipaddress
 import json
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 import logging
 import os
 import re
@@ -104,13 +105,13 @@ import view_auth                        # 账号 / 会话 / 角色 / 审计，�
 
 VERSION = "1.5"
 
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime_dir()
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
+# 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_DOMAIN = os.environ.get("AGENT_TEAM_DOMAIN") or "example.com"
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_BB_BASE = os.environ.get("AGENT_TEAM_BB_BASE") or "http://<host>:9940"
 
 DEFAULT_UPSTREAM = AGENT_TEAM_BB_BASE

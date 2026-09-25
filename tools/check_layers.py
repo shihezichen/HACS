@@ -110,16 +110,37 @@ def check_transport_words(layers, files):
 
 
 IP_RX = re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b')
-PATH_RX = re.compile(r'(?:[A-Za-z]:[\\/][^\s"\')]{3,}|/(?:opt|etc|var|home|root)/[^\s"\')]{3,})')
+PATH_RX = re.compile(r'(?:[A-Za-z]:(?!//)[\\/][^\s"\')]{3,}'   # 盘符路径；
+                       r'|(?<![:/\w])/(?:opt|etc|var|home|root)/[^\s"\')]{3,})')  # posix 惯例目录；
+                                                                                       # 负向断言排除 URL（http:// 里的 'p:/'、'//opt/'）
+
+
+TRIPLE_RX = re.compile(r'"""(?:.|\n)*?"""|\'\'\'(?:.|\n)*?\'\'\'')
+
+
+def _strip_docstrings(src: str) -> str:
+    """文档串里的示例路径不算硬编码（保留行数以维持行号）。"""
+    return TRIPLE_RX.sub(lambda m: '\n' * m.group(0).count('\n'), src)
 
 
 def check_hardcode(layers, files):
+    """宿主字面量检查，**分两类**（只有一类是真该收的）：
+
+      · `host_paths` —— 宿主路径字面量（真硬编码）。唯一合法去处 = 层归属表里声明的
+        `host_path_owner`（当前 = L0 `agent-team/node_paths.py`）；其余件出现即「要收」，
+        这类数字应当单调趋 0，是「配置零硬编码 / 跨 OS 解耦」的可机械校验进度指标。
+      · `net_literals` —— IP / 端口默认值（提示级）。大量是**合法的**默认（loopback、
+        兜底基址），强行收走反而降低可读性，故只提示不设门禁。
+
+    文档字符串与注释里的示例地址一律不计（`_strip_docstrings`）。
+    """
     run_layers = {'L1', 'L2', 'L3', 'L4'}
+    owner = (layers.get('rules') or {}).get('host_path_owner') or ''
     hits = []
     for rel, meta in files.items():
         if meta['layer'] not in run_layers:
             continue
-        src = read_src(rel)
+        src = _strip_docstrings(read_src(rel))
         ips, paths = [], []
         for i, line in enumerate(src.splitlines(), 1):
             s = line.strip()
@@ -131,6 +152,8 @@ def check_hardcode(layers, files):
                 ips.append((i, m.group(0), s[:70]))
             for m in PATH_RX.finditer(line):
                 paths.append((i, m.group(0), s[:70]))
+        if owner and rel.replace('\\', '/').endswith(owner):
+            paths = []                     # 合法去处：宿主默认值的唯一出处，不计数
         if ips or paths:
             hits.append(dict(file=rel, layer=meta['layer'], ips=ips[:6], ip_count=len(ips),
                              paths=paths[:4], path_count=len(paths)))
@@ -187,8 +210,13 @@ def main():
         print('  例如缺：%s' % '、'.join(sorted(MISSING)[:3]))
         return 2
 
+    host_paths = [dict(file=h['file'], layer=h['layer'], count=h['path_count'],
+                       samples=[p[2] for p in h['paths'][:2]]) for h in w3 if h['path_count']]
+    net_literals = [dict(file=h['file'], layer=h['layer'], count=h['ip_count']) for h in w3 if h['ip_count']]
     report = dict(direction_violations=v1, transport_business_hits=w2,
-                  hardcode=w3, storage=w4, edges=len(edges), files=len(files), declared_exceptions=DECLARED)
+                  hardcode=w3, host_paths=host_paths, net_literals=net_literals,
+                  host_path_owner=(layers.get('rules') or {}).get('host_path_owner') or '',
+                  storage=w4, edges=len(edges), files=len(files), declared_exceptions=DECLARED)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=1))
         return 1 if v1 else 0

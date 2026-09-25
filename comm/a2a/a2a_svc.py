@@ -683,11 +683,47 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _load_env_file(path: str = "") -> List[str]:
+    """启动期读入集中配置文件（默认 = 本脚本同目录的 a2a.env）。
+
+    为什么需要：本节点的全部路径/口径都由 env 提供，但计划任务与 systemd 单元都不会注入 env，
+    而 `a2a.env` 是当初设计好的集中配置却没有任何加载者（孤儿文件）——结果是水位链读不到真源、
+    自愈静默失效。定位用「脚本同目录」，不写死绝对路径，跨 OS 可用；真实 env 优先（只填补缺失项），
+    绝不覆盖调用方已给的变量。文件不存在则原样返回（远端节点没有该文件即为无操作）。
+    阶段 4 由 L0 nodelet 统一注入后，本函数应整体删除。返回：本次填补的键名列表（不含值，便于日志）。
+    """
+    cand = path or os.environ.get("A2A_ENV_FILE") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "a2a.env")
+    if not os.path.isfile(cand):
+        return []
+    filled: List[str] = []
+    try:
+        with open(cand, "r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip().strip('"').strip("'")
+                if key and val and key not in os.environ:
+                    os.environ[key] = val
+                    filled.append(key)
+    except OSError as exc:
+        LOG.warning("读集中配置 %s 失败：%s", cand, exc)
+    return filled
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    filled = _load_env_file()
 
     logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
+    # 集中配置的加载结果要在 basicConfig 之后才可见（之前只有 stdlib 兜底 handler，INFO 会被吞）
+    if filled:
+        LOG.info("集中配置载入 %d 项：%s", len(filled), ",".join(filled))
+    else:
+        LOG.info("集中配置未载入（无 a2a.env 或键已由环境提供）")
 
     Runtime.advertise_host = args.host
     Runtime.advertise_port = args.port

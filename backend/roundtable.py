@@ -80,23 +80,24 @@ import urllib.parse
 import urllib.request
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 VERSION = "1.2"
 
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
 
 DEFAULT_MAX_ROUNDS = 2       # **每个议程项**的轮次上限（不是整场）
 DEFAULT_MAX_TOTAL_ROUNDS = 0  # 整场总轮数上限，0 = 不额外限制（= 议程项数 × --max-rounds）
 DEFECT_DUE_HOURS = 24        # 缺席缺陷单的闭环期限：次日
 DEFAULT_DEADLINE_S = 900
 DEFAULT_MAX_CHARS = 6000
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
 DEFAULT_MODERATOR = os.environ.get("AGENT_TEAM_MODERATOR") or "hermes"
 DEFAULT_TOPIC = "roundtable"   # 没给 --topic 时的缺省话题（会打一行 warn，不静默）
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
 MODERATOR_FALLBACK = tuple(m.strip() for m in (os.environ.get("AGENT_TEAM_MODERATOR_FALLBACK") or "hermes,lobster,top001").split(",") if m.strip())
 
 SNIPPET_MAX = 12             # 单次 prompt 最多塞几条黑板片段

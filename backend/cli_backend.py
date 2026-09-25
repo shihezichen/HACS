@@ -64,6 +64,7 @@ import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 VERSION = "1.0"
 DEFAULT_TIMEOUT_S = 300.0
@@ -73,32 +74,30 @@ DETAIL_MAX = 300           # 错误 detail 截断长度
 MAX_BODY_BYTES = 262144    # 请求体上限 256 KiB
 TASK_LOG_MAX = 40          # 日志里只记任务前 40 字，不记全文
 
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or r"<home>\agent-team"
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime_dir()
 
 DEFAULT_KEY_FILE = os.environ.get("AGENT_TEAM_PASS_FILE") or AGENT_TEAM_RUNTIME_DIR + r"\cli-backend-key"
 DEFAULT_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "logs", "cli_backend.log")
 
-# PHASE2_TODO: 待节点注入 env 后删除（本机 node22 运行时路径）
-PI_NODE = os.environ.get("AGENT_TEAM_NODE_EXE") or r"<home>\node22\node-v22.23.2-win-x64\node.exe"
-# PHASE2_TODO: 待节点注入 env 后删除
-PI_CLI_JS = os.environ.get("AGENT_TEAM_PI_CLI_JS") or (
-    r"<home>\node22\node-v22.23.2-win-x64\node_modules"
-    r"\@earendil-works\pi-coding-agent\dist\bundle\cli.js")
-# PHASE2_TODO: 待节点注入 env 后删除
-PI_WORKDIR = os.environ.get("AGENT_TEAM_PI_WORKDIR") or r"<home>\pi-workspace"
-# PHASE2_TODO: 待节点注入 env 后删除
-CLAUDE_EXEC = os.environ.get("AGENT_TEAM_CLAUDE_EXEC") or r"<home>\AppData\Local\hermes\scripts\claude_exec.py"
-# PHASE2_TODO: 待节点注入 env 后删除
-CLAUDE_WORKDIR = os.environ.get("AGENT_TEAM_CLAUDE_WORKDIR") or r"<home>\claude-workspace"
+# 兜底默认值集中到 L0 node_paths（env 优先）（本机 node22 运行时路径）
+PI_NODE = os.environ.get("AGENT_TEAM_NODE_EXE") or _np.node_exe()
+# 兜底默认值集中到 L0 node_paths（env 优先）
+PI_CLI_JS = _np.pi_cli_js()
+# 兜底默认值集中到 L0 node_paths（env 优先）
+PI_WORKDIR = os.environ.get("AGENT_TEAM_PI_WORKDIR") or _np.pi_workdir()
+# 兜底默认值集中到 L0 node_paths（env 优先）
+CLAUDE_EXEC = _np.claude_exec()
+# 兜底默认值集中到 L0 node_paths（env 优先）
+CLAUDE_WORKDIR = _np.claude_workdir()
 
 # codex：原生 exe 优先（不需要 shell），退回 PATH 上的 codex.cmd（配套 codex_launch.py 垫片，
 # 它 os.execv 到同一个原生 exe）。CODEX_CLI 环境变量可整体顶掉这两个。
-# PHASE2_TODO: 待节点注入 env 后删除
-CODEX_EXE = os.environ.get("AGENT_TEAM_CODEX_EXE") or r"<home>\.codex\packages\standalone\current\bin\codex.exe"
-# PHASE2_TODO: 待节点注入 env 后删除
-CODEX_CMD = os.environ.get("AGENT_TEAM_CODEX_CMD") or r"<home>\.local\bin\codex.cmd"
+# 兜底默认值集中到 L0 node_paths（env 优先）
+CODEX_EXE = _np.codex_exe()
+# 兜底默认值集中到 L0 node_paths（env 优先）
+CODEX_CMD = _np.codex_cmd()
 CODEX_WORKDIR = os.environ.get("AGENT_TEAM_CODEX_WORKDIR") or os.environ.get("CODEX_WORKDIR") or r"<work-dir>"
 
 # codex 拒绝在「非 git 仓库 / 未受信任目录」里跑时的报错特征 → 自动加 --skip-git-repo-check 重试

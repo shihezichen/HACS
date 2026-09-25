@@ -67,6 +67,7 @@ import re
 import sys
 import unicodedata
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -76,7 +77,7 @@ VERSION = "1.0"
 
 UTC = datetime.timezone.utc
 
-DEFAULT_DSN_FILE = "<deploy-dir>/pg.env"
+DEFAULT_DSN_FILE = os.path.join(_np.etc_dir(), "pg.env")
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
 

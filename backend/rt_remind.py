@@ -46,6 +46,7 @@ import json
 import os
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -56,8 +57,8 @@ UTC = datetime.timezone.utc
 ACTION_OPEN_STATUSES = ("open", "doing")        # 落实事项"还欠着"的状态
 ISSUE_OPEN_STATUSES = ("open", "watching")      # 遗留问题"还在跟踪"的状态
 
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
 DEFAULT_DSN_FILE = os.environ.get("AGENT_TEAM_PG_ENV_FILE") or (AGENT_TEAM_ETC_DIR + "/pg.env")
 DEFAULT_LIMIT = 200          # 单张表一次最多捞这么多条（逾期真到这个量级，问题不在提醒上）
 DEFAULT_TIMEOUT_S = 60.0

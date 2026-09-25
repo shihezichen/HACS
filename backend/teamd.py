@@ -68,13 +68,14 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple  # noqa: F401
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from nats_client import NatsClient, NatsError, read_secret_file  # noqa: E402
 
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<home>\agent-team"
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime_dir()
 
 VERSION = "1.2"
 REQ_SUBJECT_FMT = "a2a.v1.req.%s"
@@ -191,7 +192,7 @@ def default_password_path(member):
     """两者都缺省时的平台默认口令文件路径。"""
     if os.name == "nt":
         return "%s\\nats-%s.pass" % (os.environ.get("AGENT_TEAM_NATS_DIR") or AGENT_TEAM_RUNTIME_DIR, member)
-    return "%s/%s.pass" % (os.environ.get("AGENT_TEAM_NATS_DIR") or "/etc/nats", member)  # PHASE2_TODO: 待节点注入 env 后删除
+    return "%s/%s.pass" % (_np.nats_dir(), member)  # 兜底默认值集中到 L0 node_paths（env 优先）
 
 
 def resolve_member_creds(members, user_entries, password_file_entries):

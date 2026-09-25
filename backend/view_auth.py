@@ -60,11 +60,12 @@ import threading
 import time
 import unicodedata
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 VERSION = "1.0"
 
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
 DEFAULT_DSN_FILE = os.environ.get("AGENT_TEAM_PG_ENV_FILE") or AGENT_TEAM_ETC_DIR + "/pg.env"
 DEFAULT_KEY_FILE = os.environ.get("AGENT_TEAM_SESSION_KEY_FILE") or AGENT_TEAM_ETC_DIR + "/view-session.key"
 KEY_ENV = "BB_VIEW_SESSION_KEY"          # 备选：直接给 base64 的密钥（systemd 环境变量）

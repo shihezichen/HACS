@@ -15,12 +15,13 @@ import subprocess
 import sys
 import tempfile
 import os
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 BASE = "https://example.com"
 CHAT = "https://chat.example.com/"
 USER = "portalcheck_" + secrets.token_hex(3)
 PASS = secrets.token_urlsafe(20)
-AUTH = "<deploy-dir>/view_auth.py"
+AUTH = os.path.join(_np.runtime_dir(), "view_auth.py")
 JAR = tempfile.mktemp(suffix=".jar")
 OUT = "/tmp/portal_accept.html"
 

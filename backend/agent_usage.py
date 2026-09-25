@@ -41,6 +41,7 @@ import sqlite3
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional, Tuple
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 LOG = logging.getLogger("agent_usage")
 
@@ -74,15 +75,14 @@ def a2a_remote_base() -> str:
 def a2a_remote_token() -> str:
     """a2a 服务令牌：先 env，再令牌文件。
 
-    遗留：最后一条候选是 Linux 部署的 <deploy-dir>/client-token，待节点注入 env 后删除。
+    候选目录由 L0 node_paths.etc_dirs() 集中提供（env > 平台惯例，Windows=运行目录 / posix=<deploy-dir>）。
     """
     tok = _first_env("CTX_A2A_TOKEN", "A2A_TOKEN")
     if tok:
         return tok
     candidates = [_first_env("CTX_A2A_TOKEN_FILE"), _first_env("A2A_TOKEN_FILE"),
-                  _first_env("AGENT_TEAM_TOKEN_FILE"),
-                  os.path.join(_first_env("AGENT_TEAM_ETC_DIR") or "<deploy-dir>",
-                               "client-token")]
+                  _first_env("AGENT_TEAM_TOKEN_FILE")]
+    candidates += [os.path.join(d, "client-token") for d in _np.etc_dirs()]
     for path in candidates:
         if path and os.path.isfile(path):
             try:
@@ -171,6 +171,11 @@ def window_for(model: str, backend: str = "") -> int:
     ② Hermes 自带模型目录 `DEFAULT_CONTEXT_LENGTHS`（能 import agent 时）；
     ③ 本模块兜底表（保守值，偏小 = 自愈偏早，属安全方向）。
 
+    ④ **Hermes 别名兜底**（仅 backend=hermes）——④ 只在①②③全不命中时生效，且只对 Hermes 后端：
+    agents.json 里的 `model` 常写部署别名（如 `hermes-agent`），目录里查不到，若直接返回 0
+    则 read_usage 恒为 None，自愈静默失效。此时该实例的 **config.yaml 生效窗口** 才是真分母
+    （它是这台 Hermes 的压缩阈值）；非 Hermes 后端不做此兜底，避免把本机窗口套给别的后端。
+
     全都不命中返回 0，表示「不知道」——调用方必须降级为不自愈，绝不编造分母。
     口径说明：①优先于②是有意为之。目录里的窗口是模型**理论上限**，而 Hermes 自身
     的压缩阈值按生效窗口算；自愈若按理论上限估水位，会系统性低估压力（本机实测低估
@@ -199,7 +204,14 @@ def window_for(model: str, backend: str = "") -> int:
     for k, v in CTX_WINDOW_FALLBACK.items():
         if k in m and len(k) > len(best_key):
             best_key, best_val = k, v
-    return int(best_val)
+    if best_val > 0:
+        return int(best_val)
+    # ④ 别名兜底：模型名查不到时，以「该 Hermes 实例的生效窗口」为准（仅 Hermes 后端）。
+    if backend in ("", "hermes"):
+        _bm, _bw = effective_window_from_config()
+        if _bw > 0:
+            return int(_bw)
+    return 0
 
 
 # ---- Hermes 估算公式参数（对齐 Hermes 0.21.3 agent/model_metadata.py）----

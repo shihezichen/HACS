@@ -42,6 +42,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -66,16 +67,16 @@ DEFAULT_PORT = 9980
 #: 默认文档：根路径 / 与 SPA fallback 都落这里（原 index.html 已停用）
 DEFAULT_DOC = "group.html"
 
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<deploy-dir>"
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime_dir()
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
+# 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_DOMAIN = os.environ.get("AGENT_TEAM_DOMAIN") or "example.com"
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_SSH_TARGET = os.environ.get("AGENT_TEAM_SSH_TARGET") or ""
-# PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_CLAUDE_EXEC = os.environ.get("AGENT_TEAM_CLAUDE_EXEC") or "<home>/AppData/Local/hermes/scripts/claude_exec.py"
+# 兜底默认值集中到 L0 node_paths（env 优先）
+AGENT_TEAM_CLAUDE_EXEC = _np.claude_exec()
 
 #: 门户登录页（本服务**不自己签发 cookie**，与「只有看板 POST /login」的既有口径一致）。
 #: 未登录的浏览器访客一律转交这里，并带「登录后回本页」的 next。
@@ -97,7 +98,7 @@ ROSTER_DEFAULTS = (
 )
 
 #: 成员显示名补充表（agents.json 里只有 description 时用；键 = 成员 id）
-# PHASE2_TODO: 待节点注入 env 后删除（键=成员 id，值=显示名）
+# 兜底默认值集中到 L0 node_paths（env 优先）（键=成员 id，值=显示名）
 _DISPLAY_NAMES_FALLBACK = {
     "lobster": "龙虾",
     "quantum": "量子",
@@ -117,7 +118,7 @@ if _dn_override:
 BODY_MAX = 1 << 20                       # 请求体上限 1MB
 #: tailnet 内免登录时把对端认作的人（与看板"内网免登录"同口径）。
 #: 有人用会话登录时以登录身份为准；要区分多人就实现 §H 的 /login（复用 view_auth）。
-# PHASE2_TODO: 待节点注入 env 后删除
+# 兜底默认值集中到 L0 node_paths（env 优先）
 DEFAULT_HUMAN_ID = (os.environ.get("AGENT_TEAM_HUMAN_ID") or os.environ.get("CHAT_HUMAN_ID") or "<human-id>").strip() or "<human-id>"
 DB_CONNECT_TIMEOUT_S = 5
 DB_RETRY_S = 30.0                        # 连接坏了多久才重连
