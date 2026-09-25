@@ -98,10 +98,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
 import view_auth                        # 账号 / 会话 / 角色 / 审计，纯标准库
+import web_gateway                      # L1 通行层：HTTP 应答出口与路由分发
 
 VERSION = "1.5"
 
@@ -612,46 +613,219 @@ def upstream_get(path: str, params: Dict[str, Any],
 
 
 # --- HTTP 处理 ------------------------------------------------------
+#
+# 「应答出口 + 路由分发」这层**传输职责**交给 L1 `web_gateway`（阶段2 刀6）：本件
+# 只留「路径 → 处理函数」的登记表，处理函数一律 `return (码, 响应体字节, 本次特有
+# 的头)`，一行 socket 都不碰。L1 给不了的三样东西收在 `ViewHandler._reply()` 这
+# **唯一一个出口**里（迁移前的 `_finish()`）：
+#   · 公网面的**固定安全头集合**（SECURITY_HEADERS，顺序即字节顺序）；
+#   · `head_only` 语义（HEAD 照发 Content-Length，但一个字节的体都不写）；
+#   · 每个响应一行 `<方法> <路径> -> <码> <耗时>ms ip=<ip>` 的日志。
 
-class ViewHandler(BaseHTTPRequestHandler):
+# v1.4 起这页开在公网上，下面这组头**每个响应都带**。顺序就是发出去的字节顺序，
+# 一个字节都不许动（迁移前写死在 _finish() 里，现在登记成一处常量）。
+SECURITY_HEADERS = (
+    ("Cache-Control", "no-store"),
+    ("X-Content-Type-Options", "nosniff"),
+    ("Referrer-Policy", "no-referrer"),
+    ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
+    ("X-Frame-Options", "DENY"),            # 不许被套进 iframe 钓鱼
+    ("X-Robots-Tag", "noindex, nofollow"),  # 不许被搜索引擎收录
+    # 页面完全自包含：不许加载任何外部脚本/样式/图片，fetch 与表单只许打自己。
+    # style-src / script-src 留 'unsafe-inline' 是因为整页样式与脚本都内联在
+    # HTML 里（自包含、离线可跑）；**外域一律不许**，这才是这条头的重点。
+    ("Content-Security-Policy",
+     "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+     "script-src 'self' 'unsafe-inline'; connect-src 'self'; "
+     "img-src 'self' data:; object-src 'none'; base-uri 'none'; "
+     "form-action 'self'; frame-ancestors 'none'"),
+)
+
+JSON_CT = "application/json; charset=utf-8"
+HTML_CT = "text/html; charset=utf-8"
+TEXT_CT = "text/plain; charset=utf-8"
+
+GW = web_gateway.Gateway("blackboard_view", version=VERSION, quiet=True)
+
+READ_METHODS = ("GET", "HEAD")                      # 只读看板：两者走同一套处理函数
+WRITE_METHODS = ("PUT", "PATCH", "DELETE", "OPTIONS")
+
+
+# --- 路由登记表：路径 → 处理函数（语义全在 ViewHandler 的同名方法里）-----
+
+@GW.auth
+def _gw_gate(req: "web_gateway.Request") -> Any:
+    """门禁钩子：L1 在路由前调一次，返回回复即短路（迁移前 _route() 开头那一段）。"""
+    return req.view._auth_gate()
+
+
+@GW.not_found
+def _gw_not_found(req: "web_gateway.Request") -> Any:
+    """没登记的路径：读方法落 404 文案，写方法照旧落 405（只读纪律）。"""
+    if req.method in READ_METHODS:
+        return req.view._route_404()
+    return req.view._reject_write()
+
+
+@GW.route(PORTAL_PATH, methods=READ_METHODS)
+@GW.route("/portal", methods=READ_METHODS)
+def _gw_portal(req):
+    return req.view._portal()
+
+
+@GW.route(BOARD_PATH, methods=READ_METHODS)
+def _gw_board(req):
+    return req.view._board()
+
+
+@GW.route("/healthz", methods=READ_METHODS)
+def _gw_healthz(req):
+    return req.view._healthz()
+
+
+@GW.route("/favicon.ico", methods=READ_METHODS)
+def _gw_favicon(req):
+    return req.view._favicon()
+
+
+@GW.route("/api/health", methods=READ_METHODS)
+def _gw_api_health(req):
+    return req.view._api_health()
+
+
+@GW.route("/api/entries", methods=READ_METHODS)
+def _gw_api_entries(req):
+    return req.view._api_entries()
+
+
+@GW.route("/api/search", methods=READ_METHODS)
+def _gw_api_search(req):
+    return req.view._api_search()
+
+
+@GW.route("/api/sessions", methods=READ_METHODS)
+def _gw_api_sessions(req):
+    return req.view._api_sessions()
+
+
+@GW.route("/api/sessions", methods=READ_METHODS, prefix=True)
+def _gw_api_session_detail(req):
+    """/api/sessions/<id>。迁移前只认**恰好三段**，更深的路径落 404 —— 前缀登记
+    会把 /api/sessions/a/b 也收进来，所以这里把段数判断补回去。"""
+    if len(req.parts) != 3:
+        return req.view._route_404()
+    return req.view._api_session_detail(req.parts[2])
+
+
+@GW.route("/api/tracking", methods=READ_METHODS)
+def _gw_api_tracking(req):
+    return req.view._api_tracking()
+
+
+@GW.route("/api/actions", methods=READ_METHODS)
+def _gw_api_actions(req):
+    return req.view._api_tracking_list("actions")
+
+
+@GW.route("/api/issues", methods=READ_METHODS)
+def _gw_api_issues(req):
+    return req.view._api_tracking_list("issues")
+
+
+@GW.route("/api/shared", methods=READ_METHODS)
+def _gw_api_shared(req):
+    return req.view._api_shared()
+
+
+@GW.route("/api/shared/search", methods=READ_METHODS)
+def _gw_api_shared_search(req):
+    return req.view._api_shared_search()
+
+
+@GW.route(LOGIN_PATH, methods=("POST",))
+def _gw_login_post(req):
+    """唯一开了口子的写方法，而且只开在 /login 上（登录 / 改密 / 退出）。
+
+    认证没装（--mode tailnet）时连这个口子都没有 —— 直接 405，口径同 v1.3。
+    路径在这里**再比一次原始 path**：迁移前用的是 `urlsplit(path).path == LOGIN_PATH`
+    的严格相等，`/login/` 落的是 405 而不是登录页，登记表的尾斜杠归一化不能把它放宽。
+    """
+    view = req.view
+    if view._auth_on() and urllib.parse.urlsplit(view.path).path == LOGIN_PATH:
+        return view._login_post()
+    return view._reject_write()
+
+
+# 写方法登记在根路径上，为的是让 L1 的 handler_class() **保留** do_PUT / do_PATCH /
+# do_DELETE / do_OPTIONS（连同上面那条 POST 带来的 do_POST）：这几个方法一旦一条路由
+# 都没有，基类就会回 501，而迁移前这里是带 Allow 头的 405。别的路径上的写方法由
+# _gw_not_found 兜到同一个 _reject_write —— 应答出口始终只有一个。
+@GW.route("/", methods=WRITE_METHODS)
+def _gw_write_blocked(req):
+    return req.view._reject_write()
+
+
+# 必须在全部 @GW.route 之后取：handler_class() 会按「已登记的方法」删掉多余的
+# do_<METHOD>。上面七个方法全登记了，所以一个都不会被删。
+_GatewayHandler = GW.handler_class()
+
+
+class ViewHandler(_GatewayHandler):
+    """L1 网关处理器 + 本件特有的三处差异；路由分发与信封全部沿用 L1。
+
+    1. **响应形态**：`sys_version=""` + HTTP/1.1，保住 `Server: blackboard_view/<VERSION>`
+       与 keep-alive 语义（L1 默认 HTTP/1.0 且不清 sys_version）。
+    2. **应答出口**：重写 `_reply()` —— 公网面的固定安全头集合、`head_only`、一行
+       日志，外加「同名头允许发多条」（改密成功那一下要一次下发两个 Set-Cookie，
+       L1 的 dict 头会把它们并成一条，字节就不一样了）。
+    3. **路径归一**：沿用迁移前的 parts 口径（剥 #fragment、吃掉空段与尾斜杠），
+       比 L1 的 `partition("?")` + `rstrip("/")` 宽，`/api//entries` 照样认。
+    """
+
     server_version = "blackboard_view/" + VERSION
     sys_version = ""
     protocol_version = "HTTP/1.1"
 
     head_only = False
-    visitor = None          # type: Optional[Visitor]  —— 每个请求在 _route 里填
+    visitor = None          # type: Optional[Visitor]  —— 每个请求在 _auth_gate 里填
 
     # --- 基础工具 ---------------------------------------------------
     def log_message(self, fmt: str, *args: Any) -> None:
-        """屏蔽默认 stderr 日志，统一由 _finish() 打一行。"""
+        """屏蔽默认 stderr 日志，统一由 _reply() 打一行。"""
         return
 
     def _elapsed_ms(self) -> float:
         return (time.time() - getattr(self, "_started", time.time())) * 1000.0
 
-    def _finish(self, code: int, body: bytes, content_type: str,
-                extra_headers: Optional[List[Tuple[str, str]]] = None) -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", content_type)
+    def _handle(self) -> None:
+        """L1 的统一入口：请求交给 GW.dispatch，回来的信封由 _reply() 发出去。"""
+        self._started = time.time()
+        self.head_only = self.command == "HEAD"
+        req = web_gateway.Request(self)
+        req.view = self
+        # 路径归一化对齐迁移前的 `[p for p in path.split("/") if p]`：剥 #fragment、
+        # 吃掉空段与尾斜杠。要原始路径的地方一律读 self.path（见 _gw_login_post）。
+        req.parts = [p for p in urllib.parse.urlsplit(self.path).path.split("/") if p]
+        req.path = "/" + "/".join(req.parts)
+        status, body, headers = GW.dispatch(req)
+        self._reply(status, body, headers)
+
+    def _reply(self, status: int, body: bytes, headers: Dict[str, Any]) -> None:
+        """**本件唯一的应答出口**（迁移前的 _finish()）。
+
+        头的顺序就是发出去的字节顺序：Content-Type → Content-Length → 固定安全头
+        集合 → 本次特有的头。同名头（改密成功时的两个 Set-Cookie）在 headers 里以
+        list 的形式带进来，这里逐条发出去。
+        """
+        headers = dict(headers)
+        self.send_response(status)
+        self.send_header("Content-Type", headers.pop("Content-Type"))
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        # v1.4：这页要开到公网上，安全头一条不少
-        self.send_header("Strict-Transport-Security",
-                         "max-age=31536000; includeSubDomains")
-        self.send_header("X-Frame-Options", "DENY")          # 不许被套进 iframe 钓鱼
-        self.send_header("X-Robots-Tag", "noindex, nofollow")  # 不许被搜索引擎收录
-        # 页面完全自包含：不许加载任何外部脚本/样式/图片，fetch 与表单只许打自己。
-        # style-src / script-src 留 'unsafe-inline' 是因为整页样式与脚本都内联在
-        # HTML 里（自包含、离线可跑）；**外域一律不许**，这才是这条头的重点。
-        self.send_header("Content-Security-Policy",
-                         "default-src 'self'; style-src 'self' 'unsafe-inline'; "
-                         "script-src 'self' 'unsafe-inline'; connect-src 'self'; "
-                         "img-src 'self' data:; object-src 'none'; base-uri 'none'; "
-                         "form-action 'self'; frame-ancestors 'none'")
-        for name, value in (extra_headers or []):
+        for name, value in SECURITY_HEADERS:
             self.send_header(name, value)
+        for name, value in headers.items():
+            for one in (value if isinstance(value, list) else [value]):
+                self.send_header(name, one)
         self.end_headers()
         if not self.head_only:
             try:
@@ -660,28 +834,41 @@ class ViewHandler(BaseHTTPRequestHandler):
                 pass
         # 日志一行一条：方法/路径/状态/耗时/来源 IP —— 不记 token、不记响应体
         LOG.info("%s %s -> %d %.1fms ip=%s", self.command,
-                 urllib.parse.urlsplit(self.path).path, code, self._elapsed_ms(),
+                 urllib.parse.urlsplit(self.path).path, status, self._elapsed_ms(),
                  self.client_address[0] if self.client_address else "-")
 
-    def _send_json(self, code: int, payload: Dict[str, Any]) -> None:
+    # --- 应答信封：处理函数只组装，不发送 ----------------------------
+    def _out(self, code: int, body: bytes, content_type: str,
+             extra_headers: Optional[List[Tuple[str, str]]] = None) -> Tuple[int, bytes, Dict[str, Any]]:
+        """装一个 L1 认的信封：公共安全头由 _reply() 补，这里只给本次特有的头。"""
+        headers = {"Content-Type": content_type}    # type: Dict[str, Any]
+        for name, value in (extra_headers or []):
+            if name in headers:                     # 同名头（两个 Set-Cookie）留成 list
+                current = headers[name]
+                headers[name] = (current if isinstance(current, list)
+                                 else [current]) + [value]
+            else:
+                headers[name] = value
+        return code, body, headers
+
+    def _json(self, code: int, payload: Dict[str, Any]) -> Tuple[int, bytes, Dict[str, Any]]:
         """所有 JSON 响应的**唯一**出口：出门前统一按角色再遮一遍。
 
         放在这里而不是放在每个 _api_* 里，是因为"漏了一个端点"这种事只要发生一次
         就是泄密；收口在出口上，将来加端点也自动被管住。
         role=None（tailnet 直连 / 未装认证）时 apply_role 原样返回，一个字节不动。
         """
-        self._finish(code, json_bytes(apply_role(payload, self.role)),
-                     "application/json; charset=utf-8")
+        return self._out(code, json_bytes(apply_role(payload, self.role)), JSON_CT)
 
-    def _send_html(self, code: int, text: str,
-                   extra_headers: Optional[List[Tuple[str, str]]] = None) -> None:
-        self._finish(code, text.encode("utf-8"), "text/html; charset=utf-8", extra_headers)
+    def _html(self, code: int, text: str,
+              extra_headers: Optional[List[Tuple[str, str]]] = None) -> Tuple[int, bytes, Dict[str, Any]]:
+        return self._out(code, text.encode("utf-8"), HTML_CT, extra_headers)
 
     def _redirect(self, location: str,
-                  extra_headers: Optional[List[Tuple[str, str]]] = None) -> None:
+                  extra_headers: Optional[List[Tuple[str, str]]] = None) -> Tuple[int, bytes, Dict[str, Any]]:
         """302 + 空体。Location 只会是本服务里的相对路径（见 safe_next）。"""
         headers = [("Location", location)] + list(extra_headers or [])
-        self._finish(302, b"", "text/plain; charset=utf-8", headers)
+        return self._out(302, b"", TEXT_CT, headers)
 
     # --- 认证：取请求上下文 -----------------------------------------
     @property
@@ -838,138 +1025,89 @@ class ViewHandler(BaseHTTPRequestHandler):
         values = query.get(name) or []
         return (values[0] or "").strip() if values else ""
 
-    # --- 路由 -------------------------------------------------------
-    def do_GET(self) -> None:  # noqa: N802
-        self._started = time.time()
-        self.head_only = False
-        self._route()
+    # --- 门禁与路由目标（登记表见文件上方的 @GW.route）----------------
+    def _auth_gate(self) -> Any:
+        """门禁。这几行的顺序就是安全边界，改之前先想清楚。
 
-    def do_HEAD(self) -> None:  # noqa: N802
-        self._started = time.time()
-        self.head_only = True
-        self._route()
-
-    def _reject_write(self) -> None:
-        """只读看板：一切写方法都到这里。
-
-        v1.4 起唯一的例外是 POST /login（见 do_POST）—— 那是登录表单，不碰黑板。
-        这条 405 **不看登录状态**：登录了也一样写不进去，这是只读纪律，不是权限。
+        **只对读方法生效**：迁移前这段写在 _route() 开头，而 _route() 只从
+        do_GET / do_HEAD 进来；写方法（含 POST /login）从来不过这道门。
         """
-        self._started = time.time()
-        self.head_only = False
-        self._drain_body()
-        self._audit("write_blocked", None,
-                    "拦下写请求 %s %s" % (self.command,
-                                          urllib.parse.urlsplit(self.path).path[:120]))
-        self._finish(405, json_bytes({
-            "ok": False,
-            "error": "method_not_allowed",
-            "detail": "看板只读：只接受 GET / HEAD，不提供任何写入黑板的入口",
-        }), "application/json; charset=utf-8", [("Allow", "GET, HEAD")])
-
-    def do_POST(self) -> None:  # noqa: N802
-        """唯一开了口子的写方法，而且只开在 /login 上（登录 / 改密 / 退出）。
-
-        认证没装（--mode tailnet）时连这个口子都没有 —— 直接 405，口径同 v1.3。
-        """
-        path = urllib.parse.urlsplit(self.path).path
-        if self._auth_on() and path == LOGIN_PATH:
-            self._started = time.time()
-            self.head_only = False
-            self._login_post()
-            return
-        self._reject_write()
-
-    do_PUT = _reject_write
-    do_PATCH = _reject_write
-    do_DELETE = _reject_write
-    do_OPTIONS = _reject_write
-
-    def _route(self) -> None:
+        if self.command not in READ_METHODS:
+            return None
         path = urllib.parse.urlsplit(self.path).path
         parts = [p for p in path.split("/") if p]
         self.visitor = None
 
-        # --- 门禁。这几行的顺序就是安全边界，改之前先想清楚 -------------
-        if self._auth_on():
-            if parts == ["healthz"]:
-                pass                        # 探活免登录：不然 systemd/隧道判不了死活
-            elif path == LOGIN_PATH:
-                self._login_get()
-                return
-            else:
-                self.visitor = self._resolve_visitor()
-                if self.visitor is None:
-                    if parts != ["favicon.ico"]:    # 图标被挡不值得记一条审计
-                        self._audit("access_denied", None,
-                                    "未登录访问 %s %s，已跳登录页" % (self.command, path[:120]))
-                    self._redirect(LOGIN_PATH + "?next="
-                                   + urllib.parse.quote(safe_next(self.path), safe="/?=&"))
-                    return
-                if path == ACCOUNT_PATH:
-                    self._account_get()
-                    return
-
-        # --- 首页 = webPortal 卡片墙（v1.5）----------------------------
-        # 只做入口、不展示任何黑板数据；未登录的人仍然被上面的门禁挡在 /login。
-        # 老书签兼容：白板时代的带参链接（/?tab=... ）302 到 /board。
-        if not parts or parts == ["portal"]:
-            if parts != ["portal"] and urllib.parse.urlsplit(self.path).query:
-                self._redirect(BOARD_PATH)
-                return
-            bar, headers = self._userbar()
-            self._send_html(200, render_portal(bar), headers)
-            return
-        if parts == ["board"]:
-            bar, headers = self._userbar()
-            self._send_html(200, render_page(bar), headers)
-            return
+        if not self._auth_on():
+            return None
         if parts == ["healthz"]:
-            self._send_json(200, {
-                "ok": True, "version": VERSION, "service": "blackboard_view",
-                "upstream": Runtime.upstream, "token_loaded": Runtime.token_loaded,
-                "refresh_seconds": Runtime.refresh_seconds,
-            })
-            return
-        if parts == ["favicon.ico"]:
-            self._finish(204, b"", "image/x-icon")
-            return
-        if parts == ["api", "health"]:
-            code, payload = upstream_get("/healthz", {})
-            self._send_json(code, payload)
-            return
-        if parts == ["api", "entries"]:
-            self._api_entries()
-            return
-        if parts == ["api", "search"]:
-            self._api_search()
-            return
-        if parts == ["api", "sessions"]:
-            self._api_sessions()
-            return
-        if len(parts) == 3 and parts[0] == "api" and parts[1] == "sessions":
-            self._api_session_detail(parts[2])
-            return
-        if parts == ["api", "tracking"]:
-            self._api_tracking()
-            return
-        if parts in (["api", "actions"], ["api", "issues"]):
-            self._api_tracking_list(parts[1])
-            return
-        if parts == ["api", "shared"]:
-            self._api_shared()
-            return
-        if parts == ["api", "shared", "search"]:
-            self._api_shared_search()
-            return
+            return None                     # 探活免登录：不然 systemd/隧道判不了死活
+        if path == LOGIN_PATH:
+            return self._login_get()
+        self.visitor = self._resolve_visitor()
+        if self.visitor is None:
+            if parts != ["favicon.ico"]:    # 图标被挡不值得记一条审计
+                self._audit("access_denied", None,
+                            "未登录访问 %s %s，已跳登录页" % (self.command, path[:120]))
+            return self._redirect(LOGIN_PATH + "?next="
+                                  + urllib.parse.quote(safe_next(self.path), safe="/?=&"))
+        if path == ACCOUNT_PATH:
+            return self._account_get()
+        return None
 
-        self._send_json(404, {"ok": False, "error": "not_found",
-                              "detail": "看板只有 / 、/api/health、/api/entries、"
-                                        "/api/search、/api/sessions、/api/tracking、"
-                                        "/api/actions、/api/issues、/api/shared、"
-                                        "/api/shared/search"})
+    def _reject_write(self) -> Any:
+        """只读看板：一切写方法都到这里。
 
-    def _api_entries(self) -> None:
+        v1.4 起唯一的例外是 POST /login（见 _gw_login_post）—— 那是登录表单，
+        不碰黑板。这条 405 **不看登录状态**：登录了也一样写不进去，这是只读纪律，
+        不是权限。
+        """
+        self._drain_body()
+        self._audit("write_blocked", None,
+                    "拦下写请求 %s %s" % (self.command,
+                                          urllib.parse.urlsplit(self.path).path[:120]))
+        return self._out(405, json_bytes({
+            "ok": False,
+            "error": "method_not_allowed",
+            "detail": "看板只读：只接受 GET / HEAD，不提供任何写入黑板的入口",
+        }), JSON_CT, [("Allow", "GET, HEAD")])
+
+    # --- 首页 = webPortal 卡片墙（v1.5）------------------------------
+    # 只做入口、不展示任何黑板数据；未登录的人仍然被 _auth_gate 挡在 /login。
+    def _portal(self) -> Any:
+        """老书签兼容：白板时代的带参链接（/?tab=... ）302 到 /board；/portal 不带这条。"""
+        parts = [p for p in urllib.parse.urlsplit(self.path).path.split("/") if p]
+        if parts != ["portal"] and urllib.parse.urlsplit(self.path).query:
+            return self._redirect(BOARD_PATH)
+        bar, headers = self._userbar()
+        return self._html(200, render_portal(bar), headers)
+
+    def _board(self) -> Any:
+        bar, headers = self._userbar()
+        return self._html(200, render_page(bar), headers)
+
+    def _healthz(self) -> Any:
+        return self._json(200, {
+            "ok": True, "version": VERSION, "service": "blackboard_view",
+            "upstream": Runtime.upstream, "token_loaded": Runtime.token_loaded,
+            "refresh_seconds": Runtime.refresh_seconds,
+        })
+
+    def _favicon(self) -> Any:
+        return self._out(204, b"", "image/x-icon")
+
+    def _api_health(self) -> Any:
+        code, payload = upstream_get("/healthz", {})
+        return self._json(code, payload)
+
+    def _route_404(self) -> Any:
+        return self._json(404, {"ok": False, "error": "not_found",
+                                "detail": "看板只有 / 、/api/health、/api/entries、"
+                                          "/api/search、/api/sessions、/api/tracking、"
+                                          "/api/actions、/api/issues、/api/shared、"
+                                          "/api/shared/search"})
+
+    def _api_entries(self) -> Any:
         """GET /api/entries?topic=&kind=&author=&since=&limit= → 透传上游 /entries。"""
         query = self._query()
         params = {
@@ -982,9 +1120,9 @@ class ViewHandler(BaseHTTPRequestHandler):
         code, payload = upstream_get("/entries", params)
         if code == 200:
             payload["mode"] = "entries"
-        self._send_json(code, payload)
+        return self._json(code, payload)
 
-    def _api_search(self) -> None:
+    def _api_search(self) -> Any:
         """GET /api/search?q=&topic=&limit= → 透传上游 /search。
 
         q 为空不去打 /search（上游会回 400，对看板没意义）：直接退回 /entries，
@@ -999,15 +1137,14 @@ class ViewHandler(BaseHTTPRequestHandler):
             code, payload = upstream_get("/entries", {"topic": topic, "limit": limit})
             if code == 200:
                 payload["mode"] = "entries"
-            self._send_json(code, payload)
-            return
+            return self._json(code, payload)
 
         code, payload = upstream_get("/search", {"q": q, "topic": topic, "limit": limit})
         if code == 200:
             payload.setdefault("mode", "search")
-        self._send_json(code, payload)
+        return self._json(code, payload)
 
-    def _api_sessions(self) -> None:
+    def _api_sessions(self) -> Any:
         """GET /api/sessions?state=&topic=&limit=&since= → 透传上游 /sessions。"""
         query = self._query()
         params = {
@@ -1017,20 +1154,19 @@ class ViewHandler(BaseHTTPRequestHandler):
             "limit": clamp_limit(self._first(query, "limit") or None),
         }
         code, payload = upstream_get("/sessions", params)
-        self._send_json(code, payload)
+        return self._json(code, payload)
 
-    def _api_session_detail(self, session_id: str) -> None:
+    def _api_session_detail(self, session_id: str) -> Any:
         """GET /api/sessions/<id> → 透传上游 /sessions/<id>。上游 404 → 本服务 404。"""
         sid = urllib.parse.unquote(session_id).strip()
         if not sid:
-            self._send_json(404, {"ok": False, "error": "not_found",
-                                  "detail": "没有这场会议"})
-            return
+            return self._json(404, {"ok": False, "error": "not_found",
+                                    "detail": "没有这场会议"})
         params = {"limit": clamp_limit(self._first(self._query(), "limit") or None,
                                        MAX_LIMIT)}
         code, payload = upstream_get("/sessions/" + urllib.parse.quote(sid, safe=""),
                                      params, allow_status=(404,))
-        self._send_json(code, payload)
+        return self._json(code, payload)
 
     def _track_params(self) -> Dict[str, Any]:
         """跟踪类端点共用的入参整形：只放行 status/owner/overdue/limit/kind，别的一概不转发。
@@ -1048,21 +1184,21 @@ class ViewHandler(BaseHTTPRequestHandler):
             "limit": clamp_limit(self._first(query, "limit") or None, MAX_LIMIT),
         }
 
-    def _api_tracking(self) -> None:
+    def _api_tracking(self) -> Any:
         """GET /api/tracking?overdue=&limit= → 透传上游 /tracking（两张清单 + 计数）。"""
         params = self._track_params()
         params.pop("status", None)          # /tracking 不收 status，两张表的枚举不一样
         params.pop("kind", None)            # kind 只有 /issues 收
         code, payload = upstream_get("/tracking", params)
-        self._send_json(code, payload)
+        return self._json(code, payload)
 
-    def _api_tracking_list(self, kind: str) -> None:
+    def _api_tracking_list(self, kind: str) -> Any:
         """GET /api/actions|/api/issues?status=&owner=&overdue=&kind=&limit= → 透传上游同名端点。"""
         params = self._track_params()
         if kind != "issues":
             params.pop("kind", None)        # 落实事项没有"性质"这一说
         code, payload = upstream_get("/" + kind, params)
-        self._send_json(code, payload)
+        return self._json(code, payload)
 
     # --- 共享内容 --------------------------------------------------
     def _shared_params(self) -> Dict[str, Any]:
@@ -1079,29 +1215,28 @@ class ViewHandler(BaseHTTPRequestHandler):
             "limit": clamp_limit(self._first(query, "limit") or None, MAX_LIMIT),
         }
 
-    def _shared_send(self, code: int, payload: Dict[str, Any]) -> None:
+    def _shared_out(self, code: int, payload: Dict[str, Any]) -> Any:
         """共享内容的统一出口：上游没有这个端点 -> 502 shared_unavailable（页面降级）。
 
         其余情况照常，但**一定先过一遍 mask_shared** —— sensitive 且未授权的条目
         在这一行之后就没有标题和正文了，浏览器永远拿不到那几个字节。
         """
         if code == 404:
-            self._send_json(502, {
+            return self._json(502, {
                 "ok": False, "error": "shared_unavailable",
                 "detail": "上游还没有 /shared 端点：共享内容服务尚未上线",
             })
-            return
         if code == 200:
             payload = mask_shared(payload, self.role)
-        self._send_json(code, payload)
+        return self._json(code, payload)
 
-    def _api_shared(self) -> None:
+    def _api_shared(self) -> Any:
         """GET /api/shared?scope=&kind=&owner=&tag=&limit= → 透传上游 /shared。"""
         code, payload = upstream_get("/shared", self._shared_params(),
                                      allow_status=(404,))
-        self._shared_send(code, payload)
+        return self._shared_out(code, payload)
 
-    def _api_shared_search(self) -> None:
+    def _api_shared_search(self) -> Any:
         """GET /api/shared/search?q=&semantic=&... → 透传上游 /shared/search。
 
         q 为空不去打 /search（上游会回 400）：直接退回 /shared，跟黑板搜索同一口径。
@@ -1112,13 +1247,12 @@ class ViewHandler(BaseHTTPRequestHandler):
         params = self._shared_params()
         if not q:
             code, payload = upstream_get("/shared", params, allow_status=(404,))
-            self._shared_send(code, payload)
-            return
+            return self._shared_out(code, payload)
         semantic = self._first(query, "semantic").lower()
         params["q"] = q
         params["semantic"] = "1" if semantic in ("1", "true", "yes", "on") else ""
         code, payload = upstream_get("/shared/search", params, allow_status=(404,))
-        self._shared_send(code, payload)
+        return self._shared_out(code, payload)
 
     # --- 登录 / 账号（本文件里唯一会"写"的一小块，写的只有账号库，不碰黑板）---
     def _csrf(self) -> Tuple[str, List[Tuple[str, str]]]:
@@ -1145,32 +1279,31 @@ class ViewHandler(BaseHTTPRequestHandler):
         who = view_auth.ROLE_CN.get(visitor.role or "", visitor.role or "-")
         return render_userbar(visitor.username, who, token), headers
 
-    def _send_login(self, code: int, error: str = "", notice: str = "",
-                    next_url: str = "/", username: str = "") -> None:
+    def _login_page(self, code: int, error: str = "", notice: str = "",
+                    next_url: str = "/", username: str = "") -> Any:
         token, headers = self._csrf()
-        self._send_html(code, render_login(token, next_url, error, notice, username),
-                        headers)
+        return self._html(code, render_login(token, next_url, error, notice, username),
+                          headers)
 
-    def _login_get(self) -> None:
+    def _login_get(self) -> Any:
         """GET /login —— 免登录三个口子之一。已登录的人来了也照给表单（顺带给账号入口）。"""
         self.visitor = self._resolve_visitor()
         next_url = safe_next(self._first(self._query(), "next"))
         if self.visitor is not None and self.visitor.source == "session":
-            self._send_login(200, notice="当前已登录为 %s，可直接进看板，或在下面换个账号登录"
-                                         % self.visitor.username, next_url=next_url,
-                             username=self.visitor.username)
-            return
-        self._send_login(200, next_url=next_url)
+            return self._login_page(200,
+                                    notice="当前已登录为 %s，可直接进看板，或在下面换个账号登录"
+                                           % self.visitor.username, next_url=next_url,
+                                    username=self.visitor.username)
+        return self._login_page(200, next_url=next_url)
 
-    def _account_get(self) -> None:
+    def _account_get(self) -> Any:
         """GET /account —— 改密与退出。只有登录会话能进（tailnet 直连没有账号可改）。"""
         visitor = self.visitor
         if visitor is None or visitor.source != "session":
-            self._redirect(LOGIN_PATH + "?next=" + urllib.parse.quote(ACCOUNT_PATH))
-            return
+            return self._redirect(LOGIN_PATH + "?next=" + urllib.parse.quote(ACCOUNT_PATH))
         token, headers = self._csrf()
-        self._send_html(200, render_account(visitor, token,
-                                            self._first(self._query(), "msg")), headers)
+        return self._html(200, render_account(visitor, token,
+                                              self._first(self._query(), "msg")), headers)
 
     def _read_form(self) -> Optional[Dict[str, str]]:
         """读登录表单。**这是全服务唯一读请求体的地方**，所以卡得格外死：
@@ -1187,13 +1320,12 @@ class ViewHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True)
         return {k: (v[0] if v else "") for k, v in parsed.items()}
 
-    def _login_post(self) -> None:
+    def _login_post(self) -> Any:
         """POST /login —— 看板上唯一的写入口，三个动作靠 action 区分，都要过 CSRF。"""
         form = self._read_form()
         if form is None:
             self._audit("login_fail", None, "表单被拒：类型不对或超过 %d 字节" % FORM_MAX_BYTES)
-            self._send_login(400, error="表单格式不对，请从登录页重新提交")
-            return
+            return self._login_page(400, error="表单格式不对，请从登录页重新提交")
 
         action = (form.get("action") or "login").strip().lower()
         if action not in LOGIN_ACTIONS:
@@ -1208,50 +1340,46 @@ class ViewHandler(BaseHTTPRequestHandler):
         if not view_auth.check_csrf(self._cookie(view_auth.CSRF_COOKIE),
                                     form.get(CSRF_FIELD), Runtime.auth.key):
             self._audit("csrf_reject", username or None, "CSRF 校验不通过：action=%s" % action)
-            self._send_login(403, error="表单已过期或来源不对，请重新提交",
-                             next_url=next_url, username=username)
-            return
+            return self._login_page(403, error="表单已过期或来源不对，请重新提交",
+                                    next_url=next_url, username=username)
 
         if action == "logout":
             Runtime.auth.logout(self._cookie(view_auth.SESSION_COOKIE), ip, ua)
-            self._redirect(LOGIN_PATH, [cookie_header(view_auth.SESSION_COOKIE, "",
+            return self._redirect(LOGIN_PATH, [cookie_header(view_auth.SESSION_COOKIE, "",
                                           self._secure(), delete=True,
                                           domain=self._cookie_domain())])
-            return
 
         if action == "passwd":
             self.visitor = self._resolve_visitor()
             if self.visitor is None or self.visitor.source != "session":
-                self._redirect(LOGIN_PATH + "?next=" + urllib.parse.quote(ACCOUNT_PATH))
-                return
+                return self._redirect(LOGIN_PATH + "?next="
+                                      + urllib.parse.quote(ACCOUNT_PATH))
             ok, message = Runtime.auth.change_password(
                 self.visitor.username, form.get("old") or "", form.get("new") or "", ip, ua)
             if not ok:
                 token, headers = self._csrf()
-                self._send_html(200, render_account(self.visitor, token, "", message), headers)
-                return
+                return self._html(200, render_account(self.visitor, token, "", message),
+                                  headers)
             # 改密成功 = 所有会话（含自己手上这张）作废，所以把 cookie 一起清掉
-            self._finish_passwd(message)
-            return
+            return self._finish_passwd(message)
 
         ok, cookie_value, reason = Runtime.auth.login(
             username, form.get("password") or "", ip, ua)
         if not ok:
-            self._send_login(200, error=reason or "账号或口令不正确",
-                             next_url=next_url, username=username)
-            return
-        self._redirect(next_url, [cookie_header(view_auth.SESSION_COOKIE, cookie_value,
+            return self._login_page(200, error=reason or "账号或口令不正确",
+                                    next_url=next_url, username=username)
+        return self._redirect(next_url, [cookie_header(view_auth.SESSION_COOKIE, cookie_value,
                                                 self._secure(),
                                                 max_age=SESSION_MAX_AGE_S,
                                                 domain=self._cookie_domain())])
 
-    def _finish_passwd(self, message: str) -> None:
+    def _finish_passwd(self, message: str) -> Any:
         """改密成功后的收尾：清会话 cookie + 回登录页，让人用新口令重来一次。"""
         token, headers = self._csrf()
         headers = list(headers) + [cookie_header(view_auth.SESSION_COOKIE, "",
                                           self._secure(), delete=True,
                                           domain=self._cookie_domain())]
-        self._send_html(200, render_login(token, "/", "", message, ""), headers)
+        return self._html(200, render_login(token, "/", "", message, ""), headers)
 
 
 # --- 页面 -----------------------------------------------------------

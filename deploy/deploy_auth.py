@@ -39,6 +39,9 @@ KEY_FILE = os.environ.get("AGENT_TEAM_SESSION_KEY_FILE") or AGENT_TEAM_ETC_DIR +
 
 FILES = [
     ("view_auth.py", "0644"),
+    # 阶段2 刀6 起 blackboard_view 的 HTTP 面走 L1 网关，这个件必须一起推：
+    # 少了它 py_compile 照样过（编译不 import），但服务一重启就 ImportError。
+    ("web_gateway.py", "0644"),
     ("blackboard_view.py", "0755"),
     ("sql/view_auth_schema.sql", "0644"),
     ("tests/test_view_auth.py", "0644"),
@@ -168,10 +171,11 @@ def main(argv=None):
             ok = ok and rc == 0
 
         step("2/6 装进 %s" % OPT)
-        rc, out, err = ssh("cd %s && cp -f view_auth.py blackboard_view.py %s/ && "
+        rc, out, err = ssh("cd %s && cp -f view_auth.py web_gateway.py blackboard_view.py %s/ && "
                            "mkdir -p %s/tests && cp -f test_view_auth.py %s/tests/ 2>/dev/null; "
-                           "python3 -m py_compile %s/view_auth.py %s/blackboard_view.py && echo COMPILE_OK"
-                           % (STAGE, OPT, OPT, OPT, OPT, OPT))
+                           "python3 -m py_compile %s/view_auth.py %s/web_gateway.py "
+                           "%s/blackboard_view.py && echo COMPILE_OK"
+                           % (STAGE, OPT, OPT, OPT, OPT, OPT, OPT))
         print("  " + (out.strip() or err.strip())[:300])
         ok = ok and ("COMPILE_OK" in out)
 

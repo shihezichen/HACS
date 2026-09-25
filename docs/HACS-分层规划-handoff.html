@@ -77,8 +77,54 @@
     <h1>HACS 分层规划 · Handoff</h1>
     <div class="sub">Human-Agent Communication System — 分层与解耦方案（资深架构评审结论）</div>
     <div class="verline">
-      <b>v6</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5，刀 5 升 v6<br>
+      <b>v8</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5，刀 5 升 v6，刀 6 升 v7，刀 7a 升 v8<br>
       本次内容：对「通行层 / 前台层」两分法的评审 → 五层 + 三横切 + 组合根的目标划分 → 七条解耦判据 → 四处最痛耦合 → 六阶段落地计划<br>
+      <b>v8 变更（仅进度标注，方案未改）：</b>刀 <b>7a</b> 落地 —— 把 L3 <code>blackboard_svc.py</code>（团队黑板·记忆网关，端口 9940）
+      的 <b>应答出口与非 GET 方法的分派收进 L1 <code>web_gateway.py</code></b>。本件 4362 行、
+      <code>do_GET</code> 一条方法里就压着约 1250 行路由，所以<b>刻意切成两刀</b>：
+      <b>7a 只做「应答出口 + 非 GET 分派」，<code>do_GET</code> 的路由登记留给 7b</b>。
+      已做：① <code>_send_json()</code> 里 <code>send_response</code> → 逐条写头 → <code>end_headers</code> → 写 socket → 吞异常
+      这一整段换成 L1 的 <code>_envelope()</code> + <code>_reply()</code>，本件只剩「本次特有的头」（只有 405 那条
+      <code>Allow: GET</code>）、<code>Content-Length</code> 相对它的<b>字节顺序</b>、以及带鉴权成员名的那一行日志；
+      ② 本机健康口 <code>AdminHandler</code>（40 行）<b>整件收口</b>，只留 <code>@ADMIN_GW.route("/healthz")</code> +
+      一条返回<b>紧凑字节</b>的 404（<code>{"ok":false,"error":"not_found"}</code>，没有 <code>json.dumps</code> 的空格）；
+      ③ <code>do_PUT / do_PATCH / do_DELETE / do_POST</code> 的分派换成 <b>7 条 <code>@GW.route</code> 登记</b> +
+      <code>@GW.pre</code>（读完请求体保 keep-alive + 共享内容只读纪律 405）+ <code>@GW.not_found</code>
+      （POST 落 404 信封、其余写方法落基类 501）。
+      这是 <code>web_gateway.py</code> 立件时点名的那条重复的第 <b>4</b> 处消解（前三处：teamd 管理口、cli_backend、blackboard_view）。
+      <b>语义一字未动</b>：数据库层（<code>PgBackend / db_query / install_pg_backend</code>）、全部业务函数、
+      <code>main / build_parser</code> 全 flag、<code>make_server(host, port, handler)</code> 签名、模块级
+      <code>BlackboardHandler / AdminHandler</code> 名、<code>server_version</code>(<code>blackboard_svc/1.9</code> 与
+      <code>blackboard_admin/1.9</code>)、<code>sys_version=""</code>、HTTP/1.1、退出码全现名现签名现语义；
+      <code>AdminHandler</code> 的路径归一<b>照迁移前重算</b>（<code>/healthz/</code> 仍 404、<code>/healthz#x</code> 仍 200，
+      不吃 L1 默认的 <code>rstrip("/")</code>）。依赖方向 L3→L1 是合法下行，<b>分层表与例外条数不变（仍 1 条）</b>。
+      证据：<code>tools/equivalence/blackboard_svc_http_equiv.py</code> 新旧双起逐例对照 <b>104/104 一致</b>
+      （业务口 85 例 + 健康口 9+2 例 + 同连接 keep-alive 3 例 + DB 不可用 5 例：<code>Server</code>/<code>Content-Type</code>/
+      状态码/正文全比，只归一 Date、Content-Length 与 <code>ts</code>/<code>latency_ms</code> 等天然漂移；
+      DB 走既有接缝 <code>install_pg_backend</code> 注入假驱动，<b>一个字节都不真连</b>）、
+      <code>tests/test_blackboard_svc.py</code> 149 例全过（与改前同集合）、全量回归红点 <b>39 条与改前逐行一致</b>、
+      <code>tools/check_layers.py</code> 退出 0。<b>7b 待办</b>：<code>do_GET</code> 里 13 组仍用 <code>if/elif</code> 的路由
+      （healthz / msg×2 / entries / search / sessions×2 / actions / issues / tracking / tmp×2 / sess×3 / shared×4 / 兜底 404）。<br>
+      <b>v7 变更（仅进度标注，方案未改）：</b>刀 6 落地 —— 把 L3/L4 <code>blackboard_view.py</code>（团队黑板只读看板 + 公网登录门户，端口 9941）
+      的 <b>HTTP 应答出口与路由分发收进 L1 <code>web_gateway.py</code></b>：方法内那条长 <code>if/elif</code> 分派
+      （<code>do_GET / do_HEAD / do_POST / do_PUT… / _route</code>）换成 <b>17 条 <code>@GW.route</code> 登记</b> +
+      <code>@GW.auth</code> 门禁钩子 + <code>@GW.not_found</code>，处理函数一律只 <code>return (码, 体, 本次特有的头)</code>，一行 socket 都不碰；
+      迁移前写死在 <code>_finish()</code> 里的<b>九条固定安全头</b>登记成一处常量 <code>SECURITY_HEADERS</code>。
+      这是 <code>web_gateway.py</code> 立件时点名的「7~8 个件各自造 <code>BaseHTTPRequestHandler</code>」那条重复的第 <b>3</b> 处消解
+      （第 1 处 teamd 管理口、第 2 处 cli_backend）。
+      <b>页面与语义一字未动</b>：<code>render_page / render_portal</code> 与内嵌 HTML/JS/CSS、<code>mask_shared / apply_role</code>、
+      <code>safe_next / cookie_header / upstream_get</code>、<code>main / build_parser</code> 全 flag、<code>make_server</code>、
+      模块级 <code>ViewHandler</code> 名字与 <code>Runtime</code> 读法现名现签名现语义。
+      三处刻意保留的差异覆盖在子类里：<b>响应形态</b>（<code>sys_version=""</code> + HTTP/1.1 → <code>Server: blackboard_view/1.5</code>）、
+      <b>应答出口</b>（固定安全头集合的顺序 + <code>head_only</code>「发 Content-Length 但不写体」+ 一行耗时日志 + 同名头可发多条）、
+      <b>路径归一</b>（沿用迁移前的 <code>parts</code> 口径，剥 <code>#fragment</code>、吃掉空段与尾斜杠）。
+      写方法（<code>do_PUT / do_PATCH / do_DELETE / do_OPTIONS</code> 与非 <code>/login</code> 的 <code>do_POST</code>）显式登记，
+      保住迁移前带 <code>Allow</code> 头的 <b>405</b>（不落 L1 默认的 501）；<code>/login</code> 的<b>尾斜杠严格相等</b>判定原样保留。
+      依赖方向 L3→L1 是合法下行，<b>分层表与例外条数不变（仍 1 条）</b>。
+      证据：<code>tools/equivalence/blackboard_view_http_equiv.py</code> 新旧双起逐例对照 <b>70/70 一致</b>
+      （tailnet 45 例 + public 25 例：安全头全比、302 的 <code>Location</code>、<code>Set-Cookie</code> 名/属性/域、
+      登录/改密/退出全流程、坏 cookie 与失效会话、<code>?next=</code> 夹外域、404 文案、405/501、keep-alive 不错位、日志行）、
+      <code>tests/test_blackboard_view.py</code> 152 例（红点集合与改前一字不差）、全量回归红点 39 条与改前逐行一致<br>
       <b>v6 变更（仅进度标注，方案未改）：</b>刀 5 落地 —— 把 L2 <code>cli_backend.py</code>（本机 CLI 成员后端，端口 9970）
       的 <b>HTTP 面收进 L1 <code>web_gateway.py</code></b>：自建的 <code>BaseHTTPRequestHandler</code> 路由
       （<code>_send_json / _read_body / _authed / _path / do_GET / do_POST</code>，约 178 行）换成
@@ -532,7 +578,7 @@
 </table>
 
 <footer>
-  HACS 分层规划 · Handoff v6 · 2026-09-25 · 性质：规划中（阶段 1 刀 1+2+3、阶段 2 刀 1+2、阶段 4 刀 4、刀 5 已落地）<br>
+  HACS 分层规划 · Handoff v8 · 2026-09-25 · 性质：规划中（阶段 1 刀 1+2+3、阶段 2 刀 1+2、阶段 4 刀 4、刀 5、刀 6、刀 7a 已落地）<br>
   数字来自当日代码快照，会漂移；落地前请复核。本文件即该规划的唯一权威版本，改动请升版本号。
 </footer>
 
