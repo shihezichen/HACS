@@ -102,7 +102,9 @@
       <code>python tools/check_layers.py</code>；进程与启动方式来自本机进程与计划任务实查。
       标注 <span class="badge b-plan">会漂移</span> 的，落地前复核。</li>
   <li><b>提示级 vs 硬级。</b>只有「依赖方向」是硬门禁（退出码 1）。业务词、宿主硬编码、存储句柄
-      是提示级：它们的命中<b>必须人判</b>（注释里提到「会话」不算越层，真去读别人库算）。</li>
+      是提示级：它们的命中<b>必须人判</b>（注释里提到「会话」不算越层，真去读别人库算）。
+      <b>退出码 2 = 源码树守卫</b>：源文件缺失超过一成时判「查不了」，不给假绿灯
+      （对外仓里只有层归属表、没有源码，跑出来会是「件数齐全、零违规」——那是假象）。</li>
 </ul>
 <h3>1.2 台账的机器可读孪生体</h3>
 <p>本文件的所有表格由 <code>tools/gen_ledger_doc.py</code> 从 <code>tools/hacs_layers.json</code>
@@ -345,7 +347,7 @@
 <tr><td><code>tools/check_layers.py</code></td><td>四条检查的门禁脚本；<code>--json</code> 出机器可读报告，<code>--only 1,2</code> 跑子集</td><td>新增件，<b>零业务码改动</b></td></tr>
 <tr><td><code>tools/gen_ledger_doc.py</code></td><td>从层归属表生成本台账 HTML（表格同源，防漂移）</td><td>新增件</td></tr>
 </tbody></table>
-<pre><code>python tools/check_layers.py           # 全量报告，退出码 0/1
+<pre><code>python tools/check_layers.py           # 全量报告；退出码 0=无硬违规 / 1=有硬违规 / 2=不是源码树
 python tools/check_layers.py --only 1  # 只跑硬门禁
 python tools/check_layers.py --json    # 机器可读</code></pre>
 <h3>8.2 四条检查 ↔ 七条判据</h3>

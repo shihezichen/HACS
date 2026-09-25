@@ -29,6 +29,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
 MAP_PATH = os.path.join(HERE, 'hacs_layers.json')
+MISSING = set()       # 读不到的源文件（用于「源码树守卫」；read_src 会被多次调用，故用集合去重）
 
 
 def load_map():
@@ -39,6 +40,7 @@ def load_map():
 def read_src(rel: str) -> str:
     p = os.path.join(PROJECT_ROOT, rel.replace('/', os.sep))
     if not os.path.isfile(p):
+        MISSING.add(rel)
         return ''
     return io.open(p, encoding='utf-8', errors='replace').read()
 
@@ -159,6 +161,15 @@ def main():
     w2 = check_transport_words(layers, files) if (not only or '2' in only) else []
     w3 = check_hardcode(layers, files) if (not only or '3' in only) else []
     w4 = check_storage(layers, files) if (not only or '4' in only) else []
+
+    # 源码树守卫：在对外仓（HACS）里跑本脚本时，层归属表在、源文件不在 ——
+    # 那样「件数 53 / 边 0」看着像通过，其实是没料可查。宁可判不清也不给假绿灯。
+    if len(MISSING) > len(files) // 10:
+        print('✗ 只找到 %d/%d 个源文件（缺 %d 个），当前目录不是项目源码树。'
+              % (len(files) - len(MISSING), len(files), len(MISSING)))
+        print('  本门禁只对项目源码树（含 agent-team/）有效；对外仓内这两件是只读参考件。')
+        print('  例如缺：%s' % '、'.join(sorted(MISSING)[:3]))
+        return 2
 
     report = dict(direction_violations=v1, transport_business_hits=w2,
                   hardcode=w3, storage=w4, edges=len(edges), files=len(files))
