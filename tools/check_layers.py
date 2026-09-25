@@ -29,7 +29,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
 MAP_PATH = os.path.join(HERE, 'hacs_layers.json')
-MISSING = set()       # 读不到的源文件（用于「源码树守卫」；read_src 会被多次调用，故用集合去重）
+MISSING = set()
+DECLARED = []      # 已声明的例外（带理由+到期条件；门禁照常打印，只是不判违规）       # 读不到的源文件（用于「源码树守卫」；read_src 会被多次调用，故用集合去重）
 
 
 def load_map():
@@ -51,12 +52,15 @@ def local_imports(rel: str, src: str, all_names: set) -> list:
     return sorted({x for x in found if x in all_names and x != me})
 
 
-def check_direction(layers, files, index):
+def check_direction(layers, files, index, name2rel=None):
     """检查 1：依赖方向。返回 (violations, edges)"""
     order = layers['rules']['layer_order']           # ['L4','L3','L2','L1','L0']
     rank = {L: i for i, L in enumerate(order)}       # 越小越靠上
     cross_ok = set(layers['rules']['allowed_import']['cross_allowed'])
     exempt = set(layers['rules']['allowed_import']['exempt_src_layers'])
+    ex_imp = {(e['src'], e['dst']): e
+              for e in layers['rules']['allowed_import'].get('exceptions', [])}
+    name2rel = name2rel or {}
     v, edges = [], []
     for rel, meta in files.items():
         src = read_src(rel)
@@ -76,6 +80,12 @@ def check_direction(layers, files, index):
             else:
                 ok = True
             if not ok:
+                dst_rel = dep if dep in files else name2rel.get(dep, dep)
+                ex = ex_imp.get((rel, dst_rel)) or ex_imp.get((rel, dep))
+                if ex:
+                    DECLARED.append(dict(kind='依赖方向', item='%s [%s] → %s [%s]' % (rel, sl, dep, dl),
+                                         reason=ex.get('reason', ''), expires=ex.get('expires_when', '')))
+                    continue
                 v.append(dict(src=rel, src_layer=sl, dep=dep, dep_layer=dl,
                               why='下层件反向依赖了上层（%s → %s）' % (sl, dl)))
     return v, edges
@@ -129,6 +139,7 @@ def check_hardcode(layers, files):
 
 def check_storage(layers, files):
     forbidden = set(layers['rules']['storage_handle_forbidden_layers'])
+    ex_store = {e['file']: e for e in layers['rules'].get('storage_handle_exceptions', [])}
     hits = []
     for rel, meta in files.items():
         src = read_src(rel)
@@ -140,9 +151,13 @@ def check_storage(layers, files):
         if re.search(r'^\s*import\s+sqlite3|from\s+sqlite3', src, re.M):
             kinds.append('sqlite3')
         if kinds:
-            hits.append(dict(file=rel, layer=meta['layer'],
-                             kinds=kinds,
-                             flag=meta['layer'] in forbidden))
+            flag = meta['layer'] in forbidden
+            if flag and rel in ex_store:
+                flag = False
+                ex = ex_store[rel]
+                DECLARED.append(dict(kind='存储句柄', item='%s [%s] %s' % (rel, meta['layer'], ','.join(kinds)),
+                                     reason=ex.get('reason', ''), expires=ex.get('expires_when', '')))
+            hits.append(dict(file=rel, layer=meta['layer'], kinds=kinds, flag=flag))
     return hits
 
 
@@ -156,8 +171,9 @@ def main():
     layers = load_map()
     files = layers['files']
     index = {os.path.splitext(k.split('/')[-1])[0]: v['layer'] for k, v in files.items()}
+    name2rel = {os.path.splitext(k.split('/')[-1])[0]: k for k in files}
 
-    v1, edges = check_direction(layers, files, index) if (not only or '1' in only) else ([], [])
+    v1, edges = check_direction(layers, files, index, name2rel) if (not only or '1' in only) else ([], [])
     w2 = check_transport_words(layers, files) if (not only or '2' in only) else []
     w3 = check_hardcode(layers, files) if (not only or '3' in only) else []
     w4 = check_storage(layers, files) if (not only or '4' in only) else []
@@ -172,7 +188,7 @@ def main():
         return 2
 
     report = dict(direction_violations=v1, transport_business_hits=w2,
-                  hardcode=w3, storage=w4, edges=len(edges), files=len(files))
+                  hardcode=w3, storage=w4, edges=len(edges), files=len(files), declared_exceptions=DECLARED)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=1))
         return 1 if v1 else 0
@@ -206,6 +222,13 @@ def main():
     print('\n检查 4 · 直接持存储句柄的件（提示级；打 ⚠ 的是「不该持」的层）')
     for h in w4:
         print('  %s %-34s [%s] %s' % ('⚠' if h['flag'] else '·', h['file'], h['layer'], ','.join(h['kinds'])))
+
+    if DECLARED:
+        print('\n已声明的例外（不判违规；每条都带理由与到期条件，登记在 tools/hacs_layers.json）')
+        for dd in DECLARED:
+            print('  🛈 [%s] %s' % (dd['kind'], dd['item']))
+            print('      理由：%s' % dd['reason'])
+            print('      到期：%s' % dd['expires'])
 
     print('\n判据对照：检查1↔判据2 · 检查2↔判据5 · 检查3↔判据4 · 检查4↔判据1')
     return 1 if v1 else 0

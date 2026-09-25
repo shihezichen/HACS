@@ -382,14 +382,15 @@ python tools/check_layers.py --json    # 机器可读</code></pre>
 <h3>8.2 四条检查 ↔ 七条判据</h3>
 <table><thead><tr><th>检查</th><th>对应判据</th><th>级别</th><th>今日基线</th></tr></thead><tbody>
 <tr><td>1 依赖方向</td><td>判据 2 依赖严格单向</td><td><b>硬（退出码 1）</b></td><td><b>0 违规</b></td></tr>
-<tr><td>2 传输不含语义</td><td>判据 5 传输层不含业务词</td><td>提示级（需人判）</td><td><b>48 行命中</b>（多为注释；实质命中见 8.3）</td></tr>
+<tr><td>2 传输不含语义</td><td>判据 5 传输层不含业务词</td><td>提示级（需人判）</td><td><b>45 行命中</b>（多为注释；实质命中见 8.3）</td></tr>
 <tr><td>3 配置零硬编码</td><td>判据 4 配置零硬编码</td><td>提示级</td><td><b>25 件</b>带字面量</td></tr>
-<tr><td>4 存储句柄</td><td>判据 1 的前置检查</td><td>提示级</td><td><b>11 件</b>持句柄，<b>2 件越层</b></td></tr>
+<tr><td>4 存储句柄</td><td>判据 1 的前置检查</td><td>提示级</td><td><b>10 件</b>持句柄，<b>0 件越层</b>+<b>1 条已声明例外</b>（见 8.5）</td></tr>
 </tbody></table>
 <h3>8.3 提示级命中的人判结论（今日）</h3>
 <ul>
   <li><b>检查 2 的 48 行命中里，实质越层只有两处</b>：成员 CLI 里的「会议召集」子命令
-      （业务语义长在通行层）与边缘端点里的「上下文自愈 / 会话头注入」（适配逻辑长在通行层）。
+      （业务语义长在通行层）—— 边缘端点里的「上下文自愈 / 会话头注入」已在阶段 1 刀 1+2 消解
+      （实现下沉到 L2 <code>agent_usage.py</code>），是本台账记下的第一处<b>已消解</b>越层。
       其余多为文档字符串与帮助文本 —— 这也是<b>它们只能是提示级</b>的原因。</li>
   <li><b>检查 3 最该先收的一条</b>：适配件里写死的运行时绝对路径（node 可执行文件路径）。
       这条会直接阻断「换 OS 部署」，属于判据 6。</li>
@@ -402,6 +403,30 @@ python tools/check_layers.py --json    # 机器可读</code></pre>
       衡量重构是否真的推进 —— 比「代码更好看了」可核。</li>
   <li>门禁报的件名以层归属表为准；<b>新增件必须先登记再写码</b>，否则门禁看不见它。</li>
 </ul>""")
+
+# 8.5 已声明的例外（从 hacs_layers.json 生成）
+_r_ex = M['rules']['allowed_import'].get('exceptions', [])
+_r_st = M['rules'].get('storage_handle_exceptions', [])
+_rows = []
+for _e in _r_ex:
+    _rows.append(('<b>依赖方向</b><br><span class="kpi">下层 → 上层</span>',
+                  '<code>%s</code> → <code>%s</code>' % (esc(_e['src']), esc(_e['dst'])),
+                  esc(_e['reason']), esc(_e.get('expires_when', '')), esc(_e.get('recorded', ''))))
+for _e in _r_st:
+    _rows.append(('<b>存储句柄</b><br><span class="kpi">不该持的层</span>',
+                  '<code>%s</code>' % esc(_e['file']),
+                  esc(_e['reason']), esc(_e.get('expires_when', '')), esc(_e.get('recorded', ''))))
+_body = '\n'.join('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % r for r in _rows) \
+        or '<tr><td colspan="5">今日无例外</td></tr>'
+secs.append("""<h3>8.5 已声明的例外（可审计、带到期条件）</h3>
+<div class="callout warn"><b>例外的存在本身就是结论</b>：这两条是「分层规则」与「现实约束」冲突时，
+<b>显式登记</b>而不是把门禁调松 —— 门禁每次运行都会把例外原文打印出来，条目一多就该动架构，而不是动规则。</div>
+<table><thead><tr><th>类型</th><th>对象</th><th>为什么允许</th><th>何时消解（到期条件）</th><th>登记于</th></tr></thead>
+<tbody>
+%s
+</tbody></table>
+<p class="kpi">机器可读登记处：<code>hacs_layers.json</code> → <code>rules.allowed_import.exceptions</code> /
+<code>rules.storage_handle_exceptions</code>；门禁据此跳过判定，但<b>照常打印</b>。</p>""" % _body)
 
 # 九、待确认
 secs.append("""<h2>九、待确认（每项附推荐默认）</h2>
@@ -538,8 +563,11 @@ HTML_HEAD = """<!DOCTYPE html>
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v1</b> · 2026-09-25 首版 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更：首次建立台账 —— 登记 53 件、17 条层间依赖、16 项端口；新增层归属表与四条门禁（<b>零业务码改动</b>）；
+      版本 <b>v2</b> · 2026-09-25 首版 / 同日阶段 1 刀 1+2 更新 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v2）：阶段 1 刀 1+2 —— 新增 L2 件 <code>agent_usage.py</code>，把 a2a_svc 与 ctx_watermark 里
+      两份重复的「水位读取 / 窗口判定 / 会话头」合成<b>单一权威实现</b>（原两处窗口分母 1000000 与 200000 的分歧随之消失，
+      统一取「部署生效口径」）；门禁新增<b>已声明例外</b>机制（8.5，可审计、带到期条件）；<br>
+      首版（v1）：登记 53 件、17 条层间依赖、16 项端口；新增层归属表与四条门禁（<b>零业务码改动</b>）；
       并把「成员入网接口契约（草案 v0）」纳入本次评审（原属阶段 5，因它是通行层契约的成员，提前到阶段 0 定形状）<br>
       本文件由 <code>tools/gen_ledger_doc.py</code> 从 <code>tools/hacs_layers.json</code> 生成
     </div>
@@ -549,7 +577,7 @@ HTML_HEAD = """<!DOCTYPE html>
 """
 HTML_FOOT = """
 <footer>
-  HACS 分层台账 · v1 · 2026-09-25 · 阶段 0 产出 ·
+  HACS 分层台账 · v2 · 2026-09-25 · 阶段 0 产出 + 阶段 1 刀 1+2 ·
   规划文档：<code>docs/HACS-分层规划-handoff.html</code> ·
   机器可读孪生体：<code>tools/hacs_layers.json</code> · 门禁：<code>tools/check_layers.py</code> ·
   生成器：<code>tools/gen_ledger_doc.py</code><br>

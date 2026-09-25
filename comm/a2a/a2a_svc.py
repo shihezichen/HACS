@@ -24,7 +24,6 @@ import logging
 import os
 import re
 import socket
-import sqlite3
 import sys
 import time
 import urllib.error
@@ -86,16 +85,12 @@ CTX_MIN_TOKENS_FLOOR = 8000       # 上下文太小时不折腾（小会话无�
 # 注意（脱敏）：本仓版本不内置任何绝对路径 —— 必须由部署方用环境变量给出
 # OpenClaw 会话档案路径（如 A2A_SESSIONS_JSON=<该节点的 sessions.json 路径>）。
 # 未配置时读取会失败并被降级处理：不压缩、照常续跑，不报错、不阻塞。
-SESSIONS_JSON_PATH = os.environ.get("A2A_SESSIONS_JSON", "")
+# （已下沉 L2 agent_usage：SESSIONS_JSON_PATH —— 口径只允许一处）
 # Hermes 侧水位数据源（只读打开 SQLite state.db）。未配置则该后端降级为不自愈。
-HERMES_STATE_DB = os.environ.get("A2A_HERMES_STATE_DB", "")
+# （已下沉 L2 agent_usage：HERMES_STATE_DB —— 口径只允许一处）
 # 各后端「上下文窗口分母」兜底表（取不到 live 窗口时用）。键为 model 子串（小写）。
 # 口径 A（累计口径）：窗口 = 单轮典型 prompt 占用 × 该模型窗口上限。
-CTX_WINDOW_FALLBACK = {
-    "deepseek-v4-flash": 1000000,
-    "deepseek-v4-pro": 1000000,
-    "deepseek": 128000,
-}
+# CTX_WINDOW_FALLBACK 已下沉 L2 agent_usage（本文件不再保留第二份分母表）
 CTX_COMPACT_PROMPT = (
     "【上下文自愈／自动注入】本会话上下文已较大，为免撑爆窗口，请**立即把至今的进展压缩成"
     "一段「交接摘要」**（不调工具，只输出摘要本身，务必简短）：\n"
@@ -108,6 +103,8 @@ CTX_HANDOFF_PROMPT = (
     "---- 交接摘要开始 ----\n%s\n---- 交接摘要结束 ----\n"
     "请继续执行未完成的动作；全部做完时在最后单独一行写 DONE，卡死则写 BLOCKED。"
 )
+
+import agent_usage as _au  # L2 适配层：水位/窗口/会话头单一实现
 
 LOG = logging.getLogger("a2a")
 
@@ -294,39 +291,14 @@ def _loop_enabled(agent: Dict[str, Any]) -> bool:
 
 
 def _backend_kind(agent: Dict[str, Any]) -> str:
-    """按后端特征判定：openclaw / hermes / other，用于分派水位读取。
-
-    判定顺序：端口 → 模型名/URL 关键词 → 会话档案兜底。
-    **不能只认端口**：各机 OpenClaw 网关端口并不统一（本机 18789、龙虾 19805…），
-    只认端口会把它们误判成 other，连带把上下文自愈整个关掉（2026-09-23 实测）。
-    """
-    a = agent or {}
-    base = str(a.get("backend") or "").lower()
-    model = str(a.get("model") or "").lower()
-    if "8642" in base or "hermes" in base:
-        return "hermes"
-    if "18789" in base or "openclaw" in base or "openclaw" in model:
-        return "openclaw"
-    # 端口与模型都没线索：配了 OpenClaw 会话档案就按 openclaw 试（读不到自然降级）
-    if SESSIONS_JSON_PATH and os.path.isfile(SESSIONS_JSON_PATH):
-        return "openclaw"
-    return "other"
+    """后端判定 openclaw / hermes / other（判定规则见 L2 agent_usage，勿在此重写）。"""
+    return _au.backend_kind(agent)
 
 
 def _hermes_headers(agent: Dict[str, Any], caller: str,
                     session_id: Optional[str]) -> Dict[str, str]:
-    """Hermes OpenAI 兼容路由认的会话头。
-
-    Hermes 不认 OpenAI 的 `user` 字段，只认：
-      · X-Hermes-Session-Key —— 会话/记忆域键（跨轮复用同一会话）；
-      · X-Hermes-Session-Id  —— 显式接续/新建某个 transcript。
-    两者都要求 API key 认证（已由 Authorization: Bearer 满足）。
-    session_id 为空时不注入任何头（一次性会话，与原行为一致）。
-    """
-    if not session_id:
-        return {}
-    key = "a2a:%s:%s" % (caller or "unknown", session_id)
-    return {"X-Hermes-Session-Key": key, "X-Hermes-Session-Id": key}
+    """Hermes 会话头（X-Hermes-Session-Key/Id）。实现见 L2 agent_usage。"""
+    return _au.hermes_session_headers(agent, caller, session_id)
 
 
 # ---- Hermes 口径 B：只读 messages 表估算「当前上下文占用」（2026-09-23）----
@@ -339,174 +311,43 @@ def _hermes_headers(agent: Dict[str, Any], caller: str,
 #   content + tool_calls + reasoning_content 三项长度。
 # ⚠️ 公式为近似值（±15%），阈值 0.75/0.85 有缓冲；若 Hermes 升级改了公式需同步本函数
 #    （对应 Hermes 版本：0.21.3）。
-_CTX_CHARS_PER_TOKEN = 4
-_CJK_DENSE_RE = re.compile("[\u1100-\u11ff\u2e80-\u9fff\ua960-\ua97f\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
+# （已下沉 L2 agent_usage：_CTX_CHARS_PER_TOKEN —— 口径只允许一处）
+# （已下沉 L2 agent_usage：_CJK_DENSE_RE —— 口径只允许一处）
 
 
 def _estimate_tokens_rough(text: str) -> int:
-    """对齐 Hermes estimate_tokens_rough：CJK 密集字符 ≈1 token，其余 ceil(UTF-8字节/4)。"""
-    if not text:
-        return 0
-    text = str(text)
-    if text.isascii():
-        return (len(text) + 3) // _CTX_CHARS_PER_TOKEN
-    stripped = _CJK_DENSE_RE.sub("", text)
-    dense = len(text) - len(stripped)
-    return dense + ((len(stripped.encode("utf-8", "replace")) + 3) // _CTX_CHARS_PER_TOKEN)
+    """估算 token 数（单一实现见 L2 agent_usage）。"""
+    return _au.estimate_tokens_rough(text)
 
 
 def _read_hermes_ctx_b(caller: str, session_id: str,
                        model: str = "") -> Optional[Tuple[int, int]]:
-    """口径 B：只读 state.db，估算该会话「当前上下文占用」→ (占用tokens, 窗口)。
-
-    累加 active=1 消息的 content/tool_calls/reasoning_content 估算值。读不到返回 None。
-    """
-    if not session_id or not HERMES_STATE_DB or not os.path.isfile(HERMES_STATE_DB):
-        return None
-    try:
-        uri = "file:%s?mode=ro" % HERMES_STATE_DB.replace("\\", "/")
-        conn = sqlite3.connect(uri, uri=True, timeout=3.0)
-        try:
-            # 先定位会话 id（优先 session_key 精确匹配，否则取近期活跃会话）。
-            sid_row = conn.execute(
-                "SELECT id, model FROM sessions WHERE session_key = ? "
-                "ORDER BY COALESCE(last_activity_at, started_at) DESC LIMIT 1",
-                ("a2a:%s:%s" % (caller or "unknown", session_id),)).fetchone()
-            if sid_row is None:
-                return None
-            sid, row_model = sid_row[0], (sid_row[1] or "")
-            rows = conn.execute(
-                "SELECT content, tool_calls, reasoning_content FROM messages "
-                "WHERE session_id = ? AND active = 1", (sid,)).fetchall()
-            if not rows:
-                return None
-            used = 0
-            for content, tool_calls, reasoning in rows:
-                used += _estimate_tokens_rough(content or "")
-                used += _estimate_tokens_rough(tool_calls or "")
-                used += _estimate_tokens_rough(reasoning or "")
-            win = _ctx_window_for(model or row_model)
-            if win <= 0 or used <= 0:
-                return None
-            return int(used), int(win)
-        finally:
-            conn.close()
-    except Exception as exc:  # noqa: BLE001
-        LOG.debug("ctx self-heal: 口径B 读 Hermes messages 失败(%s)，降级", exc)
-        return None
+    """Hermes 口径 B（只读 messages 表估算）。实现见 L2 agent_usage。"""
+    return _au.read_hermes_ctx_b(caller, session_id, model)
 
 
 def _read_hermes_usage(caller: str, session_id: str,
                        model: str = "") -> Optional[Tuple[int, int]]:
-    """Hermes 水位总入口：口径 B 优先，拿不到回退口径 A。返回 (占用, 窗口) 或 None。
-
-    （口径 B：只读 messages 表估算当前占用；口径 A：sessions 表累计 token / 调用次数。）
-    """
-    b = _read_hermes_ctx_b(caller, session_id, model)
-    if b is not None:
-        return b
-    # ---- 口径 A 回退 ----
-    if not session_id or not HERMES_STATE_DB or not os.path.isfile(HERMES_STATE_DB):
-        return None
-    try:
-        # 只读 URI 打开，杜绝意外写入（sqlite 只读模式下写操作会直接报错）。
-        uri = "file:%s?mode=ro" % HERMES_STATE_DB.replace("\\", "/")
-        conn = sqlite3.connect(uri, uri=True, timeout=3.0)
-        try:
-            # A2A 会话在 Hermes 侧应当落在 session_key = a2a:<caller>:<session_id> 的行。
-            want_key = "a2a:%s:%s" % (caller or "unknown", session_id)
-            row = conn.execute(
-                "SELECT input_tokens, cache_read_tokens, api_call_count, model "
-                "FROM sessions WHERE session_key = ? "
-                "ORDER BY COALESCE(last_activity_at, started_at) DESC LIMIT 1",
-                (want_key,)).fetchone()
-            if row is None:
-                return None
-            inp, cache_read, calls, row_model = (int(row[0] or 0), int(row[1] or 0),
-                                                 int(row[2] or 0), (row[3] or ""))
-            if calls <= 0:
-                return None
-            typical = (inp + cache_read) / float(calls)
-            win = _ctx_window_for(model or row_model)
-            if win <= 0:
-                return None
-            return int(typical), int(win)
-        finally:
-            conn.close()
-    except Exception as exc:  # noqa: BLE001
-        LOG.debug("ctx self-heal: 读 Hermes state.db 失败(%s)，降级为不自愈", exc)
-        return None
+    """Hermes 水位总入口：口径 B 优先、回退口径 A。实现见 L2 agent_usage。"""
+    return _au.read_hermes(caller, session_id, model)
 
 
 def _ctx_window_for(model: str) -> int:
-    """模型窗口上限：先查 Hermes 内部表（若可导入），否则用本文件兜底表。"""
-    m = str(model or "").lower()
-    try:
-        import sys as _sys
-        hm = os.environ.get("A2A_HERMES_AGENT_DIR", "")
-        if hm and hm not in _sys.path:
-            _sys.path.insert(0, hm)
-        from agent import model_metadata as _mm  # type: ignore
-        hit = _mm._longest_key_match(_mm.DEFAULT_CONTEXT_LENGTHS, m)
-        if hit and hit[1] > 0:
-            return int(hit[1])
-    except Exception:  # noqa: BLE001 —— 拿不到就用兜底表
-        pass
-    best_key, best_val = "", 0
-    for k, v in CTX_WINDOW_FALLBACK.items():
-        if k in m and len(k) > len(best_key):
-            best_key, best_val = k, v
-    return int(best_val)
+    """窗口分母（生效口径优先）。实现见 L2 agent_usage.window_for。"""
+    return _au.window_for(model, "hermes")
 
 
 def _read_ctx_usage(caller: str, session_id: str,
                     agent: Optional[Dict[str, Any]] = None) -> Optional[Tuple[int, int]]:
-    """按后端分派：openclaw 读 sessions.json，hermes 读 state.db，其它不自愈。
-
-    映射规则（07-23 实测验证）：A2A 的 `user` = `a2a:<caller>:<session_id>` 会落到
-    session key = `agent:main:openai-user:a2a:<caller>:<session_id>`。
-
-    返回 None 表示读不到（文件不存在/无权限/key 不在/字段缺失）——调用方应降级为
-    「不压缩、照常续跑」，不阻塞主流程。此函数绝不写文件。
-    """
-    kind = _backend_kind(agent) if agent is not None else "openclaw"
-    if kind == "hermes":
-        return _read_hermes_usage(caller, session_id,
-                                  str((agent or {}).get("model") or ""))
-    if kind == "other":
-        return None  # 未知后端：无水位数据源，降级不自愈
-    if not session_id:
-        return None
-    try:
-        key = "agent:main:openai-user:a2a:%s:%s" % (caller or "unknown", session_id)
-        with open(SESSIONS_JSON_PATH, "r", encoding="utf-8") as fh:
-            store = json.load(fh)
-        entry = store.get(key)
-        if not isinstance(entry, dict):
-            return None
-        total = entry.get("totalTokens")
-        window = entry.get("contextTokens")
-        if total is None or window is None:
-            return None
-        total_i, window_i = int(total), int(window)
-        if window_i <= 0:
-            return None
-        return total_i, window_i
-    except Exception as exc:  # noqa: BLE001 —— 自愈是增强能力，绝不允许因它拖墤主流程
-        LOG.debug("ctx self-heal: 读 sessions.json 失败(%s)，降级为不自愈", exc)
-        return None
+    """按后端分派读水位。实现见 L2 agent_usage.read_usage（读不到 → None，绝不编造）。"""
+    return _au.read_usage(caller, session_id, agent)
 
 
 def _ctx_pressure(caller: str, session_id: str,
                   agent: Optional[Dict[str, Any]] = None) -> Optional[float]:
-    """返回该 session 的上下文水位（0.0~1.0+）；读不到返回 None。低于下限返回 0.0。"""
-    usage = _read_ctx_usage(caller, session_id, agent)
-    if usage is None:
-        return None
-    total, window = usage
-    if total < CTX_MIN_TOKENS_FLOOR:
-        return 0.0
-    return float(total) / float(window)
+    """上下文水位 0.0~1.0+；读不到 None。实现见 L2 agent_usage.pressure。"""
+    return _au.pressure(caller, session_id, agent,
+                        min_tokens_floor=CTX_MIN_TOKENS_FLOOR)
 
 
 def _ask_handoff_summary(agent: Dict[str, Any], messages: List[Dict[str, str]],
