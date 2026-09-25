@@ -16,6 +16,7 @@ LAYERS = M['layers']
 PORTS = M['ports']
 
 LAYER_TITLES = [
+    ('C',  'C 组合根（进程入口装配）'),
     ('L4', 'L4 呈现层 Experience'),
     ('L3', 'L3 协作域 Domain'),
     ('L2', 'L2 适配层 Adapter'),
@@ -202,6 +203,9 @@ secs.append("""<h2>三、依赖方向实测（门禁检查 1）</h2>
 <ul>
   <li>允许方向：<b>L4 → L3 → L2 → L1 → L0</b>（上层依赖下层）；<b>同层可互依</b>；
       <b>横切 X 可被任意层引用</b>；工具面 T 不受限（不属运行路径）。</li>
+  <li><b>组合根 C</b>（进程入口装配）排在方向序列最前：<b>C 可 import 任意层，任何层不得 import C</b>。
+      判据逻辑无需特判 —— C 的 rank 最小，<code>rank[src] &lt;= rank[dst]</code> 天然成立/天然违规。
+      它的用途是给「反向依赖」一个合法出口：把注入动作放进进程入口，而不是让下层去 import 上层。</li>
   <li>反向依赖（下层 import 上层）= <b>硬违规</b>，退出码 1，必须改。</li>
   <li>工具面缺席会让结果失真：<code>ledger_patrol.py</code> 这类巡检件 import 域件是正常的，
       把它当运行件就会报假违规。</li>
@@ -436,7 +440,7 @@ for _e in _r_st:
 _body = '\n'.join('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % r for r in _rows) \
         or '<tr><td colspan="5">今日无例外</td></tr>'
 secs.append("""<h3>8.5 已声明的例外（可审计、带到期条件）</h3>
-<div class="callout warn"><b>例外的存在本身就是结论</b>：这两条是「分层规则」与「现实约束」冲突时，
+<div class="callout warn"><b>例外的存在本身就是结论</b>：下表各条是「分层规则」与「现实约束」冲突时，
 <b>显式登记</b>而不是把门禁调松 —— 门禁每次运行都会把例外原文打印出来，条目一多就该动架构，而不是动规则。</div>
 <table><thead><tr><th>类型</th><th>对象</th><th>为什么允许</th><th>何时消解（到期条件）</th><th>登记于</th></tr></thead>
 <tbody>
@@ -580,8 +584,12 @@ HTML_HEAD = """<!DOCTYPE html>
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v2</b> · 2026-09-25 首版 / 同日阶段 1 刀 1+2 更新 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更（v2）：阶段 1 刀 1+2 —— 新增 L2 件 <code>agent_usage.py</code>，把 a2a_svc 与 ctx_watermark 里
+      版本 <b>v3</b> · 2026-09-25 首版 / 同日阶段 1 刀 1+2 与阶段 2 刀 2 更新 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v3）：阶段 2 刀 2 —— 引入<b>组合根层 C</b>（进程入口装配）；<code>a2a_svc.py</code> 改为组合根，
+      A2A 端点实现下沉新件 L1 <code>a2a_edge.py</code>（只声明能力端口，不 import 上层），
+      <code>/ctx-usage</code> 的响应构造随之上移到装配侧，L1→L2 的反向依赖改为<b>引导期注入</b>；
+      依赖方向的<b>已声明例外清零</b>。等价证据：<code>tools/equivalence/a2a_edge_equiv.py</code> 23/23 字节级一致。<br>
+      上一轮（v2）：阶段 1 刀 1+2 —— 新增 L2 件 <code>agent_usage.py</code>，把 a2a_svc 与 ctx_watermark 里
       两份重复的「水位读取 / 窗口判定 / 会话头」合成<b>单一权威实现</b>（原两处窗口分母 1000000 与 200000 的分歧随之消失，
       统一取「部署生效口径」）；门禁新增<b>已声明例外</b>机制（8.5，可审计、带到期条件）；<br>
       首版（v1）：登记 53 件、17 条层间依赖、16 项端口；新增层归属表与四条门禁（<b>零业务码改动</b>）；

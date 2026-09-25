@@ -1,11 +1,14 @@
 {
   "_readme": [
     "阶段 0 台账的机器可读部分：层归属表。check_layers.py 读它做依赖方向与判据门禁。",
-    "层的定义见 docs/HACS-分层规划-handoff.html（五层 + 三横切）。",
-    "layer 取值：L0 平台 / L1 通行 / L2 适配 / L3 协作域 / L4 呈现 / X 横切 / T 工具面",
-    "约定：只允许 L4→L3→L2→L1→L0 方向依赖（上层依赖下层）；同层可互依；X 横切可被任意层引用。"
+    "层的定义见 docs/HACS-分层规划-handoff.html（五层 + 三横切 + 组合根）。",
+    "layer 取值：C 组合根 / L0 平台 / L1 通行 / L2 适配 / L3 协作域 / L4 呈现 / X 横切 / T 工具面",
+    "约定：只允许 L4→L3→L2→L1→L0 方向依赖（上层依赖下层）；同层可互依；X 横切可被任意层引用。",
+    "组合根 C：进程入口装配件（只做装配与注入，不含业务与传输实现）。C 可 import 任意层；任何层不得 import C。",
+    "  这两条无需改判据逻辑 —— C 排在 layer_order 最前，rank 最小，判据 rank[src] <= rank[dst] 天然使 C→任意层成立、任意层→C 违规。"
   ],
   "layers": {
+    "C": "组合根（进程入口装配：只做装配与注入，不含业务与传输实现）",
     "L0": "平台层 Host（进程监管 / 路径 / 凭据 / 日志 / 探针 / 部署件）",
     "L1": "通行层 Transport（投信封 / 保投到 / 不重复 / 可观测 / 成员入网控制面）",
     "L2": "适配层 Adapter（Agent 差异唯一落脚点：调用 / 能力 / 上下文用量）",
@@ -25,10 +28,15 @@
       "port": 9960,
       "note": "成员守护：订阅点名 → 转本机 A2A；管理口只绑回环"
     },
-    "agent-team/a2a_svc.py": {
+    "agent-team/a2a_edge.py": {
       "layer": "L1",
       "port": 9920,
-      "note": "A2A 边缘端点 —— 水位/窗口/会话头已下沉 L2 agent_usage（2026-09-25 刀1+2 完成）"
+      "note": "A2A 边缘端点实现（通行层：收发/鉴权/回合循环）。只声明能力端口（backend_of / session_headers / read_usage / pressure / get_routes），不 import 任何上层件；未注入时一律降级为「不知道」，绝不编造数字"
+    },
+    "agent-team/a2a_svc.py": {
+      "layer": "C",
+      "port": 9920,
+      "note": "组合根：注入 L2 能力 + 注册 /ctx-usage，实现见 L1 a2a_edge.py。进程入口与命令行参数不变（systemd 单元 / Windows 计划任务都指向本件），argv 原样透传"
     },
     "agent-team/a2a_call.py": {
       "layer": "L1",
@@ -300,10 +308,16 @@
       "layer": "T",
       "port": null,
       "note": "网关行为测试（真 socket）"
+    },
+    "agent-team/tests/test_a2a_edge_caps.py": {
+      "layer": "T",
+      "port": null,
+      "note": "a2a_edge 能力端口测试：未注入降级口径 + 注入后 /ctx-usage 实测 + 残留守卫（L1 内不得出现 agent_usage）"
     }
   },
   "rules": {
     "layer_order": [
+      "C",
       "L4",
       "L3",
       "L2",
@@ -319,15 +333,7 @@
       "exempt_src_layers": [
         "T"
       ],
-      "exceptions": [
-        {
-          "src": "agent-team/a2a_svc.py",
-          "dst": "agent-team/agent_usage.py",
-          "reason": "a2a_svc 是边端 a2a 服务的宿主，/ctx-usage 端点的实质是 L2 适配能力的传输面薄壳；agent_usage 只读、无状态、仅依赖标准库。反向依赖确实是反的，登记在此避免门禁假绿。",
-          "expires_when": "阶段2 抽 web_gateway：把 /ctx-usage 端点连同适配面上移/改为引导期注入后删除本条",
-          "recorded": "2026-09-25 阶段1 刀1+2"
-        }
-      ]
+      "exceptions": []
     },
     "transport_business_words": [
       "群聊",
