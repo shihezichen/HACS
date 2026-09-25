@@ -33,7 +33,6 @@ import os
 import queue
 import re
 import secrets
-import subprocess
 import sys
 import threading
 import time
@@ -47,6 +46,8 @@ import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import view_auth  # noqa: E402  —— 账号 / 会话 / 角色 / 密级，与看板同一套口径
+#: L2 适配层：模型执行器「怎么调」+ Agent 展示名。本件只留薄委托，调用点不变。
+import agent_model  # noqa: E402
 
 # 上下文水位（服务端渲染，2026-09-24）：让「上下文：约 Xk/Yk (Z%)」由服务端按
 # 真源（<MEMBER_ID_1> sessions.json / <MEMBER_ID_2> state.db）渲染，绝不采信 Agent 手打的数字。
@@ -73,10 +74,7 @@ AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime
 AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
 # 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_DOMAIN = os.environ.get("AGENT_TEAM_DOMAIN") or "example.com"
-# 兜底默认值集中到 L0 node_paths（env 优先）
-AGENT_TEAM_SSH_TARGET = os.environ.get("AGENT_TEAM_SSH_TARGET") or ""
-# 兜底默认值集中到 L0 node_paths（env 优先）
-AGENT_TEAM_CLAUDE_EXEC = _np.claude_exec()
+#: 反向 SSH 目标与本机 claude_exec.py 路径已下沉 L2 agent_model（模型「怎么调」归适配层）。
 
 #: 门户登录页（本服务**不自己签发 cookie**，与「只有看板 POST /login」的既有口径一致）。
 #: 未登录的浏览器访客一律转交这里，并带「登录后回本页」的 next。
@@ -97,23 +95,10 @@ ROSTER_DEFAULTS = (
     os.environ.get("AGENT_TEAM_AGENTS_JSON") or AGENT_TEAM_ETC_DIR + "/agents.json",
 )
 
-#: 成员显示名补充表（agents.json 里只有 description 时用；键 = 成员 id）
-# 兜底默认值集中到 L0 node_paths（env 优先）（键=成员 id，值=显示名）
-_DISPLAY_NAMES_FALLBACK = {
-    "lobster": "龙虾",
-    "quantum": "量子",
-    "top001": "Top001",
-    "openclaw": "OpenClaw",
-    "openclaw-nb": "笔记本 OpenClaw",
-    "claudecode": "Claude Code",
-    "codex": "Codex",
-    "piagent": "Pi Agent",
-    "hermes": "Hermes",
-}
-DISPLAY_NAMES = dict(_DISPLAY_NAMES_FALLBACK)
-_dn_override = os.environ.get("AGENT_TEAM_DISPLAY_NAMES")
-if _dn_override:
-    DISPLAY_NAMES.update(json.loads(_dn_override))
+#: 成员显示名补充表（兜底表 + `AGENT_TEAM_DISPLAY_NAMES` 覆盖）已下沉 L2 agent_model。
+#: 这里是**同一个 dict 对象**的别名：既有 `DISPLAY_NAMES[...]` 用法照旧可用。
+_DISPLAY_NAMES_FALLBACK = agent_model._DISPLAY_NAMES_FALLBACK
+DISPLAY_NAMES = agent_model.DISPLAY_NAMES
 
 BODY_MAX = 1 << 20                       # 请求体上限 1MB
 #: tailnet 内免登录时把对端认作的人（与看板"内网免登录"同口径）。
@@ -956,10 +941,12 @@ def classify_human_intent(text: Any) -> Dict[str, Any]:
 
 
 def display_of(member_id: str) -> str:
-    """成员显示名：补充表 > 名册里自带的 display > id 原样。"""
-    if not member_id:
-        return ""
-    return DISPLAY_NAMES.get(member_id) or member_id
+    """成员显示名：补充表 > 名册里自带的 display > id 原样。（实现见 L2 agent_model）"""
+    return agent_model.display_name(member_id)
+
+
+#: L2 的正名；本件内外都可直接用 `display_name(...)`，与 `display_of(...)` 同一实现。
+display_name = agent_model.display_name
 
 
 def excerpt(text: Any, limit: int = EXCERPT_LEN) -> str:
@@ -2007,33 +1994,32 @@ class ChatDB(object):
 #:   CHAT_ENRICH_CMD=...         → 换远端执行器命令行（**指向错路径 = 模型不可用降级实测**）
 #:   CHAT_ENRICH_SSH=user@host   → 换反向 SSH 目标
 #:   CHAT_ENRICH_MIN_INTERVAL_S  → 两次模型调用之间的最小间隔（默认 1s，限速）
-ENRICH_ENABLE_ENV = "CHAT_ENRICH_ENABLE"
-ENRICH_SSH_BIN_ENV = "CHAT_ENRICH_SSH_BIN"
-ENRICH_SSH_ENV = "CHAT_ENRICH_SSH"
-ENRICH_KEY_ENV = "CHAT_ENRICH_KEY"
-ENRICH_KNOWN_ENV = "CHAT_ENRICH_KNOWN_HOSTS"
-ENRICH_CMD_ENV = "CHAT_ENRICH_CMD"
-ENRICH_TIMEOUT_ENV = "CHAT_ENRICH_TIMEOUT_S"
-ENRICH_MIN_INTERVAL_ENV = "CHAT_ENRICH_MIN_INTERVAL_S"
+#: 执行器「怎么调」整段已下沉 L2 `agent_model`（ssh 二进制 / 反向目标 / 私钥与
+#: known_hosts / 远端命令行 / 编码口径 / 超时与限速默认值 / subprocess 与输出解析）。
+#: 这里只保留**别名**，env 名与默认值逐字不变，本件既有引用点零改动。
+ENRICH_ENABLE_ENV = agent_model.ENABLE_ENV
+ENRICH_SSH_BIN_ENV = agent_model.SSH_BIN_ENV
+ENRICH_SSH_ENV = agent_model.SSH_ENV
+ENRICH_KEY_ENV = agent_model.KEY_ENV
+ENRICH_KNOWN_ENV = agent_model.KNOWN_ENV
+ENRICH_CMD_ENV = agent_model.CMD_ENV
+ENRICH_TIMEOUT_ENV = agent_model.TIMEOUT_ENV
+ENRICH_MIN_INTERVAL_ENV = agent_model.MIN_INTERVAL_ENV
 
-ENRICH_SSH_BIN = "/usr/bin/ssh"
-ENRICH_SSH_TARGET = AGENT_TEAM_SSH_TARGET
-#: 私钥/known_hosts 放**/etc 下**而不是 /root/.ssh：公网那个实例带 ProtectHome=yes，
-#: 家目录被隐藏，默认私钥路径在沙箱里读不到（实测过），显式 -i 才是两个实例都能跑的写法。
-ENRICH_KEY_FILE = AGENT_TEAM_ETC_DIR + "/ssh/id_ed25519"
-ENRICH_KNOWN_HOSTS = AGENT_TEAM_ETC_DIR + "/ssh/known_hosts"
-ENRICH_REMOTE_CMD = ("python -X utf8 %s" % AGENT_TEAM_CLAUDE_EXEC) + " --timeout 150 -"
-ENRICH_TIMEOUT_S = 240.0
-ENRICH_MIN_INTERVAL_S = 1.0
+ENRICH_SSH_BIN = agent_model.SSH_BIN
+ENRICH_SSH_TARGET = agent_model.SSH_TARGET
+ENRICH_KEY_FILE = agent_model.KEY_FILE
+ENRICH_KNOWN_HOSTS = agent_model.KNOWN_HOSTS
+ENRICH_REMOTE_CMD = agent_model.REMOTE_CMD
+ENRICH_TIMEOUT_S = agent_model.TIMEOUT_S
+ENRICH_MIN_INTERVAL_S = agent_model.MIN_INTERVAL_S
+ENRICH_NAME_MAX = agent_model.NAME_MAX
+ENRICH_SUMMARY_MAX = agent_model.SUMMARY_MAX
+#: 以下四个是**本层（L3）**的 worker 旋钮，不属执行器适配，留在这里。
 ENRICH_QUEUE_MAX = 200
 ENRICH_CONTEXT_LINES = 6
-ENRICH_NAME_MAX = 18
-ENRICH_SUMMARY_MAX = 80
 ENRICH_BACKFILL_MAX = 20          # 一次回填最多排 20 条
 ENRICH_BACKFILL_DEFAULT = 10
-#: ⚠️ 远端执行器必须用 `python -X utf8` 起 —— 本机 Windows 上 python 的 stdin/stdout
-#: 被 ssh 接到管道时按 cp936 走，中文提示词与中文回答会在两端各烂一次（实测踩到：
-#: task_name 落库成「锟斤拷」）。UTF-8 模式一次性把 stdin/stdout 都钉成 utf-8。
 
 #: 提示词：要**严格 JSON**，一行；口径写死在提示里（模型判 is_task=false 的三种典型形状）。
 TODO_ENRICH_PROMPT = """你是团队群「任务队列」的判定器。判断下面这条群消息是不是一条「给人派活的任务」，并抽象出任务名。
@@ -2056,81 +2042,29 @@ TODO_ENRICH_PROMPT = """你是团队群「任务队列」的判定器。判断�
 """
 
 
+# ---- 执行器适配的薄委托（实现见 L2 agent_model；签名与返回值逐字不变）----
+
 def todo_enrich_enabled() -> bool:
     """富化总开关（`CHAT_ENRICH_ENABLE=0/false/no/off` 关）。"""
-    raw = (os.environ.get(ENRICH_ENABLE_ENV) or "1").strip().lower()
-    return raw not in ("0", "false", "no", "off")
+    return agent_model.enabled()
 
 
 def todo_enrich_timeout() -> float:
-    try:
-        value = float((os.environ.get(ENRICH_TIMEOUT_ENV) or "").strip() or ENRICH_TIMEOUT_S)
-    except (TypeError, ValueError):
-        value = ENRICH_TIMEOUT_S
-    return max(5.0, min(1800.0, value))
+    return agent_model.timeout_s()
 
 
 def todo_enrich_min_interval() -> float:
-    try:
-        value = float((os.environ.get(ENRICH_MIN_INTERVAL_ENV) or "").strip()
-                      or ENRICH_MIN_INTERVAL_S)
-    except (TypeError, ValueError):
-        value = ENRICH_MIN_INTERVAL_S
-    return max(0.0, value)
+    return agent_model.min_interval_s()
 
 
 def todo_enrich_argv() -> List[str]:
     """模型调用的完整命令行（ssh → 本机 claude_exec.py），提示词走 stdin。"""
-    ssh_bin = (os.environ.get(ENRICH_SSH_BIN_ENV) or "").strip() or ENRICH_SSH_BIN
-    target = (os.environ.get(ENRICH_SSH_ENV) or "").strip() or ENRICH_SSH_TARGET
-    remote = (os.environ.get(ENRICH_CMD_ENV) or "").strip() or ENRICH_REMOTE_CMD
-    key = (os.environ.get(ENRICH_KEY_ENV) or "").strip()
-    if not key:
-        key = ENRICH_KEY_FILE
-    known = (os.environ.get(ENRICH_KNOWN_ENV) or "").strip()
-    if not known:
-        known = ENRICH_KNOWN_HOSTS
-    argv = [ssh_bin, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
-    if key:
-        argv += ["-i", key, "-o", "IdentitiesOnly=yes"]
-    if known:
-        argv += ["-o", "UserKnownHostsFile=%s" % known]
-    argv += [target, remote]
-    return argv
+    return agent_model.ssh_argv()
 
 
 def todo_enrich_parse(raw: Any) -> Optional[Dict[str, Any]]:
     """模型输出 → 校验过的判定。**不合格一律返回 None**（调用方据此重试 / 降级）。"""
-    text = str(raw or "").strip()
-    if not text:
-        return None
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end <= start:
-        return None
-    try:
-        data = json.loads(text[start:end + 1])
-    except Exception:
-        return None
-    if not isinstance(data, dict) or "is_task" not in data:
-        return None
-    flag = data.get("is_task")
-    if isinstance(flag, str):
-        flag = flag.strip().lower() in ("true", "1", "yes", "y", "是")
-    flag = bool(flag)
-    name = re.sub(r"\s+", " ", str(data.get("task_name") or "")).strip()
-    name = name.strip("，,。.、:：;；\"'“”（）()【】[]")
-    summary = re.sub(r"\s+", " ", str(data.get("summary") or "")).strip()
-    if flag and not name:
-        return None                    # 判是任务却不给名字：不算合格输出
-    try:
-        conf = float(data.get("confidence"))
-    except (TypeError, ValueError):
-        conf = 0.0
-    return {"is_task": flag,
-            "task_name": name[:ENRICH_NAME_MAX],
-            "summary": summary[:ENRICH_SUMMARY_MAX],
-            "confidence": max(0.0, min(1.0, conf)),
-            "raw": text[:600]}
+    return agent_model.parse(raw)
 
 
 def todo_enrich_call_model(prompt: str) -> Tuple[Optional[Dict[str, Any]], str]:
@@ -2139,30 +2073,7 @@ def todo_enrich_call_model(prompt: str) -> Tuple[Optional[Dict[str, Any]], str]:
     **失败是正常路径**：超时 / ssh 不通 / 执行器不存在 / 输出不是 JSON —— 全部只返回
     None，由调用方重试或降级成规则名。这里绝不抛异常给上层。
     """
-    if not todo_enrich_enabled():
-        return None, "disabled"
-    argv = todo_enrich_argv()
-    timeout = todo_enrich_timeout()
-    started = time.time()
-    try:
-        proc = subprocess.run(argv, input=prompt.encode("utf-8"),
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return None, "timeout_%ds" % int(timeout)
-    except FileNotFoundError:
-        return None, "ssh_missing:%s" % argv[0]
-    except Exception as exc:
-        return None, "spawn_error:%s" % scrubbed(exc)
-    out = (proc.stdout or b"").decode("utf-8", "replace").strip()
-    err = (proc.stderr or b"").decode("utf-8", "replace").strip()
-    if proc.returncode != 0:
-        return None, "exit_%d:%s" % (proc.returncode, (err or out)[-200:])
-    verdict = todo_enrich_parse(out)
-    if verdict is None:
-        return None, "unparsable:%s" % out[-200:]
-    verdict["elapsed_s"] = round(time.time() - started, 2)
-    return verdict, "ok"
+    return agent_model.call(prompt)
 
 
 def todo_enrich_seq_of(text: Any) -> Optional[int]:

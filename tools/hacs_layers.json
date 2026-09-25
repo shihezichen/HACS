@@ -83,6 +83,12 @@
       "port": null,
       "note": "上下文水位真源（读取/窗口分母/后端判定/会话头，单一权威口径）——a2a_svc 与 ctx_watermark 共同依赖"
     },
+    "agent-team/agent_model.py": {
+      "layer": "L2",
+      "port": null,
+      "duty": "适配层：模型执行器「怎么调」（ssh 二进制/反向目标/私钥与 known_hosts/远端命令行/编码口径/超时与限速默认值/subprocess 与输出解析）+ Agent 展示名（兜底表 + AGENT_TEAM_DISPLAY_NAMES 覆盖 + display_name 语义）",
+      "note": "L2 适配层：模型富化执行器 + Agent 展示名（阶段1 刀3 从 chat_svc(L3) 下沉）。**不含**提示词模板/队列 worker/写库/台账 —— 那些是「调什么」，留在 L3；失败一律降级返回 (None, 原因)，绝不编造。唯一依赖者 chat_svc.py（运行节点 lobster）"
+    },
     "agent-team/cli_backend.py": {
       "layer": "L2",
       "port": 9970,
@@ -91,7 +97,7 @@
     "agent-team/chat_svc.py": {
       "layer": "L3",
       "port": 9980,
-      "note": "对话台 —— ⚠️ 一文件承载 L4+L3+L2 细节（拆分点）"
+      "note": "对话台 —— ⚠️ 一文件承载 L4+L3 细节（拆分点）；L2 部分（模型执行器怎么调 + Agent 展示名）已下沉 agent_model.py，本件只留薄委托"
     },
     "agent-team/blackboard_svc.py": {
       "layer": "L3",

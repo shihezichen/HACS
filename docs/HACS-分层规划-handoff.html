@@ -77,8 +77,13 @@
     <h1>HACS 分层规划 · Handoff</h1>
     <div class="sub">Human-Agent Communication System — 分层与解耦方案（资深架构评审结论）</div>
     <div class="verline">
-      <b>v3</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3<br>
+      <b>v4</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4<br>
       本次内容：对「通行层 / 前台层」两分法的评审 → 五层 + 三横切 + 组合根的目标划分 → 七条解耦判据 → 四处最痛耦合 → 六阶段落地计划<br>
+      <b>v4 变更（仅进度标注，方案未改）：</b>阶段 1 刀 3 落地 —— 第四节 4.3 点名的两处
+      （<code>chat_svc.py</code> 反向 SSH 跑外部执行器做模型富化、各 Agent 展示名表硬编码在 <code>chat_svc.py</code> 里）
+      已下沉 L2 新件 <code>agent-team/agent_model.py</code>：L2 管「<b>怎么调</b>」（ssh/私钥/编码/超时限速/解析），
+      L3 只留「<b>调什么</b>」（提示词、队列 worker、写库）与同名薄委托，调用点零改动
+      （证据：<code>tools/equivalence/todo_enrich_equiv.py</code> 137/137 函数级一致）<br>
       <b>v3 变更：</b>层表新增<b>组合根 C（进程入口装配）</b>。阶段 2 刀 2 用它把 <code>a2a_svc</code>（L1）→ <code>agent_usage</code>（L2）
       这条<b>反向依赖改为引导期注入</b>：端点实现下沉新件 L1 <code>a2a_edge.py</code>（只声明能力端口），
       <code>a2a_svc.py</code> 改为组合根负责注入 L2 能力并登记 <code>/ctx-usage</code> 路由；
@@ -503,7 +508,7 @@
 </table>
 
 <footer>
-  HACS 分层规划 · Handoff v3 · 2026-09-25 · 性质：规划中（阶段 1 刀 1+2、阶段 2 刀 1+2 已落地）<br>
+  HACS 分层规划 · Handoff v4 · 2026-09-25 · 性质：规划中（阶段 1 刀 1+2+3、阶段 2 刀 1+2 已落地）<br>
   数字来自当日代码快照，会漂移；落地前请复核。本文件即该规划的唯一权威版本，改动请升版本号。
 </footer>
 
