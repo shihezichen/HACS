@@ -75,7 +75,7 @@ except Exception:
 MAX_TIMEOUT = 300.0
 DEFAULT_TIMEOUT = 120.0
 # PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<home>\\agent-team"
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<home>\agent-team"
 # PHASE2_TODO: 待节点注入 env 后删除
 AGENT_TEAM_NATS_HOST = (os.environ.get("AGENT_TEAM_NATS_HOST")
                         or "<host>:9930,<node-ip>:9930")  # <NODE_IP_1> 主 / <NODE_IP_2> 备

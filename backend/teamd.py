@@ -74,7 +74,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from nats_client import NatsClient, NatsError, read_secret_file  # noqa: E402
 
 # PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<home>\\agent-team"
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or "<home>\agent-team"
 
 VERSION = "1.2"
 REQ_SUBJECT_FMT = "a2a.v1.req.%s"
