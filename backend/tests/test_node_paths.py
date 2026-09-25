@@ -8,6 +8,7 @@
 """
 
 import io
+import json
 import os
 import re
 import sys
@@ -117,7 +118,85 @@ def t_no_leftover_literals():
     return "%d 个已改造模块零残留" % len(REFACTORED)
 
 
-TESTS = [t_platform_semantics, t_env_wins, t_local_equivalence, t_no_leftover_literals]
+def t_target_profile():
+    """目标主机档案（刀 4）：user@host / 裸 host 同解；四台各归其平台；未登记不编造。"""
+    saved = os.environ.pop(np.ENV_TARGET_PROFILE_JSON, None)
+    try:
+        for host in ("<user>@<node>", "thinkbook", "THINKBOOK", " thinkbook "):
+            assert np.target_known(host) is True, host
+            assert np.target_flavour(host) == "nt", host
+            assert np.target_claude_exec(host) == \
+                "<home>/AppData/Local/hermes/scripts/claude_exec.py", host
+        for host in ("lobster", "root@lobster", "quantum", "top001"):
+            assert np.target_known(host) is True, host
+            assert np.target_flavour(host) == "posix", host
+            assert np.target_home(host) == "/root", host
+            assert np.target_claude_exec(host) == \
+                "/root/.local/share/hermes/scripts/claude_exec.py", host
+        # 未登记 / 空串：按 posix 兜底，但 target_known 必须说实话
+        for host in ("nosuchhost", "user@nosuchhost", "", None, "   "):
+            assert np.target_known(host) is False, host
+            assert np.target_flavour(host) == "posix", host
+            assert np.target_claude_exec(host).startswith("/root/"), host
+    finally:
+        if saved is not None:
+            os.environ[np.ENV_TARGET_PROFILE_JSON] = saved
+    return "四台归位 + user@host 同解 + 未登记不编造"
+
+
+def t_target_profile_env_override():
+    """`AGENT_TEAM_TARGET_PROFILE_JSON` 整表覆盖；缺键按 flavour 惯例补齐；坏 JSON 退回内置表。"""
+    saved = os.environ.pop(np.ENV_TARGET_PROFILE_JSON, None)
+    try:
+        os.environ[np.ENV_TARGET_PROFILE_JSON] = json.dumps({
+            "thinkbook": {"flavour": "posix", "home": "/srv/tb",
+                          "claude_exec": "/srv/tb/bin/claude_exec.py"},
+            "lobster": {"flavour": "posix", "home": "/data/nbhome"},
+            "newbox": {"flavour": "nt"},
+        })
+        assert np.target_flavour("thinkbook") == "posix", np.target_flavour("thinkbook")
+        assert np.target_claude_exec("thinkbook") == "/srv/tb/bin/claude_exec.py"
+        # 缺 claude_exec → 按覆盖后的 home 补齐
+        assert np.target_claude_exec("lobster") == \
+            "/data/nbhome/.local/share/hermes/scripts/claude_exec.py", np.target_claude_exec("lobster")
+        # 缺 home/claude_exec → 按 flavour 惯例补齐
+        assert np.target_flavour("newbox") == "nt"
+        assert np.target_claude_exec("newbox") == \
+            "<home>/AppData/Local/hermes/scripts/claude_exec.py", np.target_claude_exec("newbox")
+        # **整表**覆盖：内置表里有、覆盖表里没有的，变成未登记
+        assert np.target_known("quantum") is False, "整表覆盖没生效"
+        # 坏 JSON 不许抛，退回内置表
+        os.environ[np.ENV_TARGET_PROFILE_JSON] = "{不是 JSON"
+        assert np.target_known("quantum") is True, "坏 JSON 该退回内置表"
+        assert np.target_flavour("thinkbook") == "nt"
+    finally:
+        os.environ.pop(np.ENV_TARGET_PROFILE_JSON, None)
+        if saved is not None:
+            os.environ[np.ENV_TARGET_PROFILE_JSON] = saved
+    return "整表覆盖 / 缺键补齐 / 坏 JSON 退回内置表"
+
+
+def t_local_vs_target_are_separate():
+    """本机真值与目标主机真值是两套：既有 `claude_exec()` 的签名与返回值一字未改。"""
+    s = _clear_env()
+    saved = os.environ.pop(np.ENV_CLAUDE_EXEC, None)
+    try:
+        if os.name == "nt":
+            assert np.claude_exec() == os.path.join(os.path.expanduser("~"), "AppData", "Local",
+                                                    "hermes", "scripts", "claude_exec.py"), np.claude_exec()
+        # posix 语义下本机值与「目标是 thinkbook」的值必须不同 —— 这正是缺陷的形状
+        assert np.claude_exec("posix") != np.target_claude_exec("thinkbook")
+        assert np.claude_exec("posix").endswith(".local/share/hermes/scripts/claude_exec.py".replace("/", os.sep)) \
+            or np.claude_exec("posix").endswith(".local/share/hermes/scripts/claude_exec.py"), np.claude_exec("posix")
+    finally:
+        if saved is not None:
+            os.environ[np.ENV_CLAUDE_EXEC] = saved
+        _restore(s)
+    return "claude_exec() 未改；本机值 ≠ 目标值"
+
+
+TESTS = [t_platform_semantics, t_env_wins, t_local_equivalence, t_no_leftover_literals,
+         t_target_profile, t_target_profile_env_override, t_local_vs_target_are_separate]
 
 if __name__ == "__main__":
     bad = 0

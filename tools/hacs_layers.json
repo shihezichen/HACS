@@ -87,7 +87,7 @@
       "layer": "L2",
       "port": null,
       "duty": "适配层：模型执行器「怎么调」（ssh 二进制/反向目标/私钥与 known_hosts/远端命令行/编码口径/超时与限速默认值/subprocess 与输出解析）+ Agent 展示名（兜底表 + AGENT_TEAM_DISPLAY_NAMES 覆盖 + display_name 语义）",
-      "note": "L2 适配层：模型富化执行器 + Agent 展示名（阶段1 刀3 从 chat_svc(L3) 下沉）。**不含**提示词模板/队列 worker/写库/台账 —— 那些是「调什么」，留在 L3；失败一律降级返回 (None, 原因)，绝不编造。唯一依赖者 chat_svc.py（运行节点 lobster）"
+      "note": "L2 适配层：模型富化执行器 + Agent 展示名（阶段1 刀3 从 chat_svc(L3) 下沉）。**不含**提示词模板/队列 worker/写库/台账 —— 那些是「调什么」，留在 L3；失败一律降级返回 (None, 原因)，绝不编造。唯一依赖者 chat_svc.py（运行节点 lobster）。刀 4：远端执行器路径改取 node_paths.target_claude_exec(目标)（本机真值不再冒充远端真值），新增 probe() 通道自检（不写库不改状态）"
     },
     "agent-team/cli_backend.py": {
       "layer": "L2",
@@ -302,8 +302,18 @@
     "agent-team/node_paths.py": {
       "layer": "L0",
       "port": null,
-      "duty": "平台层：宿主默认值唯一出处（运行/配置/日志目录、node、claude/codex/pi 可执行路径）；env 优先 > 平台惯例，只读纯函数",
-      "note": "L0 平台层：宿主默认值唯一出处（刀 3 新增）；env 优先 > 平台惯例"
+      "duty": "平台层：宿主默认值唯一出处 —— ①**本机**真值（运行/配置/日志目录、node、claude/codex/pi 可执行路径）；②**目标主机**真值（target_flavour / target_home / target_claude_exec / target_known，阶段4 节点档案的雏形）。两套真值分开，跨主机调用取 target_*；env 优先 > 平台惯例，只读纯函数",
+      "note": "L0 平台层：宿主默认值唯一出处（刀 3 新增）；env 优先 > 平台惯例。刀 4 增「目标主机档案」雏形：thinkbook=nt / lobster·quantum·top001=posix，AGENT_TEAM_TARGET_PROFILE_JSON 可整表覆盖；未登记主机按 posix 兜底且 target_known()=False（不编造真值）"
+    },
+    "agent-team/tests/test_agent_model.py": {
+      "layer": "T",
+      "port": null,
+      "note": "agent_model 自检与回归：probe() 结构/降级路径（subprocess 桩，不真打模型）+ 「远端执行器路径跟着目标主机走」的缺陷回归钉子 + 对外名字面守卫"
+    },
+    "tools/probe_model_channel.py": {
+      "layer": "T",
+      "port": null,
+      "note": "模型通道自检探针：真打一次最小 prompt，把「enrich worker 活着但 submitted 恒为 0」这类静默失效变成可判死的退出码；--node 读 deploy_targets.json 经 ssh 在该节点上跑"
     },
     "agent-team/web_gateway.py": {
       "layer": "L1",

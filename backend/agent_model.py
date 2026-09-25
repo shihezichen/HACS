@@ -22,10 +22,19 @@
     parse(raw)           -> Optional[Dict]       模型输出 → 校验过的判定；不合格返回 None
     call(prompt, timeout=None) -> (Optional[Dict], str)
                                                  (判定, 说明)；**失败一律降级**
+    probe(timeout_s=60)  -> Dict                 真打一次最小 prompt 的自检（不写库/不改状态）
     display_name(member_id) -> str               补充表 > id 原样
 
 **失败是正常路径**：超时 / ssh 不通 / 执行器不存在 / 输出不是 JSON —— 一律返回
 `(None, 原因)`，绝不抛异常给上层、绝不编造判定。
+
+远端执行器路径取**目标主机**的真值（2026-09-25 刀 4 修的就是这一处）
+------------------------------------------------------------------
+`REMOTE_CMD` 里的 `claude_exec.py` 跑在 **ssh 目标机**上，不是本机，所以路径必须按目标主机
+取：`node_paths.target_claude_exec(目标)`。改之前取的是 `node_paths.claude_exec()`（**本机**
+平台路径）—— chat_svc 从 thinkbook 迁到 lobster 后，Linux 本机路径被发给 Windows 目标机，
+远端 `can't open file`，整条模型通道静默失效（enrich worker 活着但 submitted/done 恒为 0）。
+目标主机未登记在档案表里时仍会给出兜底路径（posix 惯例），`probe()` 会把这件事写进 `why`。
 
 零硬编码
 --------
@@ -53,7 +62,7 @@ import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优
 import view_auth          # X 横切：错误文本脱敏（safe_err）同一套口径
 
 __all__ = ["enabled", "timeout_s", "min_interval_s", "ssh_argv", "parse", "call",
-           "display_name", "DISPLAY_NAMES"]
+           "probe", "display_name", "DISPLAY_NAMES"]
 
 # ------------------------------------------------------------ 宿主默认值（env 优先）
 
@@ -61,8 +70,8 @@ __all__ = ["enabled", "timeout_s", "min_interval_s", "ssh_argv", "parse", "call"
 AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
 # 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_SSH_TARGET = os.environ.get("AGENT_TEAM_SSH_TARGET") or ""
-# 兜底默认值集中到 L0 node_paths（env 优先）
-AGENT_TEAM_CLAUDE_EXEC = _np.claude_exec()
+#: ⚠️ **目标主机**上的执行器路径（不是本机的）—— 见上文「远端执行器路径取目标主机真值」。
+AGENT_TEAM_CLAUDE_EXEC = _np.target_claude_exec(AGENT_TEAM_SSH_TARGET)
 
 # ---------------------------------------------------- 模型执行器：环境变量名与默认值
 
@@ -83,7 +92,14 @@ SSH_TARGET = AGENT_TEAM_SSH_TARGET
 #: 家目录被隐藏，默认私钥路径在沙箱里读不到（实测过），显式 -i 才是两个实例都能跑的写法。
 KEY_FILE = AGENT_TEAM_ETC_DIR + "/ssh/id_ed25519"
 KNOWN_HOSTS = AGENT_TEAM_ETC_DIR + "/ssh/known_hosts"
-REMOTE_CMD = ("python -X utf8 %s" % AGENT_TEAM_CLAUDE_EXEC) + " --timeout 150 -"
+
+
+def _remote_cmd(target: str) -> str:
+    """目标机上要跑的那条命令（执行器路径按**目标主机档案**取，不取本机路径）。"""
+    return ("python -X utf8 %s" % _np.target_claude_exec(target)) + " --timeout 150 -"
+
+
+REMOTE_CMD = _remote_cmd(AGENT_TEAM_SSH_TARGET)
 TIMEOUT_S = 240.0
 MIN_INTERVAL_S = 1.0
 NAME_MAX = 18
@@ -121,14 +137,21 @@ def min_interval_s() -> float:
     return max(0.0, value)
 
 
+def _target() -> str:
+    """本次调用的 ssh 目标（`CHAT_ENRICH_SSH` > `AGENT_TEAM_SSH_TARGET` > 回退值）。"""
+    return (os.environ.get(SSH_ENV) or "").strip() or SSH_TARGET
+
+
 def ssh_argv() -> List[str]:
-    """模型调用的完整命令行（ssh → 本机 claude_exec.py），提示词走 stdin。
+    """模型调用的完整命令行（ssh → 目标机上的 claude_exec.py），提示词走 stdin。
 
     选项顺序是契约的一部分（排障时人要照着敲同一条命令），别重排。
+    远端命令的默认值按**当次生效的目标主机**取 —— `CHAT_ENRICH_SSH` 换了目标，路径跟着换，
+    否则换目标就又踩回「拿 A 机的路径去 B 机上跑」那个坑。`CHAT_ENRICH_CMD` 仍是最外层覆盖。
     """
     ssh_bin = (os.environ.get(SSH_BIN_ENV) or "").strip() or SSH_BIN
-    target = (os.environ.get(SSH_ENV) or "").strip() or SSH_TARGET
-    remote = (os.environ.get(CMD_ENV) or "").strip() or REMOTE_CMD
+    target = _target()
+    remote = (os.environ.get(CMD_ENV) or "").strip() or _remote_cmd(target)
     key = (os.environ.get(KEY_ENV) or "").strip()
     if not key:
         key = KEY_FILE
@@ -210,6 +233,38 @@ def call(prompt: str, timeout: Optional[float] = None) -> Tuple[Optional[Dict[st
         return None, "unparsable:%s" % out[-200:]
     verdict["elapsed_s"] = round(time.time() - started, 2)
     return verdict, "ok"
+
+
+# -------------------------------------------------------------------- 通道自检
+
+#: 自检用的最小提示词：回答内容固定、不含业务语义，只用来证明「这条通道能通且能回 JSON」。
+PROBE_PROMPT = ('只回一行 JSON，不要任何解释、不要代码块：'
+                '{"is_task": false, "task_name": "", "summary": "", "confidence": 0.9}')
+
+
+def probe(timeout_s: float = 60) -> Dict[str, Any]:
+    """真打一次最小 prompt，报告这条模型通道通不通。**不写库、不改状态、不抛异常。**
+
+    返回 `{"ok", "target", "argv", "elapsed_s", "why", "parsed"}`：
+      · `ok`      —— 打通且输出能解析成判定；
+      · `argv`    —— 这次实际用的命令行（排障时照着敲同一条）；
+      · `why`     —— `call()` 的说明原样（`ok` / `timeout_..` / `exit_..` / `unparsable:..` /
+                     `disabled`）；目标主机没登记在档案表里时额外挂一句 `target_unknown`，
+                     提醒远端路径是兜底值而不是真值；
+      · `parsed`  —— 解析出的判定，失败时 None。
+    """
+    target = _target()
+    argv = ssh_argv()
+    started = time.time()
+    verdict, why = call(PROBE_PROMPT, timeout=timeout_s)
+    if not _np.target_known(target):
+        why = "%s|target_unknown:%s" % (why, target)
+    return {"ok": verdict is not None,
+            "target": target,
+            "argv": argv,
+            "elapsed_s": round(time.time() - started, 2),
+            "why": why,
+            "parsed": verdict}
 
 
 # ---------------------------------------------------------------- Agent 展示名

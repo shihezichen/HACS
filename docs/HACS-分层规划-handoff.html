@@ -77,8 +77,17 @@
     <h1>HACS 分层规划 · Handoff</h1>
     <div class="sub">Human-Agent Communication System — 分层与解耦方案（资深架构评审结论）</div>
     <div class="verline">
-      <b>v4</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4<br>
+      <b>v5</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5<br>
       本次内容：对「通行层 / 前台层」两分法的评审 → 五层 + 三横切 + 组合根的目标划分 → 七条解耦判据 → 四处最痛耦合 → 六阶段落地计划<br>
+      <b>v5 变更（仅进度标注，方案未改）：</b>刀 4 落地 —— 修「<b>模型通道把本机真值当目标主机真值用</b>」：
+      L2 <code>agent_model.py</code> 的远端执行器路径改经 L0 <code>node_paths.target_claude_exec(目标)</code> 取，
+      不再拿本机 <code>claude_exec()</code> 冒充远端路径（chat_svc 从 thinkbook 迁到 lobster 后该通道静默失效的根因）。
+      同时在 L0 落<b>「目标主机档案」雏形</b>（<code>target_flavour / target_home / target_claude_exec / target_known</code>，
+      <code>AGENT_TEAM_TARGET_PROFILE_JSON</code> 可整表覆盖；未登记主机按 posix 兜底且 <code>target_known()=False</code>，<b>不编造真值</b>）——
+      这是<b>阶段 4「L0 nodelet / 节点档案」的提前雏形</b>，阶段 4 时正式化，届时本表并入节点档案，不另立第二处真值。
+      配套新增 T 件 <code>tools/probe_model_channel.py</code>（真打一次最小 prompt 的通道自检，失败退出码非 0），
+      把「enrich worker 活着但 submitted 恒为 0」这类<b>静默失效</b>变成可判死的信号。
+      证据：<code>tools/equivalence/target_profile_equiv.py</code> 冻结矩阵 21 格 + ssh_argv 平台断言 2 条全绿<br>
       <b>v4 变更（仅进度标注，方案未改）：</b>阶段 1 刀 3 落地 —— 第四节 4.3 点名的两处
       （<code>chat_svc.py</code> 反向 SSH 跑外部执行器做模型富化、各 Agent 展示名表硬编码在 <code>chat_svc.py</code> 里）
       已下沉 L2 新件 <code>agent-team/agent_model.py</code>：L2 管「<b>怎么调</b>」（ssh/私钥/编码/超时限速/解析），
