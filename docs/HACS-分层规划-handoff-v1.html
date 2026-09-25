@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HACS 分层规划 · Handoff v1</title>
+<style>
+  :root{
+    --ink:#1b2430; --ink2:#43536a; --ink3:#6b7c95;
+    --line:#dfe6ef; --bg:#f5f7fa; --card:#ffffff;
+    --accent:#2b6cb0; --accent2:#1f4e79;
+    --ok:#1f7a4d; --okbg:#e6f5ec;
+    --plan:#8a5300; --planbg:#fdf3e0;
+    --warn:#8a1f1f; --warnbg:#fbeaea;
+    --l4:#2b6cb0; --l3:#1f7a4d; --l2:#8a5300; --l1:#5b3ea8; --l0:#43536a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:0 0 60px;
+    background:var(--bg); color:var(--ink);
+    font:15px/1.75 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+  header{
+    background:linear-gradient(135deg,#1f4e79,#2b6cb0);
+    color:#fff; padding:34px 0 26px; margin-bottom:26px;
+  }
+  header h1{margin:0 0 8px;font-size:27px;letter-spacing:.5px}
+  header .sub{opacity:.92;font-size:14px}
+  .verline{
+    margin:16px 0 0; padding:11px 14px; border-radius:8px;
+    background:rgba(255,255,255,.13); font-size:13px; line-height:1.9;
+  }
+  h2{
+    font-size:20px; margin:34px 0 12px; padding:8px 0 8px 12px;
+    border-left:5px solid var(--accent); background:#fff;
+    border-radius:0 6px 6px 0;
+  }
+  h3{font-size:16px;margin:22px 0 8px;color:var(--accent2)}
+  p{margin:9px 0}
+  ul,ol{margin:8px 0 8px 4px;padding-left:22px}
+  li{margin:5px 0}
+  code{
+    font:13px/1.5 Consolas,"Cascadia Mono",monospace;
+    background:#eef2f7;padding:1px 5px;border-radius:4px;color:#1f4e79;
+  }
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+  table{width:100%;border-collapse:collapse;margin:12px 0;background:#fff;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 10px;vertical-align:top;text-align:left}
+  th{background:#eef2f7;color:var(--accent2);font-weight:600;white-space:nowrap}
+  tbody tr:nth-child(even){background:#fafcfe}
+  .badge{
+    display:inline-block;padding:1px 8px;border-radius:20px;
+    font-size:12px;font-weight:600;white-space:nowrap;
+  }
+  .b-plan{background:var(--planbg);color:var(--plan);border:1px solid #eccf9a}
+  .b-ok{background:var(--okbg);color:var(--ok);border:1px solid #a9dcc0}
+  .b-warn{background:var(--warnbg);color:var(--warn);border:1px solid #eebdbd}
+  .b-info{background:#e8f1fb;color:var(--accent2);border:1px solid #b9d4ee}
+  .callout{border-left:4px solid var(--accent);background:#eef5fc;padding:12px 15px;border-radius:0 8px 8px 0;margin:14px 0}
+  .callout.warn{border-color:#c05621;background:#fdf6ec}
+  .callout.now{border-color:#1f7a4d;background:#effaf3}
+  figure{margin:18px 0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px}
+  figure svg{display:block;width:100%;height:auto}
+  figcaption{font-size:13px;color:var(--ink3);margin-top:8px;text-align:center}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:760px){.two{grid-template-columns:1fr}}
+  .kpi{font-size:13px;color:var(--ink2)}
+  .kpi b{color:var(--accent2);font-size:15px}
+  footer{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);color:var(--ink3);font-size:13px}
+  .ph{color:#8a5300;font-weight:600}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>HACS 分层规划 · Handoff</h1>
+    <div class="sub">Human-Agent Communication System — 分层与解耦方案（资深架构评审结论）</div>
+    <div class="verline">
+      <b>v1</b> · 刷新日期 <b>2026-09-25</b> · 首版<br>
+      本次内容：对「通行层 / 前台层」两分法的评审 → 五层 + 三横切的目标划分 → 六条解耦判据 → 三处最痛耦合 → 五阶段落地计划<br>
+      性质：<span class="badge b-plan">规划中（尚未落地）</span> · 用途：后续陆续改进时的参考基线
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<h2>一、本文件定位</h2>
+<div class="card">
+  <p><b>这是什么：</b>2026-09-25 一次架构评审的<strong>书面固化</strong>。结论来自当天对代码仓（生产源码 + 对外脱敏仓）的通读与实测统计，不是凭印象画的框图。</p>
+  <p><b>怎么用：</b>后续每一次动结构之前，以本文件的「层 / 边界 / 判据 / 分期」为对照基线；改动若偏离本文件，先改本文件并升版本号，再动代码 —— <b>避免「文档里的架构」和「跑着的架构」两套说法漂移。</b></p>
+  <p><b>唯一权威版本：</b>本文件即该规划的唯一权威版本，不另存并行的 Markdown 版本。讨论记录、聊天结论不作为依据，以本文件为准。</p>
+  <p><b>口径：</b>文中出现的节点名（thinkbook / 龙虾 / 量子 / Top001）为角色代号；地址、路径、身份一律用占位符写法，见第九节。事实数字取自 2026-09-25 的代码快照，<b>代码在动，数字会漂移，落地前需复核。</b></p>
+</div>
+
+<h2>二、现状快照（实测）</h2>
+<table>
+  <thead><tr><th>观察项</th><th>实测</th><th>含义</th></tr></thead>
+  <tbody>
+    <tr><td>对话台后端 <code>chat_svc.py</code></td><td><b>4587 行 / 约 227 KB</b></td><td>一个文件承载了通信外的几乎全部业务</td></tr>
+    <tr><td>其中 HTTP 处理器类 <code>ChatHandler</code></td><td><b>1980 行</b></td><td>路由 + 领域逻辑 + 落库 + 静态托管混在一起</td></tr>
+    <tr><td>它一肩挑的职责</td><td>PG 读写 · 会话/消息 · 待办 · 会议 · <b>模型富化（反向 SSH）</b> · 鉴权 · <b>同源静态托管</b> · <b>计算器反代</b> · 登录重定向 · SSE 聚合</td><td><span class="badge b-warn">四层职责合一</span></td></tr>
+    <tr><td>群聊前端 <code>group.html</code></td><td><b>约 107 KB 单文件</b>（另有 36 KB <code>app.js</code>）</td><td>渲染引擎 + 视图状态 + 传输客户端焊在一起，只能整体替换</td></tr>
+    <tr><td>宿主机差异散落</td><td><b>26 个文件 / 85 行</b>带 <code>PHASE2_TODO</code> 标记</td><td>路径 / 监听地址 / 执行器位置等宿主细节进到了业务代码</td></tr>
+    <tr><td>部署件形态</td><td>systemd 模板已入仓；实际部署仍靠一次性脚本（<code>deploy_p1.py</code> / <code>deploy_p1b.py</code> …）+ 手工拷贝</td><td><span class="badge b-plan">台账与落件待补</span></td></tr>
+    <tr><td>已有的正确边界</td><td><code>deploy/</code> 的部署说明已写死判断法则：<b>通信层四节点对等；业务层只在中枢</b></td><td><span class="badge b-ok">保留，别推翻</span></td></tr>
+    <tr><td>已有的正确边界（二）</td><td>前端只走同源相对路径，响应体不含绝对地址</td><td><span class="badge b-ok">保留，别推翻</span></td></tr>
+  </tbody>
+</table>
+
+<h2>三、对「通行层 / 前台层」两分法的评审</h2>
+
+<h3>3.1 方向正确的两条</h3>
+<ul>
+  <li>纵向按「<b>通信能力 / 展示</b>」切，是正确的轴 —— 它对应的是"能力生命周期"与"人的感知"，两者的变化节奏本就不同。</li>
+  <li>「通信层对等、业务层中枢独有」这条法则已在部署说明里成立：通信件每台节点都装、形态一致；业务件全局一份。这条<b>不是新提案，是既成事实</b>，应原样继承。</li>
+</ul>
+
+<h3>3.2 关键错位：群聊不属于通行层</h3>
+<div class="callout warn">
+  <p><b>通行层的唯一职责应当是一句话：把一份信封投递给 X，并保证投到、不重复、可观测。</b>它不该认识「群 / 会话 / 序列号 / 待办」这些词。</p>
+  <p>而群聊是<b>领域业务</b>：会话与消息持久化、会话内单调序列号、<code>@</code> 解析成待回应账、待办入队、会议四要素 …… 全是领域规则。把它们放进通行层，中枢侧必然再次长成一个巨物 —— 第二节 <code>chat_svc.py</code> 4587 行的现状就是这条路径的终点。</p>
+</div>
+<table>
+  <thead><tr><th>「群聊」被拆开看，其实横跨三处</th><th>归属</th></tr></thead>
+  <tbody>
+    <tr><td>点名送达、在线态、断线补投、幂等去重</td><td><span class="badge b-info">通行层</span>（这才是通行层的活）</td></tr>
+    <tr><td>会话 / 消息 / 序列号 / 待回应账 / 待办 / 会议</td><td><span class="badge b-plan">协作域</span>（业务，不是通行）</td></tr>
+    <tr><td>把消息画出来、能点、能搜、能筛选</td><td><span class="badge b-ok">呈现层</span></td></tr>
+  </tbody>
+</table>
+<p>旁证：群守望器 <code>group_watch.py</code> 的自述里就承认了「群聊走 HTTP + 落库只给页面看；另一条通道只服务点对点；<b>中间这段桥没人接</b>」—— <b>这正是「群聊骑在两套通道上」的直接证据</b>，也是本次重划要真正解决的问题。</p>
+
+<h3>3.3 缺的一层：Agent 适配层</h3>
+<p>今天「同一个 Agent 现在什么状态、窗口多大、怎么调它」这件事，在<b>三个文件里各写了一遍口径</b>：</p>
+<ul>
+  <li><code>ctx_watermark.py</code> 直接读各 Agent 的真源（会话文件 / 状态库）；</li>
+  <li><code>chat_svc.py</code> <b>反向 SSH 回本机跑外部执行器</b>做模型富化（携带私钥路径、编码处理等宿主细节）；</li>
+  <li><code>a2a_svc.py</code> 按后端字段做分派；<code>chat_svc.py</code> 里还硬编码了各 Agent 的展示名表。</li>
+</ul>
+<p>这是典型的「<b>不同 agent 的差异 与 通用机制</b>」未解耦：新增一个 Agent 要同时改多处。</p>
+
+<h3>3.4 缺的另一层：平台 / 主机层</h3>
+<p>操作系统与宿主差异（自启方式、路径、凭据位置、shell 差异）目前以 <code>PHASE2_TODO</code> 标记散落在 26 个文件、85 行里。上层代码因此对宿主有感知，跨系统部署时要逐处改。</p>
+
+<h3>3.5 前台层内部还需再切一刀</h3>
+<p>前台至少要分三段：<b>渲染引擎</b>（md / 公式 / 代码高亮 / 代码块）、<b>业务视图</b>（群 / 队列 / 会议）、<b>传输客户端</b>（同源 API + SSE）。现在它们在一个 107 KB 的单文件里，改一处要整体回归。</p>
+
+<h2>四、目标划分：五层 + 三横切</h2>
+
+<figure>
+<svg viewBox="0 0 1240 600" role="img" aria-label="HACS 五层加三横切架构图" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="0" width="1240" height="600" fill="#ffffff"/>
+
+  <!-- L4 -->
+  <rect x="20" y="20" width="880" height="86" rx="9" fill="#eaf2fb" stroke="#2b6cb0" stroke-width="1.6"/>
+  <rect x="20" y="20" width="7" height="86" rx="3" fill="#2b6cb0"/>
+  <text x="44" y="47" font-size="16" font-weight="700" fill="#1f4e79">L4 呈现层 Experience</text>
+  <text x="44" y="72" font-size="13.5" fill="#43536a">职责：静态壳（渲染引擎）· 业务视图 · BFF 网关（同源 / 鉴权 / SSE 聚合）</text>
+  <text x="44" y="93" font-size="12.5" fill="#6b7c95">现状：chat_svc 里的静态托管 + 计算器反代 + 登录重定向；前端 107 KB 单文件</text>
+
+  <!-- L3 -->
+  <rect x="20" y="118" width="880" height="86" rx="9" fill="#effaf3" stroke="#1f7a4d" stroke-width="1.6"/>
+  <rect x="20" y="118" width="7" height="86" rx="3" fill="#1f7a4d"/>
+  <text x="44" y="145" font-size="16" font-weight="700" fill="#14603c">L3 协作域 Domain</text>
+  <text x="44" y="170" font-size="13.5" fill="#43536a">职责：群聊 · 待回应账 · 任务队列 · 会议 · 黑板 · 共享内容</text>
+  <text x="44" y="191" font-size="12.5" fill="#6b7c95">现状：chat_svc（域部分）/ task_svc / roundtable / blackboard_svc / shared_content / group_watch</text>
+
+  <!-- L2 -->
+  <rect x="20" y="216" width="880" height="86" rx="9" fill="#fdf3e0" stroke="#8a5300" stroke-width="1.6"/>
+  <rect x="20" y="216" width="7" height="86" rx="3" fill="#8a5300"/>
+  <text x="44" y="243" font-size="16" font-weight="700" fill="#7a4900">L2 适配层 Adapter</text>
+  <text x="44" y="268" font-size="13.5" fill="#43536a">职责：一个 Agent 一个适配器；调用 / 能力 / 上下文用量；Agent 差异唯一落脚点</text>
+  <text x="44" y="289" font-size="12.5" fill="#6b7c95">现状：上下文水位 + 模型富化（反向 SSH）+ a2a backend 分派，三处各写一遍口径</text>
+
+  <!-- L1 -->
+  <rect x="20" y="314" width="880" height="86" rx="9" fill="#f0ecfa" stroke="#5b3ea8" stroke-width="1.6"/>
+  <rect x="20" y="314" width="7" height="86" rx="3" fill="#5b3ea8"/>
+  <text x="44" y="341" font-size="16" font-weight="700" fill="#4a3190">L1 通行层 Transport</text>
+  <text x="44" y="366" font-size="13.5" fill="#43536a">职责：投信封 · 保投到 · 不重复 · 可观测（两个角色：中枢 relay / 边缘 edge）</text>
+  <text x="44" y="387" font-size="12.5" fill="#6b7c95">现状：NATS 客户端 / 成员守护 / A2A 服务端点 + 服务端集群</text>
+
+  <!-- L0 -->
+  <rect x="20" y="412" width="880" height="86" rx="9" fill="#eef1f5" stroke="#43536a" stroke-width="1.6"/>
+  <rect x="20" y="412" width="7" height="86" rx="3" fill="#43536a"/>
+  <text x="44" y="439" font-size="16" font-weight="700" fill="#33455c">L0 平台层 Host</text>
+  <text x="44" y="464" font-size="13.5" fill="#43536a">职责：进程监管 · 路径 · 凭据 · 日志 · 探针（一台机一份 OS profile）</text>
+  <text x="44" y="485" font-size="12.5" fill="#6b7c95">现状：服务单元散件 + Windows 计划任务 + 26 个文件 85 行宿主常量标记</text>
+
+  <!-- 横切 1 -->
+  <rect x="930" y="20" width="290" height="155" rx="9" fill="#f7fbfd" stroke="#2b6cb0" stroke-dasharray="5 4" stroke-width="1.4"/>
+  <text x="950" y="47" font-size="14.5" font-weight="700" fill="#1f4e79">横切 1 · 身份与授权</text>
+  <text x="950" y="73" font-size="12.5" fill="#43536a">统一账号 / 角色 / 密级 / 审计</text>
+  <text x="950" y="95" font-size="12.5" fill="#43536a">从「只服务看板」升为</text>
+  <text x="950" y="117" font-size="12.5" fill="#43536a">各域服务共同复用</text>
+  <text x="950" y="146" font-size="12" fill="#6b7c95">现状：一套实现已就绪</text>
+
+  <!-- 横切 2 -->
+  <rect x="930" y="187" width="290" height="155" rx="9" fill="#f7fbfd" stroke="#1f7a4d" stroke-dasharray="5 4" stroke-width="1.4"/>
+  <text x="950" y="214" font-size="14.5" font-weight="700" fill="#14603c">横切 2 · 契约与事件总线</text>
+  <text x="950" y="240" font-size="12.5" fill="#43536a">HTTP 契约已在 docs/ 固化</text>
+  <text x="950" y="262" font-size="12.5" fill="#43536a">需补：事件契约（谁发什么）</text>
+  <text x="950" y="284" font-size="12.5" fill="#43536a">幂等键、重投语义</text>
+  <text x="950" y="313" font-size="12" fill="#6b7c95">现状：习惯良好，缺事件侧</text>
+
+  <!-- 横切 3 -->
+  <rect x="930" y="354" width="290" height="144" rx="9" fill="#f7fbfd" stroke="#8a5300" stroke-dasharray="5 4" stroke-width="1.4"/>
+  <text x="950" y="381" font-size="14.5" font-weight="700" fill="#7a4900">横切 3 · 可观测与门禁</text>
+  <text x="950" y="407" font-size="12.5" fill="#43536a">健康口 / 运行变量口（只绑回环）</text>
+  <text x="950" y="429" font-size="12.5" fill="#43536a">凭据扫描门禁 + 语法门禁</text>
+  <text x="950" y="451" font-size="12.5" fill="#43536a">新增：依赖方向门禁（import 检查）</text>
+
+  <!-- 底部说明 -->
+  <line x1="20" y1="524" x2="900" y2="524" stroke="#dfe6ef" stroke-width="2"/>
+  <text x="20" y="552" font-size="13.5" fill="#1f4e79" font-weight="700">依赖方向单向：只允许上层依赖下层，下层绝不反向引用上层。</text>
+  <text x="20" y="578" font-size="13.5" fill="#8a5300" font-weight="700">通行层硬指标：其代码里不出现「群 / 会话 / 待办 / 会议」等业务词 —— 可 grep 校验。</text>
+</svg>
+<figcaption>图 1 · 目标分层（五层 + 三横切）。虚线框为横切关注点，不占层级。 </figcaption>
+</figure>
+
+<h3>4.1 层职责与边界契约</h3>
+<table>
+  <thead><tr><th>层</th><th>职责（一句话）</th><th>边界契约</th><th>现状件</th><th>目标形态</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>L0 平台</b></td>
+      <td>让上层对操作系统零感知</td>
+      <td>节点档案（配置唯一来源）+ 统一探针口</td>
+      <td>服务单元散件、计划任务、85 行宿主常量</td>
+      <td>每节点一份 <code>profile</code> + 一个轻量节点守护（自启 / 探针）</td>
+    </tr>
+    <tr>
+      <td><b>L1 通行</b></td>
+      <td>投信封、保投到、不重复</td>
+      <td>信封 <code>{to, from, kind, 幂等键, payload}</code> + 主题命名</td>
+      <td>NATS 客户端 / 成员守护 / A2A 端点 + 集群</td>
+      <td>拆成 <b>relay</b>（中枢侧：路由 / 权限 / 投递账 / 补投）与 <b>edge</b>（每节点一份），二者契约化</td>
+    </tr>
+    <tr>
+      <td><b>L2 适配</b></td>
+      <td>所有 Agent 差异的唯一落脚点</td>
+      <td><code>调用(信封) → 回复 + 用量</code>；<code>能力()</code></td>
+      <td>上下文水位 + 模型富化 + 后端分派（三处口径）</td>
+      <td>每个 Agent 一个适配器，统一接口；水位 / 富化收进来</td>
+    </tr>
+    <tr>
+      <td><b>L3 协作域</b></td>
+      <td>领域规则与状态</td>
+      <td>HTTP 契约 + 事件契约（都先写再改码）</td>
+      <td>对话台（域部分）/ 任务清单 / 圆桌 / 黑板 / 共享内容 / 群守望器</td>
+      <td>各自一进程、一份 schema；跨域只走契约，禁跨层读库读文件</td>
+    </tr>
+    <tr>
+      <td><b>L4 呈现</b></td>
+      <td>人看到与操作的东西</td>
+      <td>只用同源相对路径 API；响应体不含绝对地址</td>
+      <td>对话台（静态 + 反代 + 重定向）+ 前端单文件</td>
+      <td><code>web_gateway</code>（静态 / 反代 / 鉴权跳转 / SSE 聚合）+ 前端三件套（壳 / 视图 / 传输）</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>4.2 三条横切</h3>
+<ol>
+  <li><b>身份与授权</b> —— 现有那套账号 / 会话 / 角色 / 密级 / 审计实现，应从「只服务看板」升为所有域服务共同复用的能力。</li>
+  <li><b>契约与事件总线</b> —— HTTP 契约已有良好习惯（<code>docs/</code> 下成体系）；缺的是<b>事件侧</b>：谁发什么事件、幂等键在哪、重投语义是什么。</li>
+  <li><b>可观测与门禁</b> —— 健康口 / 运行变量口（只绑回环）、凭据扫描门禁、语法门禁；<b>新增一条「依赖方向门禁」</b>（见判据 2）。</li>
+</ol>
+
+<h2>五、六条解耦判据</h2>
+<p>判据的作用是<b>防止切开之后又粘回去</b>。每条都可机械校验。</p>
+<table>
+  <thead><tr><th>#</th><th>判据</th><th>为什么</th><th>现在的反例</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><b>契约先于实现</b>：跨层只走契约，禁止跨层直读数据库或文件</td><td>直读等于把对方的内部结构写成依赖</td><td>对话台后端直接读各 Agent 本机的会话文件 / 状态库（跨节点还要绕一圈调用）</td></tr>
+    <tr><td>2</td><td><b>依赖严格单向</b>：只允许上层引用下层，下层绝不引用上层</td><td>反向引用会让分层变成装饰</td><td>尚无门禁；建议在既有语法门禁旁加一条 import 检查</td></tr>
+    <tr><td>3</td><td><b>一进程一端口一职责</b>，端口表入仓维护</td><td>端口即部署面，可核验</td><td>端口表已存在，需继续维护</td></tr>
+    <tr><td>4</td><td><b>配置零硬编码</b>：环境变量是唯一真值来源</td><td>跨系统部署的前提</td><td>85 行宿主常量标记（路径 / 监听地址 / 执行器位置）</td></tr>
+    <tr><td>5</td><td><b>传输不含语义</b>：通行层代码里不出现「群 / 会话 / 待办 / 会议」</td><td>可 grep 的硬指标，最防回退</td><td>群聊链路上仍混着业务概念</td></tr>
+    <tr><td>6</td><td><b>适配层兜住两种差异</b>：Agent 差异 与 宿主差异</td><td>保证「加一个 Agent」只改一个地方</td><td>同一口径写在三个文件里</td></tr>
+  </tbody>
+</table>
+
+<h2>六、三处最痛的耦合（建议最先动）</h2>
+<table>
+  <thead><tr><th>部位</th><th>现状问题</th><th>应归到</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>上下文水位</b></td>
+      <td>读真源 / 挂到消息行 / 自愈判断，<b>三处各写一套口径</b>；呈现层因此依赖 Agent 内部实现</td>
+      <td><span class="badge b-plan">L2 适配层</span> 暴露「用量」查询，谁要谁问</td>
+    </tr>
+    <tr>
+      <td><b>模型富化</b></td>
+      <td>业务进程反向 SSH 回本机跑外部执行器，携带私钥路径与编码处理等宿主细节；失败属正常路径但难定位</td>
+      <td><span class="badge b-plan">L2 + L0</span>（业务进程不该知道 SSH 与编码）</td>
+    </tr>
+    <tr>
+      <td><b>群 → 点名 的桥</b></td>
+      <td>独立进程跑在笔记本节点上，<b>轮询落库</b>找「欠回应」；位置与触发方式都是过渡实现</td>
+      <td><span class="badge b-plan">L3</span> 里的事件驱动投递 worker（订阅事件而非轮询），部署位置由节点档案决定</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>七、分期落地计划</h2>
+<p>每一期都能独立上线、独立回滚，且<b>不要求先做大重构</b>。</p>
+<table>
+  <thead><tr><th>阶段</th><th>内容</th><th>风险</th><th>产出</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>0 · 台账</b><br>（不动一行业务码）</td>
+      <td>把现有各件逐个贴上「层 / 职责 / 端口 / 依赖方向 / 现有耦合点」，出对照表；同时加一条依赖方向门禁</td>
+      <td><span class="badge b-ok">零风险</span></td>
+      <td>分层台账文档（本文件的姊妹件）+ 门禁脚本</td>
+    </tr>
+    <tr>
+      <td><b>1 · 抽适配层</b></td>
+      <td>上下文水位 + 模型富化 + 后端分派 收进适配目录，业务侧只调统一接口</td>
+      <td><span class="badge b-ok">低</span>（收益最大）</td>
+      <td>适配层统一接口 + 各 Agent 适配器</td>
+    </tr>
+    <tr>
+      <td><b>2 · 抽网关，拆前端</b></td>
+      <td>静态托管 + 计算器反代 + 登录重定向 + SSE 聚合 从对话台拆出为 <code>web_gateway</code>；前端把单文件拆成「壳 / 视图 / 传输」</td>
+      <td><span class="badge b-plan">中</span>（对话台处理器可瘦身过半）</td>
+      <td>网关进程 + 前端三件套</td>
+    </tr>
+    <tr>
+      <td><b>3 · 定通行层契约</b></td>
+      <td>明确中枢 relay 与边缘 edge 的接口；群聊彻底从通信链路摘出；群守望器改事件驱动</td>
+      <td><span class="badge b-plan">中</span></td>
+      <td>通行层契约文档 + 事件驱动投递 worker</td>
+    </tr>
+    <tr>
+      <td><b>4 · 平台层收口</b></td>
+      <td>节点档案 + 轻量节点守护统一自启与探针；一次性部署脚本改为档案驱动</td>
+      <td><span class="badge b-plan">中</span></td>
+      <td>节点档案模板 + 部署件（替代一次性脚本）</td>
+    </tr>
+  </tbody>
+</table>
+<div class="callout now">
+  <b>建议起点：阶段 0。</b>零代码改动、零风险，但会让后续每一刀都有据可依。出「层 — 件 — 端口 — 契约」对照表，作为本文件的附件。
+</div>
+
+<h2>八、收益判据（可验证，不是形容词）</h2>
+<ul>
+  <li>新增一个 Agent → <b>只写一个适配器</b>，其余零改动（今天要动多处：成员配置 + 身份表 + 展示名表 + 水位口径）。</li>
+  <li>换一台机 / 换操作系统 → <b>只写一份节点档案</b>（今天要改散落在 26 个文件里的宿主常量）。</li>
+  <li>换前端框架 → <b>后端零改动</b>（前端已只用同源相对路径，边界已经是对的，只差内部再分层）。</li>
+  <li>故障面清晰：通行层挂了业务不可用；<b>业务挂了点对点照常通</b>（现状已靠笔记本节点上的守望器兜着，说明这个分层是真实需求而非纸面设计）。</li>
+</ul>
+
+<h2>九、占位符与术语口径</h2>
+<table>
+  <thead><tr><th>写法</th><th>含义</th></tr></thead>
+  <tbody>
+    <tr><td class="ph">&lt;host&gt; / &lt;node-ip&gt;</td><td>节点地址（真实地址不入文档）</td></tr>
+    <tr><td class="ph">&lt;deploy-dir&gt;</td><td>服务部署目录</td></tr>
+    <tr><td class="ph">&lt;home&gt;</td><td>用户家目录</td></tr>
+    <tr><td class="ph">&lt;repo&gt;</td><td>本地项目目录</td></tr>
+    <tr><td class="ph">&lt;member-id&gt; / &lt;human-id&gt;</td><td>成员标识 / 真人标识</td></tr>
+    <tr><td class="ph">example.com</td><td>域名占位</td></tr>
+  </tbody>
+</table>
+<p>术语：<b>relay</b> = 中枢侧投递角色；<b>edge</b> = 节点侧投递角色；<b>适配器</b> = 某个 Agent 的统一调用入口；<b>节点档案</b> = 一台机的配置真值来源；<b>信封</b> = 通行层的唯一传输单元。</p>
+
+<h2>十、待拍板与风险</h2>
+<table>
+  <thead><tr><th>事项</th><th>待定之处</th><th>推荐默认（供直接采用）</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>从哪一期起手</td>
+      <td>0 / 1 / 2 的先后</td>
+      <td><b>先 0 再 1</b>：台账零风险，适配层收益最大且不碰前端</td>
+    </tr>
+    <tr>
+      <td>L1 的 relay / edge 是否拆成两个进程</td>
+      <td>拆开更清晰，但会增加一个可观测面</td>
+      <td>先<b>契约化不拆进程</b>（接口先定，进程后拆），避免一次动两处</td>
+    </tr>
+    <tr>
+      <td>网关用自研还是现成的反向代理</td>
+      <td>静态与反代可交给现成组件，BFF 逻辑仍需自研</td>
+      <td>静态与反代用现成组件，BFF 与鉴权跳转自研，减少自养代码</td>
+    </tr>
+    <tr>
+      <td>风险：拆到一半的中间态</td>
+      <td>分层重构最容易死在「半拆」状态</td>
+      <td>每期必须独立可上线、可回滚；<b>禁止一次性大迁移</b></td>
+    </tr>
+  </tbody>
+</table>
+
+<footer>
+  HACS 分层规划 · Handoff v1 · 2026-09-25 · 性质：规划中（尚未落地）<br>
+  数字来自当日代码快照，会漂移；落地前请复核。本文件即该规划的唯一权威版本，改动请升版本号。
+</footer>
+
+</div>
+</body>
+</html>
