@@ -48,6 +48,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import view_auth  # noqa: E402  —— 账号 / 会话 / 角色 / 密级，与看板同一套口径
 #: L2 适配层：模型执行器「怎么调」+ Agent 展示名。本件只留薄委托，调用点不变。
 import agent_model  # noqa: E402
+#: L1 通行层：HTTP 应答出口（写 socket 那一段）与**非 GET 方法**的路由分发。
+import web_gateway  # noqa: E402
 
 # 上下文水位（服务端渲染，2026-09-24）：让「上下文：约 Xk/Yk (Z%)」由服务端按
 # 真源（<MEMBER_ID_1> sessions.json / <MEMBER_ID_2> state.db）渲染，绝不采信 Agent 手打的数字。
@@ -2395,8 +2397,222 @@ class Visitor(object):
 
 
 # ------------------------------------------------------------------ HTTP
+#
+# 「应答出口」这层**传输职责**交给 L1 `web_gateway`（阶段2 刀8a）：`send_response` →
+# 逐条写头 → `end_headers` → 写体 → 客户端早断时吞异常，全在 L1 的 `_reply()` 里。
+# 本件三个出口（`_send_json` / `_redirect` / `_send_bytes`）只剩 L1 给不了的三件事：
+#   · **摆哪几个头、按什么顺序摆**（头的顺序就是发出去的字节顺序）；
+#   · **HEAD 不写体**（但 `Content-Length` 仍报真实长度）；
+#   · `server_version` / HTTP/1.1（L1 默认 HTTP/1.0 且 server_version 取网关名）。
+#
+# **本件没有流式面**（硬约束 3）：全文件搜不到 `text/event-stream` / `chunked` /
+# `Transfer-Encoding`，也没有「连接不关」的写法；三个出口清一色是「先算出完整 body →
+# 一次性报 `Content-Length` → 一次写完」，所以整条应答路径都能安全走 L1 的缓冲封装，
+# 不需要任何「原样直写 socket」的豁免分支。
+#
+# **路由分派**这一刀只收**非 GET**（刀8a）：POST / PUT / PATCH / DELETE 的 11 条写
+# 路径，加上它们同样够得着的三条共享前缀（`/healthz`、`/calc/api/*`、`/calc/admin/*`）
+# 与兜底，全部登记进下面的 @GW.route 表。
+#
+# **GET 与 HEAD 的路由表整张留给刀8b**。理由要写清楚：本件的 `_handle()` 是一张
+# **方法无关的共享表**（同一串 if 同时服务 GET / HEAD / 写），不像 blackboard_svc
+# 那样每个 do_<METHOD> 各有各的表。HEAD 的可达集合**就是 GET 的表**，把 HEAD 拆成
+# 一条条 @GW.route 等于顺手把 GET 表也搬了 —— 那是 8b 的活。所以 HEAD 在本刀只把
+# **方法分派**接进 L1：不登记任何 HEAD 路由，由 `_gw_not_found()` 把它原样转回
+# 未动过的 `_handle("HEAD", ...)`。等 8b 把 GET 表搬进 L1，HEAD 自然跟着落到
+# 各自的 @GW.route 上。
 
-class ChatHandler(BaseHTTPRequestHandler):
+GW = web_gateway.Gateway("chat_svc", version=VERSION, quiet=True)
+
+#: 登记的处理函数一律**推式写出**（自己调 `_send_json()` / `_send_bytes()`），回这个
+#: 占位信封；`_dispatch_gw()` 看见 `self._sent` 为真就把它丢掉，绝不会发第二份响应。
+#: 之所以不改成「返式」：迁移前 `_dispatch()` 本来就是两种出口并存 ——「叶子方法回
+#: (status, payload)」与「回 None = 响应已自行发出（静态 / 反代 / 302 走这条）」，
+#: 把后者改成返式等于重写四十来个叶子方法，那就不是收路由而是改业务了。
+_SENT = (204, None, {})  # type: Tuple[int, Any, Dict[str, Any]]
+
+
+def _gw_done(req: "web_gateway.Request",
+             result: Optional[Tuple[int, Dict[str, Any]]]) -> Any:
+    """把「叶子方法回 (status, payload) 或 None」收敛成 L1 的占位信封。
+
+    与迁移前 `_dispatch()` 里那两行逐字同义：
+
+        body = self._handle(method, path, query)
+        if body is not None:              # None = 响应已自行发出
+            self._send_json(body[0], body[1])
+    """
+    if result is not None:
+        req.svc._send_json(result[0], result[1])
+    return _SENT
+
+
+@GW.pre
+def _gw_pre(req: "web_gateway.Request") -> Any:
+    """所有非 GET 方法的公共前奏：**先把请求体读完并缓存**。
+
+    迁移前 `_dispatch()` 开头那句 `self._drain_body()` 就是这一步 —— 写端点要用
+    （`_json_body()` 读的就是这份缓存），而且哪怕接下来就 405/501 也得把 socket
+    排空，否则 keep-alive 连接上的下一个请求会错位。
+    """
+    req.svc._drain_body()
+    return None
+
+
+@GW.not_found
+def _gw_not_found(req: "web_gateway.Request") -> Any:
+    """没登记的路径。三支，**顺序就是迁移前 `_handle()` 里的顺序**：
+
+    1. HEAD —— 路由表就是 GET 的表（留给刀8b），原样转回未动过的 `_handle()`。
+    2. 非 `/api/` 开头 —— 迁移前这一判在写端点判定**之前**，一律走同源静态托管
+       （写方法在 `_serve_static()` 里落 405「静态资源只支持 GET/HEAD」）。
+       `/login`、`/logout`、`/calc`、`/calc/admin`、`/` 这些写请求都落在这里。
+    3. `/api/` 下没对上形状的 —— 照旧 501 `not_implemented`（**不是 404**，
+       前端据这个码开关按钮），文案含方法与路径，一字不改。
+    """
+    svc = req.svc
+    if req.method == "HEAD":
+        return _gw_done(req, svc._handle("HEAD", req.path, req.query_dict))
+    if not req.path.startswith("/api/"):
+        return _gw_done(req, svc._serve_static(req.path, req.method))
+    return _gw_done(req, svc._not_implemented(req.method, req.path))
+
+
+# --- 非 GET 够得着的三条共享前缀（迁移前它们在 `_handle()` 里**不分方法**）--------
+
+@GW.route("/healthz", methods=("POST", "PUT", "PATCH", "DELETE"))
+def _gw_write_healthz(req: "web_gateway.Request") -> Any:
+    """迁移前 `if path == "/healthz"` 那一判**没有方法门槛**：`POST /healthz`
+    照样回 200 健康体。这里原样保留 —— 改成 405 就是行为变更。"""
+    return _gw_done(req, (200, req.svc._healthz()))
+
+
+@GW.route("/calc/api", methods=("POST", "PUT", "PATCH", "DELETE"), prefix=True)
+def _gw_write_calc_api(req: "web_gateway.Request") -> Any:
+    """`/calc/api/*` → 反代计算器后台（迁移前同样不分方法）。
+
+    **必须再判一次 `startswith("/calc/api/")`**：迁移前写的是「带尾斜杠的前缀」，
+    `/calc/api` 本身（`_dispatch` 已 rstrip 掉尾斜杠）落不进这一支、要走静态 405；
+    而 L1 的前缀匹配把「路径等于前缀」也算命中，不补这一判就会把 405 悄悄变成反代。
+    """
+    if not req.path.startswith("/calc/api/"):
+        return _gw_not_found(req)
+    svc = req.svc
+    return _gw_done(req, svc._calc_proxy(req.method, req.path[len("/calc"):],
+                                         req.query_dict))
+
+
+@GW.route("/calc/admin", methods=("POST", "PUT", "PATCH", "DELETE"), prefix=True)
+def _gw_write_calc_admin(req: "web_gateway.Request") -> Any:
+    """`/calc/admin/*` → 管理后台静态（写方法在 `_serve_admin()` 里落 405）。
+
+    同上补判：`/calc/admin` 本身迁移前只对 GET/HEAD 生效，写方法走静态 405。
+    """
+    if not req.path.startswith("/calc/admin/"):
+        return _gw_not_found(req)
+    svc = req.svc
+    return _gw_done(req, svc._serve_admin(req.path[len("/calc/admin"):], req.method))
+
+
+# --- 写端点登记表（契约 §I：临时群）：迁移前 do_POST/PATCH/PUT/DELETE 共用的那串 if --
+#
+# **不挂 `@GW.auth` 全局鉴权钩子**：`/healthz` 与「未知路径」这两支迁移前根本不鉴权，
+# 挂上去会让未知路径先落 401 而不是落它该落的 501/405。所以鉴权仍由每条路由自己
+# 在调叶子方法时 `_require_visitor()`（= 迁移前每条路由重复的那一下）。
+#
+# L1 只有「精确 / 前缀」两种匹配，带 <sid> 的形状只能落前缀，再由处理函数用**原正则**
+# 二次判形。正则与顺序原样搬过来，一条不动、一条不合并 —— 顺序变了就可能换一条命中。
+
+@GW.route("/api/sessions", methods=("POST",))
+def _gw_post_sessions(req: "web_gateway.Request") -> Any:
+    """POST /api/sessions —— 建群（契约 §I.4）。
+
+    精确登记管这一条、前缀登记管带 <sid> 的：L1 先查精确表，前缀只在精确表落空时
+    才轮到，与迁移前 `path == "/api/sessions"` / 正则带 id 的分工一一对上。
+    """
+    svc = req.svc
+    return _gw_done(req, svc._create_session(svc._require_visitor(), svc._json_body()))
+
+
+@GW.route("/api/sessions", methods=("POST", "PUT", "PATCH", "DELETE"), prefix=True)
+def _gw_write_sessions(req: "web_gateway.Request") -> Any:
+    """`/api/sessions/<sid>/...` 下的全部写端点，顺序与迁移前逐条对齐。
+
+    形状对不上的（`PUT /api/sessions/x/messages`、`POST /api/sessions/x/unknown`）
+    转 `_gw_not_found()`，落 501 `not_implemented` —— 与迁移前那条兜底逐字一致。
+
+    注意实参的**求值顺序**：`_require_visitor()` 写在 `_json_body()` 左边，所以
+    「没登录 + 请求体不是 JSON」时先抛 401 而不是 400。这一点原样保留。
+    """
+    svc, path, method = req.svc, req.path, req.method
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/messages$", path)
+    if m and method == "POST":
+        return _gw_done(req, svc._post_message(svc._require_visitor(), m.group(1),
+                                               svc._json_body()))
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})$", path)
+    if m and method == "PATCH":
+        return _gw_done(req, svc._patch_session(svc._require_visitor(), m.group(1),
+                                                svc._json_body()))
+    # 加人 / 踢人（契约 §I.5）：加踢都是改成员表，同一条路径 POST/DELETE。
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/members$", path)
+    if m and method in ("POST", "DELETE"):
+        return _gw_done(req, svc._members_write(svc._require_visitor(), m.group(1),
+                                                method, svc._json_body()))
+    # 群记忆锚 RoomMemo（契约 §I.6）：PUT 整份初始化 / PATCH 只追加。
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/memo$", path)
+    if m and method in ("PUT", "PATCH"):
+        return _gw_done(req, svc._memo_write(svc._require_visitor(), m.group(1),
+                                             method, svc._json_body()))
+    # 待办台账（群 #108~#114 冻结）：POST 新增条目 / 批量勾选递交。
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos$", path)
+    if m and method == "POST":
+        return _gw_done(req, svc._todo_create(svc._require_visitor(), m.group(1),
+                                              svc._json_body()))
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/clear$", path)
+    if m and method == "POST":
+        return _gw_done(req, svc._todos_clear(svc._require_visitor(), m.group(1),
+                                              svc._json_body()))
+    # #448-3：队列级清空（左栏「任务队列」清空按钮）
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/purge$", path)
+    if m and method == "POST":
+        return _gw_done(req, svc._todos_purge(svc._require_visitor(), m.group(1),
+                                              svc._json_body()))
+    # #448-1：历史几轮「人 @agent 派活」的消息回填进队列
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/backfill$", path)
+    if m and method == "POST":
+        return _gw_done(req, svc._todos_backfill(svc._require_visitor(), m.group(1),
+                                                 svc._json_body()))
+    # #541：手动触发「模型富化回填」（给历史行补模型名/详情；限速，不自动跑）
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/enrich$", path)
+    if m and method == "POST":
+        return _gw_done(req, svc._todos_enrich(svc._require_visitor(), m.group(1),
+                                               svc._json_body()))
+    return _gw_not_found(req)
+
+
+@GW.route("/api/todos", methods=("PATCH",), prefix=True)
+def _gw_patch_todo(req: "web_gateway.Request") -> Any:
+    """单条状态变更（路径不带 sid，与冻结口径一致：PATCH /api/todos/{id}）。
+
+    迁移前它排在那串 if 的最后一条；拆成独立一条登记不改命中结果 —— 它的正则
+    要求 `/api/todos/` 开头，与前面九条 `/api/sessions/` 开头的两两不相交。
+    """
+    svc = req.svc
+    m = re.match(r"^/api/todos/([A-Za-z0-9_\-]{1,64})$", req.path)
+    if m:
+        return _gw_done(req, svc._todo_patch(svc._require_visitor(), m.group(1),
+                                             svc._json_body()))
+    return _gw_not_found(req)
+
+
+# 必须在全部 @GW.route 之后取：`handler_class()` 会按「已登记的方法」删掉多余的
+# do_<METHOD>。本件登记的只有 POST/PUT/PATCH/DELETE，于是 L1 那份 do_GET/do_HEAD/
+# do_OPTIONS 会被删掉 —— GET/HEAD 由下面的 ChatHandler 自己定义，OPTIONS 则照旧
+# 落基类的 501，与迁移前逐字一致。
+_GatewayHandler = GW.handler_class()
+
+
+class ChatHandler(_GatewayHandler):
     """只读阶段的全部路由。写端点一律 501（契约 §12.4）。"""
 
     server_version = "agent-team-chat/" + VERSION
@@ -2410,25 +2626,69 @@ class ChatHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
         LOG.info("%s - %s", self._peer_ip(), fmt % args)
 
+    #: 本次请求是否已经写出响应（登记的处理函数一律推式出口）。
+    #: keep-alive 上一个实例要服务多个请求，所以每次进 `_dispatch_gw()` 都重置。
+    _sent = False
+
     def do_GET(self) -> None:  # noqa: N802
         self._dispatch("GET")
 
+    # 非 GET 的**方法分派**全在 L1（模块顶部的 @GW.route 登记表，阶段2 刀8a）：
+    # 下面五个方法只把入口接上去。HEAD 的路由**表**仍在 `_handle()` 里（它就是
+    # GET 的表，整张留给刀8b），由 `_gw_not_found()` 原样转回去。
     def do_HEAD(self) -> None:  # noqa: N802
-        self._dispatch("HEAD")
+        self._dispatch_gw()
 
     def do_POST(self) -> None:  # noqa: N802
-        self._dispatch("POST")
+        self._dispatch_gw()
 
     def do_PATCH(self) -> None:  # noqa: N802
-        self._dispatch("PATCH")
+        self._dispatch_gw()
 
     def do_PUT(self) -> None:  # noqa: N802
-        self._dispatch("PUT")
+        self._dispatch_gw()
 
     def do_DELETE(self) -> None:  # noqa: N802
-        self._dispatch("DELETE")
+        self._dispatch_gw()
+
+    def _dispatch_gw(self) -> None:
+        """非 GET 方法的统一入口：**路由分派交给 L1**（模块顶部的 @GW.route 登记表）。
+
+        与 `_dispatch()` 逐行同构，只把「一串 if 选处理函数」换成 `GW.dispatch()`；
+        计时、三层兜底 except、`_request_ms` 全照旧。`_drain_body()` 挪进了
+        `@GW.pre`，那里同样在本 try 之内，抛错照旧落这里的 500。
+        """
+        started = time.time()
+        self._sent = False
+        try:
+            parsed = urllib.parse.urlsplit(self.path)
+            req = web_gateway.Request(self)
+            req.svc = self
+            # 路径与查询一律沿用**本件自己的**归一化：`urlsplit()` 会剥掉 #fragment，
+            # L1 的 `partition("?")` 不会 —— 不覆盖的话 `/api/x#y` 的归一结果就变了。
+            req.path = parsed.path.rstrip("/") or "/"
+            req.query_dict = urllib.parse.parse_qs(parsed.query)
+            status, body, headers = GW.dispatch(req)
+            if not self._sent:            # 兜底：理论上走不到（每条路径都写过）
+                self._reply(status, body, headers)
+        except RequestError as exc:
+            self._send_json(exc.status, {
+                "ok": False,
+                "error": dict({"code": exc.code, "message": exc.message}, **exc.extra),
+            })
+        except DBUnavailable as exc:
+            LOG.warning("DB 不可用：%s", scrubbed(exc))
+            self._send_json(503, {"ok": False, "error": {
+                "code": "upstream_unavailable", "message": "数据库暂不可用"}})
+        except Exception as exc:                    # 兜底：绝不把栈吐给前端
+            LOG.exception("未处理异常 %s %s", self.command, self.path)
+            self._send_json(500, {"ok": False, "error": {
+                "code": "internal", "message": "服务端异常：%s" % scrubbed(exc)}})
+        finally:
+            self._request_ms = int((time.time() - started) * 1000)
 
     def _dispatch(self, method: str) -> None:
+        """GET 的入口。路由表（`_handle()`）整张留给刀8b，这里一个字没动。"""
         started = time.time()
         try:
             self._drain_body()
@@ -2499,58 +2759,10 @@ class ChatHandler(BaseHTTPRequestHandler):
             #    —— 静态绝不允许覆盖 /api/ 前缀。
             return self._serve_static(path, method)
 
-        # 写端点（契约 §I：临时群）。未实现的仍一律 501（**不是 404**，前端据此开关按钮）。
-        if method != "GET" and method != "HEAD":
-            if method == "POST" and path == "/api/sessions":
-                return self._create_session(self._require_visitor(), self._json_body())
-            m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/messages$", path)
-            if m and method == "POST":
-                return self._post_message(self._require_visitor(), m.group(1),
-                                          self._json_body())
-            m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})$", path)
-            if m and method == "PATCH":
-                return self._patch_session(self._require_visitor(), m.group(1),
-                                           self._json_body())
-            # 加人 / 踢人（契约 §I.5）：加踢都是改成员表，同一条路径 POST/DELETE。
-            m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/members$", path)
-            if m and method in ("POST", "DELETE"):
-                return self._members_write(self._require_visitor(), m.group(1),
-                                           method, self._json_body())
-            # 群记忆锚 RoomMemo（契约 §I.6）：PUT 整份初始化 / PATCH 只追加。
-            m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/memo$", path)
-            if m and method in ("PUT", "PATCH"):
-                return self._memo_write(self._require_visitor(), m.group(1),
-                                        method, self._json_body())
-            # 待办台账（群 #108~#114 冻结）：POST 新增条目 / 批量勾选递交。
-            m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos$", path)
-            if m and method == "POST":
-                return self._todo_create(self._require_visitor(), m.group(1),
-                                         self._json_body())
-            m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/clear$", path)
-            if m and method == "POST":
-                return self._todos_clear(self._require_visitor(), m.group(1),
-                                         self._json_body())
-            # #448-3：队列级清空（左栏「任务队列」清空按钮）
-            m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/purge$", path)
-            if m and method == "POST":
-                return self._todos_purge(self._require_visitor(), m.group(1),
-                                         self._json_body())
-            # #448-1：历史几轮「人 @agent 派活」的消息回填进队列
-            m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/backfill$", path)
-            if m and method == "POST":
-                return self._todos_backfill(self._require_visitor(), m.group(1),
-                                            self._json_body())
-            # #541：手动触发「模型富化回填」（给历史行补模型名/详情；限速，不自动跑）
-            m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/enrich$", path)
-            if m and method == "POST":
-                return self._todos_enrich(self._require_visitor(), m.group(1),
-                                          self._json_body())
-            # 单条状态变更（路径不带 sid，与冻结口径一致：PATCH /api/todos/{id}）
-            m = re.match(r"^/api/todos/([A-Za-z0-9_\-]{1,64})$", path)
-            if m and method == "PATCH":
-                return self._todo_patch(self._require_visitor(), m.group(1),
-                                        self._json_body())
-            return self._not_implemented(method, path)
+        # 写端点（契约 §I：临时群）那串判定已搬进 L1（模块顶部的 @GW.route 登记表，
+        # 阶段2 刀8a）：未实现的仍一律 501（**不是 404**，前端据此开关按钮），
+        # 文案与兜底都在 `_gw_not_found()` 里逐字保着。
+        # 到这里的只剩 GET 与 HEAD —— 这张表整张留给刀8b。
 
         visitor = self._resolve_visitor()
         if visitor is None:
@@ -4165,18 +4377,21 @@ class ChatHandler(BaseHTTPRequestHandler):
         return parsed
 
     def _send_json(self, status: int, payload: Dict[str, Any]) -> None:
+        """本件的 JSON 应答出口；socket 那一段全在 L1 的 `_reply()` 里（刀8a）。
+
+        字典的插入顺序**就是**发出去的头顺序，所以四个头按迁移前的次序摆：
+        Content-Type → Content-Length → Cache-Control → X-Content-Type-Options。
+        `Content-Length` 必须自己填（而不是让 L1 按 body 长度补）：HEAD 不写体，
+        但报的仍是**真实长度**，交给 L1 补就会变成 0。
+        """
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        try:
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        self._sent = True
+        self._reply(status, b"" if self.command == "HEAD" else body, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Length": str(len(body)),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        })
 
     # --- 计算器反代（<MEMBER_ID> · 2026-09-23 · 前后台配合）------------------
 
@@ -4269,12 +4484,17 @@ class ChatHandler(BaseHTTPRequestHandler):
     # --- 同源静态托管（会议 §H · <MEMBER_ID> 8 条清单）-------------
 
     def _redirect(self, location: str) -> None:
-        """302 跳转。响应自行发出 —— _handle 返回 None 即表示响应已发。"""
-        self.send_response(302)
-        self.send_header("Location", location)
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+        """302 跳转。响应自行发出 —— _handle 返回 None 即表示响应已发。
+
+        socket 那一段在 L1 的 `_reply()` 里（刀8a）；头顺序照旧
+        Location → Cache-Control → Content-Length，body 本来就是空的。
+        """
+        self._sent = True
+        self._reply(302, b"", {
+            "Location": location,
+            "Cache-Control": "no-cache",
+            "Content-Length": "0",
+        })
 
     def _login_redirect(self, path: str, query: Dict[str, List[str]]) -> None:
         """未登录访客 → 门户登录页（带 next=回本页的绝对 URL）。
@@ -4363,17 +4583,19 @@ class ChatHandler(BaseHTTPRequestHandler):
 
     def _send_bytes(self, status: int, data: bytes, content_type: str,
                     cache: str = "no-store") -> None:
-        try:
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", cache)
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.end_headers()
-            if self.command != "HEAD" and data:
-                self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        """字节应答出口（静态文件 / 计算器反代都从这里出去）。
+
+        socket 那一段在 L1 的 `_reply()` 里（刀8a）；头顺序与 `Content-Length`
+        的自填理由同 `_send_json()`。L1 的 `_reply()` 本来就 `if body:` 才写，
+        与迁移前 `data` 为空时不写 socket 的写法一致。
+        """
+        self._sent = True
+        self._reply(status, b"" if self.command == "HEAD" else data, {
+            "Content-Type": content_type,
+            "Content-Length": str(len(data)),
+            "Cache-Control": cache,
+            "X-Content-Type-Options": "nosniff",
+        })
 
 
 # ------------------------------------------------------------------ 启动

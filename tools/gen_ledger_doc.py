@@ -584,8 +584,13 @@ HTML_HEAD = """<!DOCTYPE html>
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v3</b> · 2026-09-25 首版 / 同日阶段 1 刀 1+2 与阶段 2 刀 2 更新 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更（v3）：阶段 2 刀 2 —— 引入<b>组合根层 C</b>（进程入口装配）；<code>a2a_svc.py</code> 改为组合根，
+      版本 <b>v4</b> · 2026-09-25 首版 / 同日阶段 1 刀 1+2 与阶段 2 刀 2、刀7c 更新 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v4）：阶段 2 刀7c —— L1 <code>web_gateway.py</code> 的 JSON 信封函数<b>提升为公开面</b>
+      <code>envelope()</code>（旧私有名 <code>_envelope</code> 保留为同一对象的兼容别名），
+      唯一跨件私有调用点 <code>blackboard_svc.py</code> 切公开名 —— 判据 6「契约先于实现」在 L1 上闭合。
+      等价证据：<code>tools/equivalence/gateway_envelope_equiv.py</code> 41/41 逐例一致（含 <code>_envelope is envelope</code> 别名同一对象断言）+
+      <code>blackboard_svc_http_equiv.py</code> 155/155 一致。<br>
+      上一轮（v3）：阶段 2 刀 2 —— 引入<b>组合根层 C</b>（进程入口装配）；<code>a2a_svc.py</code> 改为组合根，
       A2A 端点实现下沉新件 L1 <code>a2a_edge.py</code>（只声明能力端口，不 import 上层），
       <code>/ctx-usage</code> 的响应构造随之上移到装配侧，L1→L2 的反向依赖改为<b>引导期注入</b>；
       依赖方向的<b>已声明例外清零</b>。等价证据：<code>tools/equivalence/a2a_edge_equiv.py</code> 23/23 字节级一致。<br>

@@ -100,8 +100,11 @@ class Request(object):
             raise HttpError(400, {"ok": False, "error": "bad_json"})
 
 
-def _envelope(status, obj, headers=None):
-    """把处理函数的返回值化成 (status, body_bytes, headers)。"""
+def envelope(status, obj, headers=None):
+    """把处理函数的返回值化成 (status, body_bytes, headers)。
+
+    本件为 L1 契约面，跨件只许用 `envelope()`（下划线名是旧调用点的兼容别名）。
+    """
     headers = dict(headers or {})
     if isinstance(obj, bytes):
         return status, obj, headers
@@ -110,6 +113,9 @@ def _envelope(status, obj, headers=None):
     body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     headers.setdefault("Content-Type", "application/json; charset=utf-8")
     return status, body, headers
+
+
+_envelope = envelope  # 兼容别名（刀7c 前的外部调用点）；新调用方一律用 envelope()
 
 
 class Gateway(object):
@@ -172,9 +178,9 @@ class Gateway(object):
             try:
                 verdict = hook(req)
             except HttpError as exc:
-                return _envelope(exc.status, exc.obj, exc.headers)
+                return envelope(exc.status, exc.obj, exc.headers)
             if verdict is not None:
-                return _envelope(*verdict)
+                return envelope(*verdict)
         fn = self._exact.get((req.method, req.path))
         if fn is None:
             for method, prefix, handler in self._prefix:
@@ -184,9 +190,9 @@ class Gateway(object):
         if fn is None:
             fn = self._not_found or self._default_not_found
         try:
-            return _envelope(*fn(req))
+            return envelope(*fn(req))
         except HttpError as exc:
-            return _envelope(exc.status, exc.obj, exc.headers)
+            return envelope(exc.status, exc.obj, exc.headers)
 
     def handler_class(self):
         # type: () -> type
@@ -220,7 +226,7 @@ class Gateway(object):
                 try:
                     status, body, headers = gw.dispatch(req)
                 except HttpError as exc:            # 兜底：钩子/处理函数漏网
-                    status, body, headers = _envelope(exc.status, exc.obj, exc.headers)
+                    status, body, headers = envelope(exc.status, exc.obj, exc.headers)
                 self._reply(status, body, headers)
 
             def do_GET(self):

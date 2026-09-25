@@ -2738,7 +2738,7 @@ def parse_owner(raw: str) -> Tuple[Optional[str], Optional[str]]:
 #
 # 「应答出口」这层**传输职责**交给 L1 `web_gateway`（阶段2 刀7a）：`send_response` →
 # 逐条写头 → `end_headers` → 写 socket → 客户端早断时吞异常，全在 L1 的 `_reply()`
-# 里；JSON 编码与 `Content-Type` 默认值走 L1 的 `_envelope()`。本件只剩三样 L1
+# 里；JSON 编码与 `Content-Type` 默认值走 L1 的 `envelope()`。本件只剩三样 L1
 # 给不了的东西：
 #   · **本次特有的头**（目前只有 405 那条 `Allow: GET`）与它们相对 Content-Length 的顺序；
 #   · 每个响应一行 `<方法> <路径> -> <码> from=<成员> ip=<ip>` 的日志（要带鉴权成员名）；
@@ -3139,11 +3139,11 @@ class BlackboardHandler(_GatewayHandler):
                    headers: Optional[Sequence[Tuple[str, str]]] = None) -> None:
         """本件唯一的 JSON 应答出口；socket 那一段全在 L1 的 `_reply()` 里。
 
-        头的顺序就是发出去的字节顺序：Content-Type（L1 的 `_envelope()` 补）→
+        头的顺序就是发出去的字节顺序：Content-Type（L1 的 `envelope()` 补）→
         Content-Length → 本次特有的头。Content-Length **必须自己补在这里**：
         交给 L1 的 `_reply()` 补会排到特有头后面，`Allow: GET` 那一例字节就变了。
         """
-        code, body, out = web_gateway._envelope(code, payload)
+        code, body, out = web_gateway.envelope(code, payload)
         out["Content-Length"] = str(len(body))
         for name, value in (headers or ()):
             out[name] = value
@@ -4423,7 +4423,7 @@ ADMIN_GW = web_gateway.Gateway("blackboard_admin", version=VERSION, quiet=True)
 
 @ADMIN_GW.route("/healthz")
 def _admin_healthz(req: "web_gateway.Request") -> Any:
-    """唯一的路径；JSON 编码与 Content-Type 由 L1 的 `_envelope()` 出。"""
+    """唯一的路径；JSON 编码与 Content-Type 由 L1 的 `envelope()` 出。"""
     return health_payload()
 
 
