@@ -43,7 +43,7 @@
    落在中枢是因为公网入口与对话台都在龙虾。这是架构决策，不是"龙虾特殊"。
 
 **NATS 也不是龙虾独有**：三台云机都跑 NATS，组成集群（主干 9930 / 集群 9931）。
-`--nats-host <host>:9930,<host>:9930` 是**故障转移双地址**（主龙虾、备 top001），
+`--nats-host <host-1>:9930,<host-2>:9930` 是**故障转移双地址**（主龙虾、备 top001），
 量子自己那份既是成员也参与集群。**"NATS 通信层对等"这一点，上一版 README 完全没说出来。**
 
 ---
@@ -70,7 +70,7 @@
 
 ```bash
 python3 <deploy-dir>/teamd.py --member <member> \
-  --nats-host <host>:9930,<host>:9930 --user <member> \
+  --nats-host <host-1>:9930,<host-2>:9930 --user <member> \
   --password-file /etc/nats/<member>.pass \
   --a2a-base http://<node-ip>:9920 --token-file <deploy-dir>/client-token \
   --admin-port 9960
