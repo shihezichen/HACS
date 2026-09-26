@@ -76,7 +76,9 @@ def layer_table(layer):
 
 # ---------- 第四章：实测数字（check_layers 基线）----------
 BASELINE = {
-    'files': 53, 'edges': 17, 'direction': 0, 'bizwords': 48,
+    # 前两项由 check_layers.py 实时打印（'分层门禁 · 台账（件数 N，层间 import 边 M）'）——
+    # 动结构后必须同步这两个数；下面其余各项是**刀 3 时点**的实测，不是随生成重算。
+    'files': 62, 'edges': 51, 'direction': 0, 'bizwords': 48,
     'hardcode_files': 25, 'storage': 11, 'storage_over': 2,
     # 刀 3 后：宿主字面量拆成「真硬编码（路径）」与「提示级（IP/端口默认值）」两个口径。
     'host_path_files': 42, 'host_path_sites_before': 111, 'host_path_sites_after': 80,
@@ -210,15 +212,20 @@ secs.append("""<h2>三、依赖方向实测（门禁检查 1）</h2>
   <li>工具面缺席会让结果失真：<code>ledger_patrol.py</code> 这类巡检件 import 域件是正常的，
       把它当运行件就会报假违规。</li>
 </ul>
-<h3>3.2 今日基线</h3>
+<h3>3.2 基线（件数 / 层间 import 边 / 方向违规 —— 由 <code>check_layers.py</code> 实时打印后手抄，非随生成重算）</h3>
 <table><thead><tr><th>指标</th><th>实测</th><th>含义</th></tr></thead><tbody>
-<tr><td>登记件数</td><td><b>53</b></td><td>运行件 + 工具件，不含测试</td></tr>
-<tr><td>层间 import 边</td><td><b>17</b></td><td>边少 = 件之间靠「跨进程 + 配置」耦合，而非代码引用</td></tr>
-<tr><td>方向违规</td><td><b>0</b></td><td>硬门禁今日通过</td></tr>
+<tr><td>登记件数</td><td><b>%d</b></td><td>运行件 + 工具件，不含测试</td></tr>
+<tr><td>层间 import 边</td><td><b>%d</b></td><td>跨层引用（<b>含</b>共用底座件）；同层内引用不计</td></tr>
+<tr><td>方向违规</td><td><b>%d</b></td><td>硬门禁今日通过</td></tr>
 </tbody></table>
-<p class="kpi">「边只有 17 条」这件事本身值得记一笔：<b>件与件之间主要不是通过函数调用耦合，而是通过
-端口、文件、数据库和启动参数耦合</b>。所以「解耦」在这套系统里的主战场不是重构调用关系，
-而是<b>把配置与数据通道也纳入契约</b>。</p>""")
+<p class="kpi">层间 import 边从早期基线的 17 涨到 <b>%d</b>，<b>不是「耦合变多」，而是解耦的账单</b>：
+把原先各自复制的底座提到唯一出处之后，每个调用点都得 <code>import</code> 一次 ——
+L0 <code>node_paths.py</code>（≈19 件引用，按 <code>grep -l</code> 计）、L1 <code>web_gateway.py</code>（5 件）、
+横切 <code>view_auth.py</code>（5 件）、L2 <code>agent_usage.py</code>（4 件）四类底座正是边增长的主要来源。
+反过来，<b>件与件之间真正的主战场仍不是函数调用</b>：端口、文件、数据库、启动参数这四类通道不写一行
+<code>import</code> 也能把两个件焊死，所以解耦必须在<b>契约层</b>收口。数字会漂移，落地前以当次
+<code>check_layers.py</code> 的输出为准；第四章的硬编码 / 存储句柄各组数字为<b>刀 3 时点</b>实测，重算要跑各自脚本。</p>""" % (
+        BASELINE['files'], BASELINE['edges'], BASELINE['direction'], BASELINE['edges']))
 
 # 四、配置面
 h4 = ['<h2>四、配置面实测（门禁检查 3 与 4）</h2>']
@@ -584,8 +591,13 @@ HTML_HEAD = """<!DOCTYPE html>
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v4</b> · 2026-09-25 首版 / 同日阶段 1 刀 1+2 与阶段 2 刀 2、刀7c 更新 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更（v4）：阶段 2 刀7c —— L1 <code>web_gateway.py</code> 的 JSON 信封函数<b>提升为公开面</b>
+      版本 <b>v5</b> · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c 与基线重算 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v5）：① 阶段 2 <b>刀 8a·8b</b> —— <code>chat_svc.py</code>（9980 / 9984 对话台）的<b>应答出口</b>、<b>非 GET 方法分派</b>（8a）与 <b>GET/HEAD 整张路由表 + 前端页服务</b>（8b）全部收进 L1 <code>web_gateway.py</code>；
+      等价证据 <code>tools/equivalence/chat_svc_http_equiv.py</code> <b>311/311</b> 逐字节一致（状态码 + 状态原因 + <b>有序</b>响应头 + 归一后正文），四台的 L1 已落（<code>deploy.py --status</code> 漂移 0、健康 11/11）。
+      ② <b>刀 8c</b> —— 等价装置 FakeDB 的形状按生产契约真实化（<code>set_session_meta</code> / <code>memo_get</code> / <code>memo_write</code> / <code>list_messages</code> / <code>todos_purge</code>）：
+      311 例<b>不再有任何一例走 500 兜底</b>（500 例数 19 → <b>0</b>，2xx 126 → 143），生产代码一字未动；同步更正 <code>_old/chat_svc_old.py</code> 的来源登记（实为源码仓 rev 1264482 逐字节副本）。
+      ③ <b>3.2 基线重算</b>：登记件数 53 → <b>62</b>、层间 import 边 17 → <b>51</b> —— 底座件被提为唯一出处后调用点各 import 一次，是解耦的账单，不是耦合增加。<br>
+      上一轮（v4）：阶段 2 刀7c —— L1 <code>web_gateway.py</code> 的 JSON 信封函数<b>提升为公开面</b>
       <code>envelope()</code>（旧私有名 <code>_envelope</code> 保留为同一对象的兼容别名），
       唯一跨件私有调用点 <code>blackboard_svc.py</code> 切公开名 —— 判据 6「契约先于实现」在 L1 上闭合。
       等价证据：<code>tools/equivalence/gateway_envelope_equiv.py</code> 41/41 逐例一致（含 <code>_envelope is envelope</code> 别名同一对象断言）+
