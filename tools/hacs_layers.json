@@ -389,11 +389,11 @@
       "任务队列"
     ],
     "storage_handle_forbidden_layers": [
-      "L0",
       "L1",
       "L2",
       "L4"
     ],
+    "storage_handle_forbidden_layers_readme": "口径（刀21/22 阶段4 更新）：**L0 已从「不该持」名单移出** —— 阶段4 的设计就是「宿主会话真源（Hermes state.db / OpenClaw sessions.json）的句柄与 SQL 下沉到 L0 节点档案」，L0 因此是句柄的所有者（刀21 撤掉的那条 L2 agent_usage.py 例外，正是把句柄交给了 L0 node_profile.py）。仍留在名单里的 L1/L2/L4 是「不该直接持句柄」的层：要读宿主真源必须向下经 L0 取。本键之前含 L0 是阶段2 的旧口径（当时 L0 还不承担这一职责），留着会给后续读者一个假⚠。rc 不受本检查影响（只由检查1 层方向违规决定）。",
     "host_hardcode_patterns": [
       "IP 字面量（内网/尾网）",
       "绝对路径常量（/etc|/opt|/home|/root|/var 开头，或盘符开头）"
