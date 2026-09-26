@@ -142,8 +142,12 @@ class FakeDB(object):
     """只给确定性的常量答复：两侧走**同一条**代码路径。
 
     故意**无状态** —— 矩阵里前一例的写不会改变后一例的读，新旧两侧各跑一遍
-    也不会因为「谁先跑」而分叉。少数方法猜不准真实形状时，两侧会同样落到
-    某个 5xx，那依然是逐字节对照（对照的是 HTTP 面，不是业务正确性）。
+    也不会因为「谁先跑」而分叉。
+
+    **形状一律照生产契约给**（下表就是 `agent-team/chat_svc.py` 里 `Database.*` 的返回形状）：
+    形状给错的话，那一族用例两侧都只会落到同一个 5xx 兜底，比到的只是兜底正文，
+    成功支等于**没覆盖**（刀8c 之前 `set_session_meta` 返 `True` 就是这样：`_patch_session`
+    的 `updated.pop("changed", [])` 抛 AttributeError，PATCH session 那几例只见 500）。
     """
 
     def query(self, sql, params=()):
@@ -167,8 +171,20 @@ class FakeDB(object):
     def list_sessions(self, role, filters):
         return []
 
-    def set_session_meta(self, *a, **kw):
-        return True
+    def set_session_meta(self, session_id, fields=None, actor="", state=None):
+        """**生产契约**（`Database.set_session_meta`）：会话不存在 → None；
+        否则返 `_row_to_session()` 的会话字典 **+ `changed`**（本次真改动的字段名
+        列表，调用方 `_patch_session` 取走后对外单列）。
+
+        装置无状态 → 比不出「旧值」，`changed` 按「请求里带了该字段」给
+        （生产是「值真的变了」才算，见该函数注释）。
+        """
+        if session_id != SID:
+            return None
+        out = _session(state=(state or "open"))
+        out["changed"] = [col for col in ("title", "note")
+                          if isinstance(fields, dict) and col in fields]
+        return out
 
     def members_write(self, *a, **kw):
         return {"ok": True, "member_ids": [HUMAN, AGENT]}
@@ -180,18 +196,40 @@ class FakeDB(object):
                 "text": "hi", "status": "done",
                 "created_at": "2026-09-20T18:30:00+08:00"}
 
-    def list_messages(self, *a, **kw):
-        return []
+    def list_messages(self, session_id, limit, before_seq=None, after_seq=None):
+        """**生产契约**（`Database.list_messages`）：`(messages 升序, has_more, next_before_seq)`
+        三元组；空库 → `([], False, None)`。
+
+        旧版 `return []` 会让调用点的三元拆包 `msgs, _more, _nb = ...` 抛 ValueError →
+        `GET /messages`（含 todos/backfill）那几例两侧都只见 500 兜底。
+        """
+        return [], False, None
 
     def last_message(self, session_id):
         return None
 
     # --- 群记忆锚 ---
-    def memo_get(self, *a, **kw):
-        return None
+    def memo_get(self, session_id):
+        """**生产契约**（`Database.memo_get`）：没写过 → version 0 / etag ""。"""
+        if session_id != SID:
+            return None
+        return {"memo": {}, "version": 0, "etag": "",
+                "updated_at": None, "updated_by": ""}
 
-    def memo_write(self, *a, **kw):
-        return {"ok": True}
+    def memo_write(self, session_id, doc=None, actor="", if_match=None, action=""):
+        """**生产契约**（`Database.memo_write`）：`(ok, 状态字典)` 二元组。
+
+        生产：乐观锁撞车 → `(False, 当前状态)`；成功 → `(True, 新状态)`（版本 +1）。
+        装置无状态 → 恒成功、版本 1；etag 只给同形占位串（矩阵里没有带 `If-Match`
+        的用例，`memo_etag_ok` 那一支在此覆盖不到）。
+        """
+        if session_id != SID:
+            return None
+        return True, {"memo": doc if isinstance(doc, dict) else {},
+                      "version": 1,
+                      "etag": "W/\"0123456789abcdef0123456789abcdef\"",
+                      "updated_at": "2026-09-20T18:20:00+08:00",
+                      "updated_by": actor or HUMAN}
 
     # --- 待办 ---
     def todos_list(self, *a, **kw):
@@ -209,8 +247,13 @@ class FakeDB(object):
     def todos_clear(self, *a, **kw):
         return 0
 
-    def todos_purge(self, *a, **kw):
-        return 0
+    def todos_purge(self, session_id):
+        """**生产契约**（`Database.todos_purge`）：返回**被清掉的 id 列表**。
+
+        调用点要 `len(removed)`、`removed[:12]`、`"removed": removed` —— 旧版返 `0`（int）
+        直接 `len(int)` TypeError → 队列清空那两例只见 500。空库 → `[]`。
+        """
+        return []
 
     def todo_create(self, *a, **kw):
         return {"id": "todo_0001", "session_id": SID, "status": "todo"}
