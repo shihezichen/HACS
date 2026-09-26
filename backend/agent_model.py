@@ -62,7 +62,7 @@ import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优
 import view_auth          # X 横切：错误文本脱敏（safe_err）同一套口径
 
 __all__ = ["enabled", "timeout_s", "min_interval_s", "ssh_argv", "parse", "call",
-           "probe", "display_name", "DISPLAY_NAMES"]
+           "probe", "display_name", "DISPLAY_NAMES", "DISPLAY_NAMES_FALLBACK"]
 
 # ------------------------------------------------------------ 宿主默认值（env 优先）
 
@@ -283,6 +283,8 @@ _DISPLAY_NAMES_FALLBACK = {
     "hermes": "Hermes",
 }
 DISPLAY_NAMES = dict(_DISPLAY_NAMES_FALLBACK)
+#: 公开面：兜底表的别名（**同一个对象**，不是拷贝）—— 上层件要引用就引用它，别再跨件摸 `_` 名字。
+DISPLAY_NAMES_FALLBACK = _DISPLAY_NAMES_FALLBACK
 _dn_override = os.environ.get("AGENT_TEAM_DISPLAY_NAMES")
 if _dn_override:
     DISPLAY_NAMES.update(json.loads(_dn_override))

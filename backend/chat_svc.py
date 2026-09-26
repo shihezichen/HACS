@@ -99,7 +99,8 @@ ROSTER_DEFAULTS = (
 
 #: 成员显示名补充表（兜底表 + `AGENT_TEAM_DISPLAY_NAMES` 覆盖）已下沉 L2 agent_model。
 #: 这里是**同一个 dict 对象**的别名：既有 `DISPLAY_NAMES[...]` 用法照旧可用。
-_DISPLAY_NAMES_FALLBACK = agent_model._DISPLAY_NAMES_FALLBACK
+#: 兜底表以 L2 的**公开名** `DISPLAY_NAMES_FALLBACK` 引用（判据 6：跨件只走公开契约）。
+_DISPLAY_NAMES_FALLBACK = agent_model.DISPLAY_NAMES_FALLBACK
 DISPLAY_NAMES = agent_model.DISPLAY_NAMES
 
 BODY_MAX = 1 << 20                       # 请求体上限 1MB

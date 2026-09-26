@@ -87,7 +87,7 @@
       "layer": "L2",
       "port": null,
       "duty": "适配层：模型执行器「怎么调」（ssh 二进制/反向目标/私钥与 known_hosts/远端命令行/编码口径/超时与限速默认值/subprocess 与输出解析）+ Agent 展示名（兜底表 + AGENT_TEAM_DISPLAY_NAMES 覆盖 + display_name 语义）",
-      "note": "L2 适配层：模型富化执行器 + Agent 展示名（阶段1 刀3 从 chat_svc(L3) 下沉）。**不含**提示词模板/队列 worker/写库/台账 —— 那些是「调什么」，留在 L3；失败一律降级返回 (None, 原因)，绝不编造。唯一依赖者 chat_svc.py（运行节点 lobster）。刀 4：远端执行器路径改取 node_paths.target_claude_exec(目标)（本机真值不再冒充远端真值），新增 probe() 通道自检（不写库不改状态）"
+      "note": "L2 适配层：模型富化执行器 + Agent 展示名（阶段1 刀3 从 chat_svc(L3) 下沉）。**不含**提示词模板/队列 worker/写库/台账 —— 那些是「调什么」，留在 L3；失败一律降级返回 (None, 原因)，绝不编造。唯一依赖者 chat_svc.py（运行节点 lobster）。刀 4：远端执行器路径改取 node_paths.target_claude_exec(目标)（本机真值不再冒充远端真值），新增 probe() 通道自检（不写库不改状态）。刀 14（阶段3）：增公开面 `DISPLAY_NAMES_FALLBACK`，与私有原名 `_DISPLAY_NAMES_FALLBACK` **同一个对象**（不是拷贝），私有原名保留不动；`__all__` 追加 —— 上层件引用兜底表一律走这个公开名"
     },
     "agent-team/cli_backend.py": {
       "layer": "L2",
@@ -97,7 +97,7 @@
     "agent-team/chat_svc.py": {
       "layer": "L3",
       "port": 9980,
-      "note": "对话台 —— ⚠️ 一文件承载 L4+L3 细节（拆分点）；L2 部分（模型执行器怎么调 + Agent 展示名）已下沉 agent_model.py，本件只留薄委托"
+      "note": "对话台 —— ⚠️ 一文件承载 L4+L3 细节（拆分点）；L2 部分（模型执行器怎么调 + Agent 展示名）已下沉 agent_model.py，本件只留薄委托。刀 14（阶段3）：跨件私有面访问已收口 —— 兜底表改用 L2 公开名 agent_model.DISPLAY_NAMES_FALLBACK（本件本地名 _DISPLAY_NAMES_FALLBACK 是自己的私有名，合规）"
     },
     "agent-team/blackboard_svc.py": {
       "layer": "L3",

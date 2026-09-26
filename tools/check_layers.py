@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 """check_layers.py —— 分层门禁（阶段 0 产出）
 
-四条检查，对应 docs/HACS-分层规划-handoff.html 的七条解耦判据：
+五条检查，对应 docs/HACS-分层规划-handoff.html 的七条解耦判据：
 
   检查 1  依赖方向（判据 2）：只允许上层依赖下层；同层可互依；横切 X 可被任意层引用。
   检查 2  传输不含语义（判据 5）：L1 通行层的代码里不该出现业务词。
   检查 3  配置零硬编码（判据 4）：运行件里的 IP 字面量 / 绝对路径常量。
   检查 4  存储句柄（判据 1 的前置）：哪些件直接持数据库 / 文件句柄（持句柄的件必须在自己层内）。
+  检查 5  跨件私有面访问（判据 1）：契约先于实现 —— 跨层只走公开契约，禁跨件摸 `_` 私有面。
 
 用法：
   python tools/check_layers.py                # 全量报告
@@ -15,11 +16,12 @@
   python tools/check_layers.py --json         # 机器可读
 
 退出码：0 = 无「硬违规」；1 = 有硬违规（检查 1 的方向违规）。
-检查 2/3/4 默认是「提示级」——它们的命中需要人判断，不直接判死（见台账第八节）。
+检查 2/3/4/5 默认是「提示级」——它们的命中需要人判断，不直接判死（见台账第八节）。
 """
 from __future__ import annotations
 
 import argparse
+import ast
 import io
 import json
 import os
@@ -184,6 +186,59 @@ def check_storage(layers, files):
     return hits
 
 
+def check_private_surface(layers, files):
+    """检查 5：跨件私有面访问（判据 1 · 契约先于实现）。
+
+    判据 1（契约先于实现）说的是「跨层只走契约」。可机械校验的那一半 = **别跨件摸 `_` 名字**：
+    某件 import 了另一件，却直接访问对方以 `_` 开头的属性，说明契约没定全、实现漏了出去。
+
+    口径（与旧的正则扫描的关键区别：**只认真实属性访问**）：
+      · 只扫层归属表里 `layer != "T"` 的 `.py` 件（HTML/JS 不解析；测试件在 T 层，自然豁免）。
+      · 用 ast 建「导入别名 → 模块名」映射，只在 `ast.Attribute` 且 `value` 是 `ast.Name` 时判定 ——
+        注释、文档串、字符串里的 `mod._xxx` 提及**一律不算**。
+      · `__x__` 形态的 dunder 不算私有面。
+
+    **提示级**：不参与退出码（rc 仍由检查 1 的硬违规决定）。
+    阶段3 收官后若噪声仍为 0，即把本检查提为硬门禁。
+    """
+    reg = {os.path.basename(f) for f in files}
+    mod_names = {k[:-3] for k in reg if k.endswith('.py')}
+    hits = []
+    for rel, meta in files.items():
+        if meta.get('layer') == 'T' or not rel.endswith('.py'):
+            continue
+        src = read_src(rel)
+        if not src:
+            continue
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        alias = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    alias[a.asname or a.name.split('.')[0]] = a.name.split('.')[0]
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    base = node.module.split('.')[0]
+                    for a in node.names:
+                        alias[a.asname or a.name] = base
+        own = os.path.splitext(os.path.basename(rel))[0]
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)):
+                continue
+            mod = alias.get(node.value.id)
+            if not mod or mod not in mod_names or mod == own:
+                continue
+            if not node.attr.startswith('_'):
+                continue
+            if node.attr.startswith('__') and node.attr.endswith('__'):
+                continue
+            hits.append(dict(file=rel, line=node.lineno, alias=node.value.id, attr=node.attr))
+    return sorted(hits, key=lambda h: (h['file'], h['line']))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--only', default='')
@@ -200,6 +255,7 @@ def main():
     w2 = check_transport_words(layers, files) if (not only or '2' in only) else []
     w3 = check_hardcode(layers, files) if (not only or '3' in only) else []
     w4 = check_storage(layers, files) if (not only or '4' in only) else []
+    w5 = check_private_surface(layers, files) if (not only or '5' in only) else []
 
     # 源码树守卫：在对外仓（HACS）里跑本脚本时，层归属表在、源文件不在 ——
     # 那样「件数 53 / 边 0」看着像通过，其实是没料可查。宁可判不清也不给假绿灯。
@@ -216,7 +272,8 @@ def main():
     report = dict(direction_violations=v1, transport_business_hits=w2,
                   hardcode=w3, host_paths=host_paths, net_literals=net_literals,
                   host_path_owner=(layers.get('rules') or {}).get('host_path_owner') or '',
-                  storage=w4, edges=len(edges), files=len(files), declared_exceptions=DECLARED)
+                  storage=w4, private_surface=w5,
+                  edges=len(edges), files=len(files), declared_exceptions=DECLARED)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=1))
         return 1 if v1 else 0
@@ -251,6 +308,12 @@ def main():
     for h in w4:
         print('  %s %-34s [%s] %s' % ('⚠' if h['flag'] else '·', h['file'], h['layer'], ','.join(h['kinds'])))
 
+    print('\n检查 5 · 跨件私有面访问（提示级）')
+    if not w5:
+        print('  ✓ 无跨件私有面访问（0 处）')
+    for h in w5:
+        print('  · %s:%d  %s.%s' % (h['file'], h['line'], h['alias'], h['attr']))
+
     if DECLARED:
         print('\n已声明的例外（不判违规；每条都带理由与到期条件，登记在 tools/hacs_layers.json）')
         for dd in DECLARED:
@@ -258,7 +321,7 @@ def main():
             print('      理由：%s' % dd['reason'])
             print('      到期：%s' % dd['expires'])
 
-    print('\n判据对照：检查1↔判据2 · 检查2↔判据5 · 检查3↔判据4 · 检查4↔判据1')
+    print('\n判据对照：检查1↔判据2 · 检查2↔判据5 · 检查3↔判据4 · 检查4↔判据1 · 检查5↔判据1')
     return 1 if v1 else 0
 
 

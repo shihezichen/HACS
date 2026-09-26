@@ -133,7 +133,7 @@ secs.append("""<h2>一、这份台账怎么用</h2>
   <li><b>层归属是人判的，不是推的。</b>判断法则沿用规划文档：<i>通信层四节点对等、业务层中枢独有</i>。
       一个件若同时干两层的活，台账里记两个层并打 <span class="badge b-warn">拆分点</span>，
       <b>不为它硬凑一个层</b>。</li>
-  <li><b>数字全部来自实测</b>，可复跑：件数/行数 来自 <code>wc -l</code>；门禁四项来自
+  <li><b>数字全部来自实测</b>，可复跑：件数/行数 来自 <code>wc -l</code>；门禁五项来自
       <code>python tools/check_layers.py</code>；进程与启动方式来自本机进程与计划任务实查。
       标注 <span class="badge b-plan">会漂移</span> 的，落地前复核。</li>
   <li><b>提示级 vs 硬级。</b>只有「依赖方向」是硬门禁（退出码 1）。业务词、宿主硬编码、存储句柄
@@ -401,19 +401,22 @@ secs.append("""<h2>八、门禁怎么跑（工具与基线）</h2>
 <h3>8.1 两个新增工具件</h3>
 <table><thead><tr><th>工具</th><th>作用</th><th>性质</th></tr></thead><tbody>
 <tr><td><code>tools/hacs_layers.json</code></td><td>层归属表（机器可读）：件 → 层 / 端口 / 备注；层定义、端口登记、门禁规则</td><td>台账的孪生体，<b>唯一可编辑真源</b></td></tr>
-<tr><td><code>tools/check_layers.py</code></td><td>四条检查的门禁脚本；<code>--json</code> 出机器可读报告，<code>--only 1,2</code> 跑子集</td><td>新增件，<b>零业务码改动</b></td></tr>
+<tr><td><code>tools/check_layers.py</code></td><td>五条检查的门禁脚本；<code>--json</code> 出机器可读报告，<code>--only 1,2</code> 跑子集</td><td>新增件，<b>零业务码改动</b></td></tr>
 <tr><td><code>tools/gen_ledger_doc.py</code></td><td>从层归属表生成本台账 HTML（表格同源，防漂移）</td><td>新增件</td></tr>
 </tbody></table>
 <pre><code>python tools/check_layers.py           # 全量报告；退出码 0=无硬违规 / 1=有硬违规 / 2=不是源码树
 python tools/check_layers.py --only 1  # 只跑硬门禁
 python tools/check_layers.py --json    # 机器可读</code></pre>
-<h3>8.2 四条检查 ↔ 七条判据</h3>
+<h3>8.2 五条检查 ↔ 七条判据</h3>
 <table><thead><tr><th>检查</th><th>对应判据</th><th>级别</th><th>今日基线</th></tr></thead><tbody>
 <tr><td>1 依赖方向</td><td>判据 2 依赖严格单向</td><td><b>硬（退出码 1）</b></td><td><b>0 违规</b></td></tr>
 <tr><td>2 传输不含语义</td><td>判据 5 传输层不含业务词</td><td>提示级（需人判）</td><td><b>45 行命中</b>（多为注释；实质命中见 8.3）</td></tr>
 <tr><td>3 配置零硬编码</td><td>判据 4 配置零硬编码</td><td>提示级</td><td><b>25 件</b>带字面量</td></tr>
 <tr><td>4 存储句柄</td><td>判据 1 的前置检查</td><td>提示级</td><td><b>10 件</b>持句柄，<b>0 件越层</b>+<b>1 条已声明例外</b>（见 8.5）</td></tr>
+<tr><td>5 跨件私有面访问</td><td>判据 1 契约先于实现</td><td>提示级（阶段 3 收官后若噪声仍为 0 即提为硬门禁）</td><td><b>0 处</b>（刀 14 收口后）</td></tr>
 </tbody></table>
+<p class="kpi">门禁末行会打出同一张对照：<code>判据对照：检查1↔判据2 · 检查2↔判据5 · 检查3↔判据4 · 检查4↔判据1 · 检查5↔判据1</code>。
+判据 3 与判据 7 目前<b>尚无</b>对应的机械检查，是后续刀的缺口。</p>
 <h3>8.3 提示级命中的人判结论（今日）</h3>
 <ul>
   <li><b>检查 2 的 48 行命中里，实质越层只有两处</b>：成员 CLI 里的「会议召集」子命令
@@ -591,8 +594,9 @@ HTML_HEAD = """<!DOCTYPE html>
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v9</b> · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c·9·10·11·12·13 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更（v9）：① 阶段 2 <b>刀 13 · 群聊前端「业务视图」抽出</b>（前端拆三件套<b>收官刀</b>）—— 新件 <code>agent-team/ui/group_view.js</code>（<b>74858 B</b> / md5 <code>67d3ea72f56c4679b63eec7bdfcc79d6</code> / 1568 个换行），内容是 <code>group.html</code> 那个<b>唯一的内联 <code>&lt;script&gt;</code> 块</b>（第 102–1671 行）里 offset <code>[4896, 79754)</code> 的<b>逐字节</b>搬运（不重排、不格式化、不加头注释、不加 BOM、<b>不包 IIFE</b>、<b>不加 <code>"use strict"</code></b>、首末字节仍是换行）；<code>group.html</code> 把 offset <code>[4887, 79764)</code> 那 <b>74877 B</b> 的 <code>&lt;script&gt;</code>…<code>&lt;/script&gt;</code> 整块换成<b>单行 39 B</b> 的 <code>&lt;script src="/group_view.js"&gt;&lt;/script&gt;</code>，79780 → <b>4942 B</b> / md5 <code>408a8b649dec3986636d3b3327573c54</code>（字节账 79780 − 74877 + 39 = 4942 ✓）。外链行落在<b>原内联块同一 offset 4887</b>（紧接 <code>/group_transport.js</code> 之后、<code>&lt;/body&gt;</code> 之前）—— 外链<b>经典</b>脚本仍是 parser-blocking、在原位置执行，<b>文档序即执行序，不变</b>（该块顶部那句「状态声明必须放脚本最前面」的顺序依赖因此成立）。<b>注意字节账的一处反直觉</b>：<code>&lt;/script&gt;</code> 计数 <b>6 → 6 不减</b> —— 外链 script <b>不是空元素</b>，<code>&lt;script src=…&gt;&lt;/script&gt;</code> 自带闭标签，与刀12 的 <code>&lt;link&gt;</code>（空元素，<code>&lt;/style&gt;</code> 1 → 0）不同；真正该断言的是<b>内联 <code>&lt;script&gt;</code> 计数 = 0</b>、<code>&lt;script src=</code> 计数 = <b>6</b>、外链行计数 = <b>1</b>。零 <code>.py</code> 改动、零 JS 语义改动。至此 <code>group.html</code> 只剩壳：HTML 骨架 + 1 个样式外链 + 6 个脚本外链，<b>零内联 <code>&lt;style&gt;</code>、零内联 <code>&lt;script&gt;</code></b>。<br>
+      版本 <b>v10</b> · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c·9·10·11·12·13 · 阶段 3 刀 14 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v10）：阶段 3 <b>刀 14 · 公开面收口 + 门禁检查 5</b> —— ① 消除全仓<b>唯一</b>跨件私有面访问：L2 <code>agent_model.py</code> 增公开面 <code>DISPLAY_NAMES_FALLBACK</code>（<b>与私有原名 <code>_DISPLAY_NAMES_FALLBACK</code> 同一个 dict 对象</b>，不是拷贝；原名<b>保留不动</b>，<code>__all__</code> 追加），L3 <code>chat_svc.py</code> 第 102 行由 <code>agent_model._DISPLAY_NAMES_FALLBACK</code> 改引 <b>公开名</b> —— <b>零行为改变</b>（<code>is</code> 同一对象双向自证 True）。② <code>tools/check_layers.py</code> 新增 <b>检查 5 · 跨件私有面访问</b>（<b>提示级</b>，不参与退出码），对应<b>判据 1「契约先于实现」</b> —— 这是判据 1 的<b>第二条可机械校验</b>的门禁（检查 4 是它的前置）；口径用 <code>ast</code> 只认<b>真实属性访问</b>（<code>ast.Attribute</code> + <code>ast.Name</code> 且别名来自本仓登记件），注释/文档串/字符串里的 <code>mod._xxx</code> 提及<b>一律不算</b>（与旧正则扫描的关键区别），<code>__x__</code> dunder 豁免，<code>layer == "T"</code> 的测试件豁免。改前全仓<b>恰好 1 命中</b>，改后 <b>0 处</b>。阶段 3 收官后噪声仍为 0 即提为硬门禁（<b>本刀不提</b>）。③ 件数 <b>65</b> / 层间 import 边 <b>52</b> <b>均不变</b>（本刀不增删件、不改层归属）；<code>check_layers.py</code> 检查 1–4 输出与改前逐行一致（唯一差异 = <code>chat_svc.py</code> 因加了 1 行注释，检查 3 报的行号 4495 → 4496）。<br>
+      上一轮（v9）：① 阶段 2 <b>刀 13 · 群聊前端「业务视图」抽出</b>（前端拆三件套<b>收官刀</b>）—— 新件 <code>agent-team/ui/group_view.js</code>（<b>74858 B</b> / md5 <code>67d3ea72f56c4679b63eec7bdfcc79d6</code> / 1568 个换行），内容是 <code>group.html</code> 那个<b>唯一的内联 <code>&lt;script&gt;</code> 块</b>（第 102–1671 行）里 offset <code>[4896, 79754)</code> 的<b>逐字节</b>搬运（不重排、不格式化、不加头注释、不加 BOM、<b>不包 IIFE</b>、<b>不加 <code>"use strict"</code></b>、首末字节仍是换行）；<code>group.html</code> 把 offset <code>[4887, 79764)</code> 那 <b>74877 B</b> 的 <code>&lt;script&gt;</code>…<code>&lt;/script&gt;</code> 整块换成<b>单行 39 B</b> 的 <code>&lt;script src="/group_view.js"&gt;&lt;/script&gt;</code>，79780 → <b>4942 B</b> / md5 <code>408a8b649dec3986636d3b3327573c54</code>（字节账 79780 − 74877 + 39 = 4942 ✓）。外链行落在<b>原内联块同一 offset 4887</b>（紧接 <code>/group_transport.js</code> 之后、<code>&lt;/body&gt;</code> 之前）—— 外链<b>经典</b>脚本仍是 parser-blocking、在原位置执行，<b>文档序即执行序，不变</b>（该块顶部那句「状态声明必须放脚本最前面」的顺序依赖因此成立）。<b>注意字节账的一处反直觉</b>：<code>&lt;/script&gt;</code> 计数 <b>6 → 6 不减</b> —— 外链 script <b>不是空元素</b>，<code>&lt;script src=…&gt;&lt;/script&gt;</code> 自带闭标签，与刀12 的 <code>&lt;link&gt;</code>（空元素，<code>&lt;/style&gt;</code> 1 → 0）不同；真正该断言的是<b>内联 <code>&lt;script&gt;</code> 计数 = 0</b>、<code>&lt;script src=</code> 计数 = <b>6</b>、外链行计数 = <b>1</b>。零 <code>.py</code> 改动、零 JS 语义改动。至此 <code>group.html</code> 只剩壳：HTML 骨架 + 1 个样式外链 + 6 个脚本外链，<b>零内联 <code>&lt;style&gt;</code>、零内联 <code>&lt;script&gt;</code></b>。<br>
       ② 等价证据 <code>tools/equivalence/group_frontend_equiv.py</code> <b>再扩用</b>（只加判据不放宽）：静态路由表加 <code>/group_view.js</code>；<code>--old</code> 默认值改 <code>_old/group_old_k13.html</code>（<b>79780 B</b> / <code>58497402…</code>，开工前逐字节快照），并对该旧侧<b>硬校验 md5</b> 防拿改过的件当旧侧。新增 <b>第 0b 类 · JS 文本级（业务视图）</b>（与刀12 第 0 类 CSS 文本级同构）：旧快照唯一内联 script 块的内容 <b>==</b> <code>group_view.js</code> 逐字节（74858 B / <code>67d3ea72</code>），外加字节账与<b>重组互补证据</b>（把新件那 39 B 换回原 74877 B 整块 → 与旧快照<b>逐字节相等（79780 B / <code>58497402</code>）</b>）；<b>反向证据</b>加一条（防「外链没加载，两个空页面也算一致」）：新侧必须真的 <code>GET /group_view.js</code>、旧侧<b>一次都不许请求</b>（三份旧快照里脚本都还是内联的 → 这是条无条件强断言）。原有判据<b>一条没删</b>：计算样式 <b>87 元素 × 92 属性 = 8004 个值逐行 diff 0 行</b>、CSSOM 两侧 <b>233 规则 / 24425 字符 / md5 同</b>、JS 文本级（刀11 锚）5/5、标识符 9/9、启动 4/4、轮询 1/1、动作序 13/13、函数级 7 例线级逐字节、两侧 JS 错误 0/0、客户端身份（UA / UA-CH / Accept-Language）钉死 —— 逐条 diff 合计 <b>0</b>，<code>EQUIV_SENTINEL_OK</code>；<code>--runs 2</code> 两次全 OK 且归一端口后<b>两份输出逐字节相同</b>（md5 <code>97ac0740538a9f5b7d286b8c28e4ba91</code>，10322 B）→ <code>EQUIV_DETERMINISM_OK</code>。<br>
       ③ <b>第 0 类 CSS 文本级换锚（如实记账，非放宽）</b>：该判据原先比的是「<code>--old</code> 给的旧侧 vs 活件」。刀13 又动了 <code>group.html</code>，活件与 k12 快照之间隔了<b>两步</b>，再拿默认旧侧（k13 快照）去找 <code>&lt;style&gt;</code> 段只会找不到 —— 那不是判据失效，是<b>锚错了位置</b>。故把它钉死成 <b>k12 快照 ↔ k13 快照</b>这对冻结字节（与 JS 文本级钉 k11 快照同一套路），<b>期望数字一个没下调</b>（31078 B / 31095 B / 42 B / offset 173 / <code>&lt;/style&gt;</code>=0 / <code>&lt;link</code>=1 / 110833 B 全部照旧），并<b>追加一条全链重组</b>：从<b>活的</b> <code>group.html</code> 两步走回 k12 快照（<code>408a8b64 → 58497402 → e5c46769</code>）逐字节相等 —— 活件不因换锚而脱钩。同理，「OLD 侧必须有内联 <code>&lt;style&gt;</code>」与「OLD 侧一次没请求过 <code>/group.css</code>」两条按旧侧快照形态<b>分派</b>：传 k12/k11 时走原文一字未改，传 k13（样式已外链）时换成<b>同强度的正面断言</b>（OLD 侧也必须有且仅有一张 <code>/group.css</code> 表且规则数 &gt; 0、也必须取过它），没有任何一侧被放过。<br>
       ④ <b>3.2 基线重算</b>：登记件数 64 → <b>65</b>（新增 L4 <code>group_view.js</code>）、层间 import 边 <b>52</b>（不变 —— 前端静态件之间没有 import 边）。部署表 lobster 段受管件 21 → <b>22</b>（<code>ui/group_view.js</code>，<code>services=[]</code>，静态件免重启）；入仓清单 124 → <b>126</b> 条（新件 + <code>_old/group_old_k13.html</code> 快照）。<br>
