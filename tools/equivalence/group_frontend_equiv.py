@@ -1,5 +1,25 @@
 # -*- coding: utf-8 -*-
-"""刀11/刀12/刀13 · 群聊前端「拆三件套」等价装置（无头浏览器 + CDP，纯 stdlib）。
+"""刀11/刀12/刀13/刀18 · 群聊前端「拆三件套」等价装置（无头浏览器 + CDP，纯 stdlib）。
+
+刀18 改动概要（**只换基、只加严，一类判据没删、一个期望值没下调**）：
+
+* 刀18 把「任务清单面板子树」（``#taskpanel`` 相关的 ``tErrShow``/``tErrHide``/
+  ``tLoad``/``tRow``/``tRender``/``tAdd``/``tOpen``/``TSTATUS``/``TPOLL``/
+  ``pinTaskpanelBottom`` 与两处守卫绑定）整棵下线 —— 它运行期不可达（``#taskpanel``
+  不在 ``group.html`` 的 DOM 里），并顺带删掉随之零引用的 ``TSVC`` / ``tApi``。
+  ``TGROUP_DEFAULT`` **保留**：``tgid()`` 仍被活的 ``tqLoad()``/``tqClear()`` 调用。
+* 于是两处文本级锚**换基**：``BLOCKS`` 5 段 → 3 段 + ``BLOCKS_DROPPED`` 反向断言；
+  ``js_view_text_level()`` 从「整块相等」→ ``VIEW_BLOCKS`` 保留块纯拼接 + 尾部残余 0 B
+  + ``VIEW_DROPPED`` 反向断言 + 字节账 + 源码残留扫描。两处都保住「逐字节对冻结快照、
+  拼接必须恰好铺满整件」这个强度。改基前的装置原件另存
+  ``_old/group_frontend_equiv_old_k18.py``。
+* ``IDENT_PROBES`` 摘走 ``tApi``/``TSVC``/``window.tApi``，改进 ``IDENT_GONE``：
+  由「两侧相等」升级为「两侧**各自**被钉死到字面量」；同时加严 —— 新增
+  ``tgid``/``window.tgid`` 两条两侧相等的正面探针。
+* ``FROZEN`` 里两条 ``tApi`` 用例一条没删、顺序没动，比法改 ``"gone"``：
+  OLD 侧仍逐字节比结果 + 线级条数 + 请求行，NEW 侧钉死 ReferenceError + 线级 0 条。
+  5 条 ``api`` 用例的两侧逐字节比较、计算样式、CSSOM、外链反向证据全部原封不动。
+
 
 比什么
 ------
@@ -568,8 +588,40 @@ PROBE_JS = r"""
 })();
 """
 
-IDENT_PROBES = ["typeof api", "typeof tApi", "typeof pull", "typeof boot",
-                "API", "TSVC", "TGROUP_DEFAULT", "typeof window.api", "typeof window.tApi"]
+# 两侧必须**相等**的标识符探针。刀18 从这里摘走 tApi / TSVC / window.tApi ——
+# 不是放宽：它们改进 IDENT_GONE，由「两侧相等」升级为「**两侧各自被钉死到字面量**」
+# （OLD 侧仍必须是 function / 原端点串，NEW 侧必须是 undefined / ReferenceError）。
+# 同时**加严**：新增 tgid / window.tgid 两条 —— 任务面板子树下线后它是唯一留活的成员，
+# 两侧都必须仍是 function（防「连活的那条也一起删了」这种过头删）。
+IDENT_PROBES = ["typeof api", "typeof pull", "typeof boot", "typeof tgid",
+                "API", "TGROUP_DEFAULT", "typeof window.api", "typeof window.tgid"]
+
+# 刀18 反向断言（一侧一个字面量，比原来的「两侧相等」更紧）：
+#   (表达式, OLD 侧期望值, NEW 侧期望值)
+# OLD = k13 快照页面，NEW = 活件。两侧期望值为什么**不总是**一边有一边没有：
+#   · `tApi` / `TSVC` 定义在 **group_transport.js** —— 刀11 起它就是**两侧共用的同一份
+#     活件**（夹具把根路径 /group_transport.js 对两侧都从 agent-team/ui/ 发，见模块头
+#     「夹具」一节）。刀18 把这两段从活件删掉，两侧就一起没有了 → 两边都钉 undefined，
+#     等于**多钉了一条「TSVC 端点在前端已彻底不可达」**；
+#   · `TSTATUS`/`TPOLL`/`tLoad`/`tOpen` 等定义在 **内联脚本**里，k13 快照自带 → OLD 仍有、
+#     NEW 已无，这才是一边一个值。
+# 不管哪种，两侧的值都被钉到字面量，比原先「只要求两侧相等」严。
+IDENT_GONE = [
+    ("typeof tApi",        "undefined", "undefined"),
+    ("typeof window.tApi", "undefined", "undefined"),
+    ("TSVC",               "<<throw>> TSVC is not defined",
+                           "<<throw>> TSVC is not defined"),
+    ("typeof TSTATUS",     "object",   "undefined"),
+    ("typeof TPOLL",       "object",   "undefined"),
+    ("typeof tErrShow",    "function", "undefined"),
+    ("typeof tErrHide",    "function", "undefined"),
+    ("typeof tLoad",       "function", "undefined"),
+    ("typeof tRow",        "function", "undefined"),
+    ("typeof tRender",     "function", "undefined"),
+    ("typeof tAdd",        "function", "undefined"),
+    ("typeof tOpen",       "function", "undefined"),
+    ("document.getElementById('taskpanel') === null", True, True),
+]
 
 # ---------------------------------------------------------------- 刀12 · 计算样式
 # 固定属性表：口径必须「与时间无关」—— 这里一条 transition / animation / transform
@@ -679,15 +731,36 @@ COMPUTED_JS_TMPL = r"""
 """
 
 # 函数级冻结输入（401 那例放最后：它会写 location.href）
+# 第 5 列是**比法**，刀18 新增（用例一条没删、执行顺序一字没动）：
+#   "both" —— 两侧逐字节 diff（请求行 + 请求头 + 请求体 + Error.message），口径同刀11；
+#   "gone" —— `tApi` 随刀18 从 group_transport.js 下线；该件是**两侧共用的同一份活件**
+#             （见 IDENT_GONE 处的说明），于是两侧都已无此函数 → 不再是「两侧比 wire」，
+#             改成**两侧各自对字面量**：结果 JSON 必须逐字节是 ReferenceError、
+#             且该用例窗口内的线级记录必须是 **0 条**（= TSVC 端点一次都没被打）。
+#             这是「装置跟随实现」，不是放宽：原来只要求两侧一样（两边都对也算过），
+#             现在两侧各自被钉到字面量，且多钉了一条「零出网」。
+#             （5 条 api 用例的两侧逐字节线级比较一条没动。）
 FROZEN = [
-    ("api",  "GET",   "/api/me", None),
-    ("api",  "GET",   "/api/zzz_notexist", None),
-    ("api",  "POST",  "/api/sessions", {"name": "x"}),
-    ("api",  "GET",   "/api/boom", None),
-    ("tApi", "GET",   "/api/tasks", None),
-    ("tApi", "GET",   "/api/zzz_notexist", None),
-    ("api",  "GET",   "/api/requires_login", None),
+    ("api",  "GET",   "/api/me", None, "both"),
+    ("api",  "GET",   "/api/zzz_notexist", None, "both"),
+    ("api",  "POST",  "/api/sessions", {"name": "x"}, "both"),
+    ("api",  "GET",   "/api/boom", None, "both"),
+    ("tApi", "GET",   "/api/tasks", None, "gone"),
+    ("tApi", "GET",   "/api/zzz_notexist", None, "gone"),
+    ("api",  "GET",   "/api/requires_login", None, "both"),
 ]
+
+# 刀18：下线函数的两侧字面量。键 = 用例的 call 串（与 res["frozen"][i]["call"] 同构）。
+FROZEN_GONE_EXPECT = {
+    "tApi('GET', '/api/tasks')": {
+        "outcome": {"ok": False, "message": "tApi is not defined"},
+        "wire": 0,
+    },
+    "tApi('GET', '/api/zzz_notexist')": {
+        "outcome": {"ok": False, "message": "tApi is not defined"},
+        "wire": 0,
+    },
+}
 
 ACTIONS = [
     ("建群·打开对话框", '$("newbtn").click(); return "ok";'),
@@ -891,9 +964,14 @@ def run_side(name, page_url, browser, stub_port, verbose):
         cdp.call("Page.navigate", url=page_url)
         cdp.pump(SETTLE_BOOT)
         res["boot_trace"] = cdp.evaluate("JSON.stringify(window.__tr)")
-        res["idents"] = [json.loads(cdp.evaluate(
-            "JSON.stringify((function(){try{return (%s);}catch(e){return '<<throw>> '+e.message;}})())" % e))
-            for e in IDENT_PROBES]
+        def ident(expr):
+            return json.loads(cdp.evaluate(
+                "JSON.stringify((function(){try{return (%s);}"
+                "catch(e){return '<<throw>> '+e.message;}})())" % expr))
+
+        res["idents"] = [ident(e) for e in IDENT_PROBES]
+        # 刀18：下线标识符的一侧一钉（两侧值天然不同，不进两侧 diff）
+        res["idents_gone"] = [ident(e) for e, _o, _n in IDENT_GONE]
 
         # ---------- A3 样式（刀12 新增；取值点在启动 settle 之后、任何动作之前）----------
         res["style_wait"] = json.loads(cdp.evaluate(STYLE_WAIT_JS))
@@ -911,14 +989,19 @@ def run_side(name, page_url, browser, stub_port, verbose):
         res["poll_trace"] = cdp.evaluate("JSON.stringify(window.__tr)")
 
         # ---------- B 函数级冻结输入 ----------
+        # 刀18：解析函数名这一步也放进 try —— NEW 侧 tApi 已下线，裸取会在 try 之外
+        # 抛 ReferenceError 让整个 promise reject（装置读不到结果）。包进来之后，
+        # 「函数不存在」这件事本身变成一条可比的 outcome：{ok:false,"...is not defined"}。
         cdp.evaluate(
             "window.__probe = async function (kind, method, path, body) {"
-            "  var f = (kind === 'api') ? api : tApi;"
+            "  var f;"
+            "  try { f = (kind === 'api') ? api : tApi; }"
+            "  catch (e) { return {ok: false, message: String(e && e.message)}; }"
             "  try { var v = (body === null) ? await f(method, path) : await f(method, path, body);"
             "        return {ok: true, value: JSON.stringify(v)}; }"
             "  catch (e) { return {ok: false, message: String(e && e.message)}; } }; 1")
         frozen = []
-        for kind, method, path, body in FROZEN:
+        for kind, method, path, body, _mode in FROZEN:
             a = wire_len()
             # Runtime.evaluate 不是模块，顶层 await 是语法错 → 交给 awaitPromise 去 await
             out = json.loads(cdp.evaluate(
@@ -954,6 +1037,11 @@ def run_side(name, page_url, browser, stub_port, verbose):
         mine = wire_slice(w0, wire_len())
         res["client_ident"] = client_ident(mine)
         res["doc_reqs"] = doc_reqs(mine)
+        # 刀18 追加的反向证据：整侧全程（启动 + 轮询 + 函数级 + 动作序）打到 TSVC
+        # (:9981) 的请求一条都不许有。where=="cdp" 的记录只可能来自 Fetch 域拦截，
+        # 而拦截只登记了 urlPattern=*TSVC_HOST* —— 所以这个列表非空就等于「还在出网」。
+        res["tsvc_hits"] = ["%s %s" % (r["method"], r["path"])
+                            for r in mine if r["where"] == "cdp"]
         cdp.close()
     finally:
         proc.kill()
@@ -964,8 +1052,16 @@ def run_side(name, page_url, browser, stub_port, verbose):
 
 # ====================================================================== 文本级
 
-BLOCKS = [("B1", 555, 555), ("B2", 560, 586), ("B3", 1468, 1468),
-          ("B4", 1469, 1469), ("B5", 1475, 1486)]
+# 刀11 立、刀18 **换基**（不是放宽）：`group_transport.js` 至今仍逐字节等于 k11 快照
+# 的那几段。刀18 把任务面板子树下线后，B3（`const TSVC`）与 B5（`async function tApi`）
+# 在前端已零引用 → 两段随之从传输件删除，锚从「5 段纯拼接」换成「**剩余 3 段**纯拼接
+# 且尾部残余 0 B」——**同强度**：每段仍逐字节对 k11 快照，拼接仍必须**恰好**铺满整件。
+# 换基同时**加严**：下线的两段另立 BLOCKS_DROPPED，逐段做**反向断言**（那些字节在
+# 新件里一个都不许出现）。判据总数只增不减：3 段正向 + 2 段反向 + 尾部残余 + 残留扫描。
+BLOCKS = [("B1", 555, 555), ("B2", 560, 586), ("B4", 1469, 1469)]
+
+# 刀18 下线（NEW 侧必须一个字节都不剩）—— 行号仍是 k11 快照里的原位置。
+BLOCKS_DROPPED = [("B3", 1468, 1468), ("B5", 1475, 1486)]
 
 
 STYLE_OPEN = b"<style>\n"
@@ -975,6 +1071,29 @@ SCRIPT_OPEN = b"<script>\n"
 SCRIPT_CLOSE = b"</script>\n"
 VIEW_LINE = b'<script src="/group_view.js"></script>\n'
 
+# 刀13 立、刀18 **换基**（不是放宽）：`group_view.js` 原本 == k13 快照那个唯一内联
+# <script> 块的**全部**字节（1568 行）。刀18 证明「任务清单面板子树」运行期不可达
+# （`#taskpanel` 不在 DOM 里、`tOpen`/`tLoad` 无调用方）并整棵删除后，锚从「整块相等」
+# 换成「**剩余分块纯拼接** 且尾部残余 0 B」——与 3.1 JS 文本级同一套路、**同强度**：
+# 每块仍逐字节对 k13 冻结快照，拼接仍必须**恰好**铺满整件，一个字节的私货都塞不进来。
+# 下线的两段另立 VIEW_DROPPED 做**反向断言**（字节不许出现），另加字节账与源码残留扫描。
+# 行号 = k13 内联块内的 1-based 行号（该块逐字节 == 刀18 之前的 group_view.js）。
+VIEW_BLOCKS = [
+    ("V1", 1, 902),        # 渲染壳 + 业务视图主体，直到 boot() 那行之后的空行
+    ("V2", 907, 908),      # #432-3 注释 + function tgid()  —— 仍有活调用方（tqLoad/tqClear）
+    ("V3", 1030, 1568),    # 左栏 TAB（#432-3/#448 任务队列，走 9980 同源台账）起，到文件末尾
+]
+VIEW_DROPPED = [
+    ("D1", 903, 906),      # 面板段头注释 + const TSTATUS + let TPOLL
+    ("D2", 909, 1029),     # tErrShow/tErrHide/tLoad/tRow/tRender/tAdd/tOpen
+                           #   + tp-addbtn/tp-title 守卫绑定 + pinTaskpanelBottom IIFE
+]
+# 刀18 反向断言用：删干净之后，这些字面量在 group_view.js 里一处都不许再出现。
+# 注：不收 "tp-" —— V3 里 #452-1 那段注释仍如实提到 HTML 上写过 #tp-title/#tp-owner，
+# 那是**历史说明**不是活引用；反向断言只钉「活引用写法」（调用式 / 元素 id / 常量名）。
+VIEW_RESIDUE = [b"tApi(", b"TSVC", b"taskpanel", b"tOpen(", b"tLoad(",
+                b"TSTATUS", b"TPOLL", b'$("tp-', b'#taskpanel']
+
 
 def js_view_text_level(old_html):
     """刀13 第 0b 类判据：业务视图字节同源 + 新 group.html 的字节账 + 重组互补证据。
@@ -983,13 +1102,15 @@ def js_view_text_level(old_html):
     换成「内联 ``<script>`` → 外链 js」。三件事：
 
     1. 旧快照里那个**唯一的内联 script 块**的内容（``<script>\\n`` 之后 至
-       ``</script>`` 之前）**==** ``agent-team/ui/group_view.js`` 的全部字节；
+       ``</script>`` 之前）与 ``agent-team/ui/group_view.js`` 逐字节同源 ——
+       刀18 起换基为 **``VIEW_BLOCKS`` 保留块纯拼接 + 尾部残余 0 B**，另加
+       ``VIEW_DROPPED`` 的反向断言、字节账与源码残留扫描（同强度，见常量处注释）；
     2. 新 ``group.html`` 的字节账：总字节 = 旧 − 整块 + 39、内联 ``<script>`` 计 0、
        ``VIEW_LINE`` 计 1 且落在**原内联块同一 offset**（文档序不变 = 执行序不变）；
     3. **重组互补证据**：把新件那 39 B 的外链行换回原整块 → 与旧快照逐字节相等，
-       证明「只换了这一处」。
+       证明「只换了这一处」。（2/3 两条与刀18 无关：``group.html`` 本刀一字未动。）
     """
-    print("---- 3.0b JS 文本级·业务视图（刀13）：外链件 == 旧快照内联 script 块，逐字节 ----")
+    print("---- 3.0b JS 文本级·业务视图（刀13 立 / 刀18 换基）：外链件 == 旧快照内联 script 块的保留分块，逐字节 ----")
     old = open(old_html, "rb").read()
     new = open(NEW_HTML, "rb").read()
     view = open(NEW_VIEW, "rb").read()
@@ -1017,11 +1138,57 @@ def js_view_text_level(old_html):
     print("  新件   %s" % NEW_VIEW)
     print("    文件内容                        %6d B  md5 %s  换行 %d 个"
           % (len(view), hashlib.md5(view).hexdigest(), view.count(b"\n")))
-    eq = inner == view
-    ok &= eq
-    print("    ✓ 两侧字节相等: %s（长度 %d == %d ｜ md5 %s == %s）" % (
-        eq, len(inner), len(view),
-        hashlib.md5(inner).hexdigest()[:8], hashlib.md5(view).hexdigest()[:8]))
+
+    # --- 刀18 换基：整块相等 → 剩余分块纯拼接（同强度，见 VIEW_BLOCKS 处的注释）---
+    ilines = inner.split(b"\n")
+    if ilines[-1] != b"":
+        print("  ✗ k13 内联块不是以换行收尾，分块锚无法成立")
+        return False
+    ilines = [x + b"\n" for x in ilines[:-1]]
+    nline = len(ilines)
+
+    def vseg(x, y):                      # 注意别用 a/b 当循环变量：外层 a/b 是 <script> 的 offset
+        return b"".join(ilines[x - 1:y])
+
+    print("    分块锚：k13 内联块共 %d 行 ｜ 保留 %d 块 / 下线 %d 块"
+          % (nline, len(VIEW_BLOCKS), len(VIEW_DROPPED)))
+    span_ok = (VIEW_BLOCKS[-1][2] == nline)
+    off = 0
+    for nm, la, lb in VIEW_BLOCKS:
+        seg = vseg(la, lb)
+        got = view[off:off + len(seg)]
+        eq1 = got == seg
+        ok &= eq1
+        print("      %s k13 内联块行 %4d-%-4d %6d B → 新件偏移 %6d  字节相等: %s"
+              % (nm, la, lb, len(seg), off, eq1))
+        off += len(seg)
+    tail = view[off:]
+    print("      新件尾部残余 %d B（应为 0，证明新件 = 保留块纯拼接、无任何私货）: %r"
+          % (len(tail), tail[:40]))
+    ok &= len(tail) == 0 and span_ok
+    print("      末块右端 %d == 内联块行数 %d（保留块铺到文件末尾）: %s"
+          % (VIEW_BLOCKS[-1][2], nline, span_ok))
+
+    # 反向断言：下线的两块在新件里一个字节都不剩
+    dropped_bytes = 0
+    for nm, la, lb in VIEW_DROPPED:
+        seg = vseg(la, lb)
+        dropped_bytes += len(seg)
+        gone = seg not in view
+        ok &= gone
+        print("      %s k13 内联块行 %4d-%-4d %6d B → 新件里已无此段: %s ｜ 首个非空行 %r"
+              % (nm, la, lb, len(seg), gone,
+                 next((x for x in seg.split(b"\n") if x.strip()), b"")[:48]))
+    acct = len(view) + dropped_bytes == len(inner)
+    ok &= acct
+    print("      字节账：新件 %d B + 下线 %d B = %d B ｜ == k13 内联块 %d B: %s"
+          % (len(view), dropped_bytes, len(view) + dropped_bytes, len(inner), acct))
+    # 反向断言（刀18 契约要求的那条）：源码里不许再出现任务面板的活引用写法
+    vres = [p for p in VIEW_RESIDUE if p in view]
+    ok &= not vres
+    print("      源码残留扫描 %s（应为空）: %s"
+          % ([p.decode() for p in VIEW_RESIDUE], [p.decode() for p in vres]))
+
     # 忠实性守则（刀11 立、刀12/13 沿用）：原样搬运、不包 IIFE、不加 "use strict"、不加 BOM
     bom = view[:3] == b"\xef\xbb\xbf"
     head_ok = view[:1] == b"\n"
@@ -1187,31 +1354,59 @@ def text_level():
     """证明「零逻辑改动」：新件里的每一段 == 刀11 快照同段的那几行，逐字节。
 
     这条判据钉死在 ``group_old_k11.html``（而不是 ``--old`` 给的那个旧侧）——
-    它问的是「刀11 抽出的 group_transport.js 至今仍逐字节等于当初那 5 段」，
+    它问的是「刀11 抽出的 group_transport.js 至今仍逐字节等于当初那几段」，
     是一条**常驻回归**，与本次比的是哪个旧侧无关。
+
+    刀18 换基（见 ``BLOCKS`` 处的注释）：正向段 5 → 3，下线的 B3/B5 转为**反向断言**，
+    再加一条「字节账」——剩余 3 段 + 下线 2 段 == k11 快照里那 5 段的原始总字节。
     """
     old = open(K11_HTML, "rb").read().split(b"\n")
     newjs = open(NEW_JS, "rb").read()
-    print("---- 3.1 JS 文本级（刀11 常驻回归，锚定 %s）：5 段逐段字节相等 ----"
-          % os.path.basename(K11_HTML))
+
+    def k11seg(a, b):
+        return b"".join(old[i - 1] + b"\n" for i in range(a, b + 1))
+
+    print("---- 3.1 JS 文本级（刀11 常驻回归，锚定 %s）：%d 段逐段字节相等 ----"
+          % (os.path.basename(K11_HTML), len(BLOCKS)))
     off, ok = 0, True
     for nm, a, b in BLOCKS:
-        seg = b"".join(old[i - 1] + b"\n" for i in range(a, b + 1))
+        seg = k11seg(a, b)
         got = newjs[off:off + len(seg)]
         eq = got == seg
         ok &= eq
         print("  %s 旧快照行 %4d-%-4d %5d B → 新件偏移 %5d  字节相等: %s" % (nm, a, b, len(seg), off, eq))
         off += len(seg)
     tail = newjs[off:]
-    print("  新件尾部残余 %d B（应为 0，证明新件 = 5 段纯拼接、无任何包装）: %s"
-          % (len(tail), tail[:40]))
+    print("  新件尾部残余 %d B（应为 0，证明新件 = %d 段纯拼接、无任何包装）: %s"
+          % (len(tail), len(BLOCKS), tail[:40]))
     ok &= len(tail) == 0
+
+    # --- 刀18 反向断言：下线的两段在新件里一个字节都不许出现 ---
+    print("  —— 刀18 下线段的反向断言（任务面板子树零引用后，传输面这两段随之下线）——")
+    dropped_bytes = 0
+    for nm, a, b in BLOCKS_DROPPED:
+        seg = k11seg(a, b)
+        dropped_bytes += len(seg)
+        gone = seg not in newjs
+        ok &= gone
+        print("    %s 旧快照行 %4d-%-4d %5d B → 新件里已无此段: %s ｜ 首行 %r"
+              % (nm, a, b, len(seg), gone, seg.split(b"\n")[0][:52]))
+    total = len(newjs) + dropped_bytes
+    orig = sum(len(k11seg(a, b)) for _, a, b in BLOCKS) + dropped_bytes
+    print("    字节账：新件 %d B + 下线 %d B = %d B ｜ 与刀11 原 5 段总字节 %d 相符: %s"
+          % (len(newjs), dropped_bytes, total, orig, total == orig))
+    ok &= total == orig
+
     cur = open(NEW_HTML, "rb").read()
     residue = [p for p in (b"fetch(", b"const API = ", b"const TSVC = ",
                            b"const TGROUP_DEFAULT = ", b"async function api(",
                            b"async function tApi(") if p in cur]
     print("  group.html 残留（应为空）: %s" % residue)
     ok &= not residue
+    # 刀18 追加：传输件自身也不许再出现被下线的两个标识符（含调用点写法）
+    tres = [p for p in (b"TSVC", b"tApi") if p in newjs]
+    print("  group_transport.js 残留 TSVC/tApi（应为空）: %s" % tres)
+    ok &= not tres
     print("  JS 文本级结论: %s" % ("一致" if ok else "不一致"))
     return ok
 
@@ -1242,7 +1437,7 @@ def run_once(args):
     old_html = os.path.abspath(args.old)
 
     print("=" * 78)
-    print("刀11/刀12/刀13 · 群聊前端拆三件套 —— 等价装置")
+    print("刀11/刀12/刀13/刀18 · 群聊前端拆三件套 —— 等价装置")
     print("=" * 78)
 
     for p in (old_html, NEW_HTML, NEW_JS, NEW_CSS, NEW_VIEW, K11_HTML, K12_HTML, K13_HTML):
@@ -1336,6 +1531,29 @@ def run_once(args):
     ni = ["%s = %s" % (k, json.dumps(v, ensure_ascii=False)) for k, v in zip(IDENT_PROBES, n["idents"])]
 
     bad += diff_lines("标识符探针", oi, ni, True)
+
+    # ---------- 刀18 · 下线标识符的反向断言（两侧各钉各的字面量）----------
+    print("  —— 刀18 反向断言：任务面板子树在 NEW 侧已整棵下线（OLD/NEW 各钉字面量，"
+          "比「两侧相等」更紧）——")
+    for (expr, exp_o, exp_n), got_o, got_n in zip(IDENT_GONE, o["idents_gone"], n["idents_gone"]):
+        hit_o, hit_n = got_o == exp_o, got_n == exp_n
+        mark = "✓" if (hit_o and hit_n) else "✗"
+        print("    %s %-48s OLD %-34s（期望 %s）｜ NEW %-34s（期望 %s）"
+              % (mark, expr,
+                 json.dumps(got_o, ensure_ascii=False), json.dumps(exp_o, ensure_ascii=False),
+                 json.dumps(got_n, ensure_ascii=False), json.dumps(exp_n, ensure_ascii=False)))
+        if not hit_o:
+            bad += 1
+        if not hit_n:
+            bad += 1
+    # 整侧全程零出网：TSVC(:9981) 在两侧都一次都没被打（拦截器仍挂着，所以是「真没打」
+    # 而不是「没拦到」—— 刀18 之前这里 OLD/NEW 各有 2 条 tApi 探针请求）
+    for side, r in (("OLD", o), ("NEW", n)):
+        print("    %s| 全程打到 TSVC(%s) 的请求: %d 条 %s（应 0）"
+              % (side, TSVC_HOST, len(r["tsvc_hits"]), r["tsvc_hits"][:4]))
+        if r["tsvc_hits"]:
+            bad += 1
+
     bad += diff_lines("启动轨迹", ob, nb, args.verbose)
     bad += diff_lines("轮询轨迹", op, np_, args.verbose)
     bad += diff_lines("动作序轨迹", oa, na, args.verbose)
@@ -1449,24 +1667,53 @@ def run_once(args):
 
     print("  —— 函数级冻结输入（请求行 + 请求头 + 请求体 + Error.message 逐字节）——")
     fz = 0
-    for a, b in zip(o["frozen"], n["frozen"]):
-        la = [a["call"], json.dumps(a["outcome"], ensure_ascii=False, sort_keys=True)] + a["wire"]
-        lb = [b["call"], json.dumps(b["outcome"], ensure_ascii=False, sort_keys=True)] + b["wire"]
-        if la == lb:
-            print("    ✓ %-46s 线级 %d 条逐字节一致 ｜ 结果 %s"
-                  % (a["call"], len(a["wire"]),
-                     json.dumps(a["outcome"], ensure_ascii=False)[:100]))
-        else:
+    n_both = n_gone = 0
+    for (mode, a, b) in zip([c[4] for c in FROZEN], o["frozen"], n["frozen"]):
+        if mode == "both":
+            n_both += 1
+            la = [a["call"], json.dumps(a["outcome"], ensure_ascii=False, sort_keys=True)] + a["wire"]
+            lb = [b["call"], json.dumps(b["outcome"], ensure_ascii=False, sort_keys=True)] + b["wire"]
+            if la == lb:
+                print("    ✓ %-46s 线级 %d 条逐字节一致 ｜ 结果 %s"
+                      % (a["call"], len(a["wire"]),
+                         json.dumps(a["outcome"], ensure_ascii=False)[:100]))
+            else:
+                fz += 1
+                print("    ✗ %s" % a["call"])
+                for i in range(max(len(la), len(lb))):
+                    x = la[i] if i < len(la) else "<缺>"
+                    y = lb[i] if i < len(lb) else "<缺>"
+                    if x != y:
+                        print("        OLD| " + x.replace("\n", "\n        OLD| "))
+                        print("        NEW| " + y.replace("\n", "\n        NEW| "))
+            continue
+        # mode == "gone"：刀18 —— NEW 侧函数已下线，两侧各自对字面量
+        n_gone += 1
+        exp = FROZEN_GONE_EXPECT.get(a["call"])
+        if exp is None:
             fz += 1
-            print("    ✗ %s" % a["call"])
-            for i in range(max(len(la), len(lb))):
-                x = la[i] if i < len(la) else "<缺>"
-                y = lb[i] if i < len(lb) else "<缺>"
-                if x != y:
-                    print("        OLD| " + x.replace("\n", "\n        OLD| "))
-                    print("        NEW| " + y.replace("\n", "\n        NEW| "))
+            print("    ✗ %-46s 装置漏登记 FROZEN_GONE_EXPECT" % a["call"])
+            continue
+        checks = [
+            ("OLD outcome", a["outcome"], exp["outcome"]),
+            ("OLD 线级条数", len(a["wire"]), exp["wire"]),
+            ("NEW outcome", b["outcome"], exp["outcome"]),
+            ("NEW 线级条数", len(b["wire"]), exp["wire"]),
+        ]
+        miss = [(t, g, e) for t, g, e in checks if g != e]
+        if not miss:
+            print("    ✓ %-46s [gone] 两侧均已无此函数且零出网（%s ｜ 线级 OLD %d / NEW %d 条）"
+                  % (a["call"], json.dumps(b["outcome"], ensure_ascii=False),
+                     len(a["wire"]), len(b["wire"])))
+        else:
+            fz += len(miss)
+            print("    ✗ %-46s [gone]" % a["call"])
+            for t, g, e in miss:
+                print("        %s: 实测 %s ｜ 期望 %s"
+                      % (t, json.dumps(g, ensure_ascii=False), json.dumps(e, ensure_ascii=False)))
     bad += fz
-    print("  函数级不一致例数: %d / %d" % (fz, len(FROZEN)))
+    print("  函数级不一致例数: %d / %d（两侧逐字节 %d 例 + 刀18 下线反向断言 %d 例）"
+          % (fz, len(FROZEN), n_both, n_gone))
 
     eo = diff_lines("JS 错误列表", o["errs"], n["errs"], True)
     bad += eo

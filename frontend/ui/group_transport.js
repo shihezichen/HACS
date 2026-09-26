@@ -26,17 +26,4 @@ async function api(method, path, body) {
   }
   return data;
 }
-const TSVC = "http://<tailnet-host>:9981";
 const TGROUP_DEFAULT = "meet_20260921_demo01";
-async function tApi(method, path, body) {
-  const opt = { method, headers: {} };
-  if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
-  const r = await fetch(TSVC + path, opt);
-  const txt = await r.text();
-  let d = null; try { d = txt ? JSON.parse(txt) : null; } catch (e) { d = txt; }
-  if (!r.ok) {
-    const code = (d && d.error && (d.error.code || d.error)) || ("HTTP " + r.status);
-    throw new Error(code);
-  }
-  return d;
-}
