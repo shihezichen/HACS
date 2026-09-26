@@ -1,5 +1,23 @@
 # -*- coding: utf-8 -*-
-"""刀11/刀12/刀13/刀18/刀19 · 群聊前端「拆三件套」等价装置（无头浏览器 + CDP，纯 stdlib）。
+"""刀11/刀12/刀13/刀18/刀19/刀20 · 群聊前端「拆三件套」等价装置（无头浏览器 + CDP，纯 stdlib）。
+
+刀20 改动概要（**堵口径空档、只加严**）：
+
+* 堵的是刀19 暴露出来的那个空档：桩后端把 ``/group.css`` 放在 ``ROOT_STATIC`` 里，
+  两侧**同发**活件 —— 于是「删本件里的规则」这类刀，计算样式与 CSSOM 天然全绿，
+  那两条判据对这个失效模式**零敏感度**（刀19 只用临时 ``--old`` 旁证补过一次，没固化）。
+* 做法：新增冻结基线 ``_old/group_css_old_k19.css``（= 刀19 开工前那一版 group.css，
+  31078 B / md5 ``ea71fd30…``），桩按侧分派 —— OLD 发基线、NEW 发活件（见 ``CUR_SIDE``）。
+  开场 ``css_baseline_identity()`` 三重硬校验（字节 / md5 / 与 k12 内联块逐字节），
+  不过就**硬停**。
+* CSSOM 那条随之**换基**：原判据「两侧拼接文本 md5 相同」只在两侧同发一份活件时成立，
+  已随旧侧换基失效 → 换成 ``cssom_rebase()``：旧侧展平规则表**逐条扣掉面板死规则**后，
+  必须逐条逐字节 == 新侧，且「新侧独有 0 条 + 每条下线条目都命中面板字面量 +
+  条数账平 + 下线条数恰好 ``CSSOM_DROP_EXPECT``(32) + 新侧零残留」五条全中。
+  强度只增不减：原来一条 md5，现在是逐条字节 + 配对 + 计数 + 反向断言。
+* 负控已实证（临时副本上把基线里一条活规则 ``header h1{…font-weight:600}`` 改成 300）：
+  计算样式打出 ``· font-weight: OLD '300' ｜ NEW '600'``、CSSOM 五条里四条同时判红、
+  收尾 ``EQUIV_SENTINEL_FAIL``。刀18/19 立的其他锚一个字节没动。
 
 刀19 改动概要（**只换基、只加严，一类判据没删、一个期望值没下调**）：
 
@@ -12,8 +30,11 @@
   交错重组（两段账都平）+ 残留扫描（``#taskpanel``/``#tp-`` 一个字节不许剩）。
   与刀18 的 ``js_view_text_level()`` 同一套路、同强度。改基前的装置原件另存
   ``_old/group_frontend_equiv_old_k19.py``。
-* 计算样式 / CSSOM / 外链反向证据**一条没动**：两侧本来就同发 ``agent-team/ui/group.css``
-  这一份，删的又是活 DOM 匹配不到的规则 —— 全绿即是「这些规则确实是死的」的浏览器级取证。
+* 计算样式 / CSSOM / 外链反向证据当时**一条没动**：两侧本来就同发
+  ``agent-team/ui/group.css`` 这一份，删的又是活 DOM 匹配不到的规则。
+  **刀20 更正**：正因为「两侧同发一份」，那两条判据对本刀这类失效模式其实**没有
+  敏感度**（旧侧跟着新侧一起变了），刀19 的全绿当时只是旁证。刀20 已把旧侧换成
+  冻结基线并补上负控 —— 见上面的刀20 改动概要。
 
 刀18 改动概要（**只换基、只加严，一类判据没删、一个期望值没下调**）：
 
@@ -118,6 +139,7 @@ TSVC（``http://<host>:9981``）是**硬编码常量**，改端口就等于改�
 
 import argparse
 import base64
+import difflib
 import hashlib
 import http.client
 import json
@@ -143,6 +165,20 @@ NEW_HTML = os.path.join(UI_DIR, "group.html")
 NEW_JS = os.path.join(UI_DIR, "group_transport.js")
 NEW_CSS = os.path.join(UI_DIR, "group.css")
 NEW_VIEW = os.path.join(UI_DIR, "group_view.js")
+
+# ---------------------------------------------------------------- 刀20 · CSS 冻结基线
+# 补的是刀19 暴露出来的**口径空档**：桩后端把 `/group.css` 放在 ROOT_STATIC 里，两侧
+# **同发**活件 `agent-team/ui/group.css`。于是「删本件里的规则」这一类刀，计算样式
+# 与 CSSOM 天然全绿 —— 旧侧跟着新侧一起变了，那两条判据对这个失效模式**零敏感度**。
+# 刀19 只用临时 `--old group_old_k12.html` 旁证补了一次，没有固化。
+# 本刀把旧侧钉死到一份**冻结基线**：刀19 开工前（HEAD 84d753f 的父提交 0828dac）
+# 那一版 group.css 的逐字节件。此后 OLD 侧发基线、NEW 侧发活件，计算样式与 CSSOM
+# 才真的在比「两个不同的物理文件」。
+# 身份三重校验（任一不过 → 硬停，不是只打印）：字节数 / md5 / 与 k12 内联 <style>
+# 块逐字节相同（该块本来就 == 刀19 之前的 group.css，见 css_text_level()）。
+OLD_CSS_K19 = os.path.join(OLD_DIR, "group_css_old_k19.css")
+OLD_CSS_K19_MD5 = "ea71fd30af6a49a7365ac2d643226ad5"
+OLD_CSS_K19_SIZE = 31078
 
 # 刀12 基线快照的 md5：**只**用来判定「刀12 的增量互补证据（重组回填）适不适用」。
 # --old 传别的快照（例如 k11）时，旧侧与新侧的差异不止 style 段这一处，重组自然不等，
@@ -340,6 +376,13 @@ ROOT_STATIC = {"/md.js", "/tex.js", "/hl.js", "/codeblock.js", "/group_transport
 MIME = {".js": "text/javascript; charset=utf-8", ".html": "text/html; charset=utf-8",
         ".css": "text/css; charset=utf-8"}
 
+# 刀20：`/group.css` 改成**按侧分派**。两个快照页里的 <link href="/group.css"> 是
+# 冻结字节、改不得，所以只能在桩这一侧按「当前采集的是哪一侧」发不同的物理件。
+# 两侧是**严格串行**的（run_side 一次只跑一侧，见 run_once 里的采集顺序与
+# run_side 里 `w0 = wire_len()` 那条「两侧串行，区间干净」的注释），所以这个
+# 模块级游标是确定性的。没钉侧就发 500 —— **硬失败**，不许悄悄回落到活件。
+CUR_SIDE = {"name": None}
+
 
 class Stub(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -374,6 +417,16 @@ class Stub(BaseHTTPRequestHandler):
         m = re.match(r"^/(old|new)/([A-Za-z0-9_.-]+)$", p)
         if m:
             fs = os.path.join(STATIC_ROOTS[m.group(1)], m.group(2))
+        elif p == "/group.css":
+            # 刀20：OLD 侧发冻结基线、NEW 侧发活件（见 CUR_SIDE 处的注释）
+            side = CUR_SIDE["name"]
+            if side == "old":
+                fs = OLD_CSS_K19
+            elif side == "new":
+                fs = NEW_CSS
+            else:
+                return self._out(500, "text/plain; charset=utf-8",
+                                 b"k20: /group.css requested with no side pinned")
         elif p in ROOT_STATIC:
             fs = os.path.join(UI_DIR, p.lstrip("/"))
         if fs is not None:
@@ -702,10 +755,28 @@ STYLE_WAIT_JS = r"""
 
 # 样式表清点 + 反向证据的原料：每张表的来源（href / 挂载节点）、规则条数，
 # 以及把所有表的 cssRules 逐条 cssText 拼起来的那一大串（Python 侧再取长度与 md5）。
+#
+# 刀20 追加 `flat`：把所有样式表的规则**展平成一条一条**（条件组只展一层）。
+#   · 条件组（@media / @supports，判据是 `typeof r.conditionText === "string"`）
+#     拆成 `@media <cond> {` / 每条子规则 / `}` 三类条目；
+#   · 其余规则（含 @keyframes）整条按 `r.cssText` 当叶子。
+# 叶子串一律是**浏览器自己序列化**出来的 cssText —— 装置不自己拼 CSS 文本，
+# 两侧同一个浏览器、同一次运行，格式天然同源。
+# 为什么要展平：刀20 起两侧发的是两份不同的物理件，整串 md5 不可能再相等；
+# 判据换基成「旧侧逐条扣掉死规则之后 == 新侧逐条逐字节」，就需要条目粒度。
 SHEETS_JS = r"""
 (function () {
-  var out = {sheets: [], joined: ""};
+  var out = {sheets: [], joined: "", flat: []};
   var parts = [];
+  function leaf(r) {
+    if (typeof r.conditionText === "string" && r.cssRules) {
+      out.flat.push("@" + (r.media ? "media" : "supports") + " " + r.conditionText + " {");
+      for (var q = 0; q < r.cssRules.length; q++) { out.flat.push("  " + r.cssRules[q].cssText); }
+      out.flat.push("}");
+    } else {
+      out.flat.push(r.cssText);
+    }
+  }
   for (var i = 0; i < document.styleSheets.length; i++) {
     var s = document.styleSheets[i];
     var rec = {href: s.href || null,
@@ -716,7 +787,7 @@ SHEETS_JS = r"""
       var r = s.cssRules;
       rec.rules = r.length;
       var t = "";
-      for (var k = 0; k < r.length; k++) { t += r[k].cssText; }
+      for (var k = 0; k < r.length; k++) { t += r[k].cssText; leaf(r[k]); }
       parts.push(t);
     } catch (e) { rec.err = String(e && e.name); }
     out.sheets.push(rec);
@@ -925,6 +996,7 @@ def doc_reqs(recs):
 def run_side(name, page_url, browser, stub_port, verbose):
     port = free_port()
     profile = tempfile.mkdtemp(prefix="k11_%s_" % name)      # 两侧各自独立 profile，localStorage 天然隔离
+    CUR_SIDE["name"] = name                                  # 刀20：钉住本侧 → 桩据此分派 /group.css
     w0 = wire_len()                                          # 本侧线级记录的起点（两侧串行，区间干净）
     proc, ws_url = launch(browser, port, profile)
     res = {"name": name, "url": page_url}
@@ -993,6 +1065,7 @@ def run_side(name, page_url, browser, stub_port, verbose):
         res["style_wait"] = json.loads(cdp.evaluate(STYLE_WAIT_JS))
         sh = json.loads(cdp.evaluate(SHEETS_JS, await_promise=False))
         joined = sh.pop("joined")
+        res["flat"] = sh.pop("flat")                          # 刀20：展平规则表（换基后的 CSSOM 判据原料）
         sh["total"] = len(joined)
         sh["md5"] = hashlib.md5(joined.encode("utf-8")).hexdigest()
         res["sheets"] = sh
@@ -1279,6 +1352,70 @@ CSS_DROPPED = [
 # 刀19 反向断言用：删干净之后，这些字面量在 group.css 里一处都不许再出现。
 CSS_RESIDUE = [b"#taskpanel", b"#tp-", b".titem", b"#taskbtn"]
 
+# 刀20：CSSOM 层「旧侧扣掉死规则 == 新侧」的期望条数。与源码级对得上：
+# CSS_DROPPED 的 S1 区（k12 内联块 328-369 行）含 31 个声明块、S2 是 @media 里那条
+# `#taskpanel{width:94vw}` —— 合计 32，正是刀19 台账里「删 32 条声明块」那个数。
+# 钉死，条数不对就判红。
+CSSOM_DROP_EXPECT = 32
+
+
+def cssom_rebase(old_flat, new_flat):
+    """刀20 换基：旧侧展平规则表逐条扣掉面板死规则之后，必须 == 新侧、逐条逐字节。
+
+    原判据是「两侧 CSSOM 拼接文本 md5 相同」—— 那条只在两侧**同发一份活件**时才成立，
+    正是本刀要堵的空档（见 OLD_CSS_K19 处的注释）。换基后：
+      · 双指针顺序对齐：对得上一起走；对不上就把**旧侧**那条记为「下线条目」；
+      · 每条下线条目必须命中面板字面量（CSS_RESIDUE）—— 改一个色值、动一条声明都
+        不带面板字面量，立刻判红，这就是新口径的敏感度所在；
+      · 新侧不许出现旧侧没有的条目（一条私货都塞不进来）；
+      · 条数账要平，且下线条数必须**恰好** CSSOM_DROP_EXPECT；
+      · 反向断言：新侧展平表里面板字面量一条都不许出现。
+    强度只增不减：原来只有「md5 相等」一条，现在是逐条字节 + 配对 + 计数 + 反向断言。
+    """
+    # 对齐用 difflib（确定性；autojunk 必须关掉 —— 两侧都 200+ 条，开着会把「出现得
+    # 频繁」的条目当垃圾丢掉，等于悄悄放宽）。朴素双指针在首次失配后会**失步**，把
+    # 后面所有规则都误报成差异；那样虽然照样判红，但读者看不出真正改的是哪一条。
+    sm = difflib.SequenceMatcher(None, old_flat, new_flat, autojunk=False)
+    dropped, extra = [], []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag in ("delete", "replace"):
+            dropped += [(k, old_flat[k]) for k in range(i1, i2)]
+        if tag in ("insert", "replace"):
+            extra += [(k, new_flat[k]) for k in range(j1, j2)]
+    return dropped, extra
+
+
+def css_baseline_identity():
+    """刀20：开场硬校验 CSS 冻结基线的身份（字节 / md5 / 与 k12 内联块逐字节）。
+
+    不过就**硬停** —— 旧侧的字节是整条计算样式判据的地基，地基被人动过还接着跑，
+    等于把判据本身交给了改件的人。
+    """
+    print("---- 装置自证·刀20：CSS 冻结基线（计算样式 / CSSOM 的 OLD 侧来源）----")
+    if not os.path.isfile(OLD_CSS_K19):
+        print("  ✗ 缺件: %s" % OLD_CSS_K19)
+        return False
+    raw = open(OLD_CSS_K19, "rb").read()
+    got = hashlib.md5(raw).hexdigest()
+    size_ok = len(raw) == OLD_CSS_K19_SIZE
+    md5_ok = got == OLD_CSS_K19_MD5
+    print("  基线件   %s  %8d B  md5 %s" % (OLD_CSS_K19, len(raw), got))
+    print("  取法     git show 84d753f^:agent-team/ui/group.css（刀19 开工前那一版活件）")
+    print("  字节 == %d: %s ｜ md5 == %s: %s" % (OLD_CSS_K19_SIZE, size_ok, OLD_CSS_K19_MD5, md5_ok))
+    # 与 k12 内联 <style> 块互证：该块本来就逐字节 == 刀19 之前的 group.css
+    # （见 css_text_level()），所以这条是一次**独立来源**的身份交叉验证。
+    k12 = open(K12_HTML, "rb").read()
+    a, b = k12.find(STYLE_OPEN), k12.find(b"</style>")
+    inner = k12[a + len(STYLE_OPEN):b] if (a >= 0 and b >= 0) else b""
+    same_k12 = inner == raw
+    print("  与 %s 的内联 <style> 块（%d B）逐字节相同: %s"
+          % (os.path.basename(K12_HTML), len(inner), same_k12))
+    ok = size_ok and md5_ok and same_k12
+    print("  文件身份校验: %s" % ok)
+    if not ok:
+        print("  ✗ 基线件身份不符 → 停（计算样式 / CSSOM 的旧侧地基不可信）")
+    return ok
+
 
 def css_text_level():
     """刀12 第 0 类判据：CSS 字节同源 + 字节账 + 重组互补证据（刀13 起改成**常驻回归**）。
@@ -1563,7 +1700,8 @@ def run_once(args):
     print("刀11/刀12/刀13/刀18 · 群聊前端拆三件套 —— 等价装置")
     print("=" * 78)
 
-    for p in (old_html, NEW_HTML, NEW_JS, NEW_CSS, NEW_VIEW, K11_HTML, K12_HTML, K13_HTML):
+    for p in (old_html, NEW_HTML, NEW_JS, NEW_CSS, NEW_VIEW,
+              K11_HTML, K12_HTML, K13_HTML, OLD_CSS_K19):
         if not os.path.isfile(p):
             print("缺件: " + p)
             return 1
@@ -1604,6 +1742,9 @@ def run_once(args):
     else:
         print("  旧侧不是刀13 基线快照（md5 %s ≠ %s）→ 该项硬校验不适用，不报错"
               % (old_md5[:8], K13_MD5[:8]))
+
+    if not css_baseline_identity():          # 刀20：基线身份不过 → 硬停
+        return 1
 
     view_ok = js_view_text_level(old_html)
     css_ok = css_text_level()
@@ -1754,13 +1895,45 @@ def run_once(args):
               % (inl_ok, len(inl), inl[0]["rules"] if inl else "-"))
     if not inl_ok:
         bad += 1
-    len_ok = o["sheets"]["total"] == n["sheets"]["total"]
-    md5_ok = o["sheets"]["md5"] == n["sheets"]["md5"]
-    print("    CSSOM 归一后总长度 OLD %d == NEW %d: %s ｜ 拼接文本 md5 相同: %s"
-          % (o["sheets"]["total"], n["sheets"]["total"], len_ok, md5_ok))
-    if not len_ok:
+    # ---------- 刀20 · CSSOM 换基（原「两侧 md5 相同」已随旧侧换成冻结基线而失效）----------
+    # 旧口径：两侧同发活件 → 拼接文本 md5 天然相等 → 对「删本件里的规则」零敏感度。
+    # 新口径：旧侧 = 冻结基线、新侧 = 活件，判「旧侧扣掉面板死规则后逐条逐字节 == 新侧」。
+    print("    CSSOM 拼接文本长度 OLD %d（冻结基线）｜ NEW %d（活件）｜ md5 %s / %s"
+          % (o["sheets"]["total"], n["sheets"]["total"],
+             o["sheets"]["md5"][:8], n["sheets"]["md5"][:8]))
+    print("    —— 刀20 换基：旧侧展平规则表扣掉面板死规则 → 必须逐条逐字节 == 新侧 ——")
+    of, nf = o["flat"], n["flat"]
+    dropped, extra = cssom_rebase(of, nf)
+    lits = [p.decode() for p in CSS_RESIDUE]
+    nonpanel = [(k, x) for k, x in dropped if not any(p in x for p in lits)]
+    new_res = [x for x in nf if any(p in x for p in lits)]
+    print("      展平条数 OLD %d ｜ NEW %d ｜ 顺序对齐后：旧侧独有 %d 条、新侧独有 %d 条"
+          % (len(of), len(nf), len(dropped), len(extra)))
+    for k, x in dropped:
+        print("      − OLD[%3d] %s" % (k, x[:110]))
+    for k, x in extra:
+        print("      ✗ NEW[%3d] 旧侧没有这一条（私货）: %s" % (k, x[:160]))
+    for k, x in nonpanel:
+        print("      ✗ OLD[%3d] 旧侧独有、却不带面板字面量（= 活规则被改/被删）: %s" % (k, x[:160]))
+    for x in new_res[:8]:
+        print("      ✗ NEW 侧残留面板字面量: %s" % x[:160])
+    cnt_ok = len(nf) + len(dropped) == len(of)
+    num_ok = len(dropped) == CSSOM_DROP_EXPECT
+    print("      条数账：新侧 %d + 下线 %d = %d ｜ == 旧侧 %d: %s ｜ 下线条数 == 期望 %d: %s"
+          % (len(nf), len(dropped), len(nf) + len(dropped), len(of), cnt_ok,
+             CSSOM_DROP_EXPECT, num_ok))
+    print("      每条下线条目都命中面板字面量 %s: %s（不命中 %d 条）｜ 新侧独有条目 %d 条（应 0）"
+          "｜ 新侧残留面板字面量 %d 条（应 0）"
+          % (lits, not nonpanel, len(nonpanel), len(extra), len(new_res)))
+    if extra:
         bad += 1
-    if not md5_ok:
+    if nonpanel:
+        bad += 1
+    if not cnt_ok:
+        bad += 1
+    if not num_ok:
+        bad += 1
+    if new_res:
         bad += 1
     print("  —— 线级：静态件请求（两侧天然不同，只断言下列正面事实，不逐行 diff）——")
     for side, r in (("OLD", o), ("NEW", n)):

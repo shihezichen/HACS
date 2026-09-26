@@ -200,11 +200,6 @@
       "port": null,
       "note": "群聊前端·传输客户端（同源 /api 客户端 + 任务服务客户端 + 端点常量）—— 刀11 从 group.html 抽出，零行为改变"
     },
-    "agent-team/task_sys/patch_group_html.py": {
-      "layer": "L4",
-      "port": null,
-      "note": "往群页注入任务面板的补丁脚本"
-    },
     "agent-team/view_auth.py": {
       "layer": "X",
       "port": null,
@@ -324,11 +319,6 @@
       "layer": "T",
       "port": null,
       "note": "任务种子"
-    },
-    "agent-team/task_sys/verify_task_sys.py": {
-      "layer": "T",
-      "port": null,
-      "note": "任务系统验收"
     },
     "agent-team/node_paths.py": {
       "layer": "L0",
