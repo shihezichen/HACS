@@ -1,12 +1,29 @@
 # -*- coding: utf-8 -*-
-"""刀11 · 群聊前端「传输客户端抽出」等价装置（无头浏览器 + CDP，纯 stdlib）。
+"""刀11/刀12 · 群聊前端「拆三件套」等价装置（无头浏览器 + CDP，纯 stdlib）。
 
 比什么
 ------
-旧侧 OLD = ``tools/equivalence/_old/group_old_k11.html``（开工前快照，单文件自带传输层）
-新侧 NEW = ``agent-team/ui/group.html`` + ``agent-team/ui/group_transport.js``（抽出后）
+旧侧 OLD = ``--old <path>``（当刀开工前快照），默认 ``_old/group_old_k12.html``
+新侧 NEW = ``agent-team/ui/group.html`` + 它引用的同目录兄弟件
+           （``group_transport.js`` 刀11 抽出、``group.css`` 刀12 抽出）
 
 两侧**来自两个不同的物理文件**，装置开头打印各自 md5 自证不是自比。
+
+刀12 追加了三类判据（只加不减，原有各类一条没动）：
+
+* **第 0 类 · CSS 文本级**：旧快照内联 ``<style>``…``</style>`` 之间的字节
+  **==** ``agent-team/ui/group.css`` 的字节；外加新 ``group.html`` 的字节账
+  （``</style>`` 计 0 / ``<link`` 计 1 / 总字节）与**重组互补证据**
+  （把新件那 42 B 的 ``<link>`` 行换回原 31095 B 的 style 段 → 与旧快照逐字节相等，
+  证明「只换了这一处」）。
+* **计算样式**：两侧各等 ``readyState === 'complete'`` 且 ``document.styleSheets``
+  连续两次采样稳定后，按文档序枚举 ``body *``，对每个元素取一张**固定属性表**的
+  ``getComputedStyle`` 字符串值，两侧逐行 diff 必须 0 行、元素数必须相等。
+* **反向证据**（防「外链根本没加载，两个空页面也算一致」）：NEW 侧
+  ``document.styleSheets`` 里必须有一张 ``href`` 以 ``/group.css`` 结尾、
+  且 ``cssRules.length > 0`` 的表；两侧把所有样式表的 ``cssRules`` 逐条
+  ``cssText`` 拼起来后，**总长度与 md5 都必须相等**（CSSOM 归一后的同一口径）；
+  线级还要求 NEW 侧真的请求过 ``/group.css``、OLD 侧一次都没请求过。
 
 夹具
 ----
@@ -34,9 +51,16 @@ TSVC（``http://<host>:9981``）是**硬编码常量**，改端口就等于改�
 ----
 文本级一致 ∧ 标识符探针一致 ∧ 启动轨迹一致 ∧ 轮询轨迹一致 ∧ 动作序轨迹一致
 ∧ 函数级线级（请求行 + 请求头 + 请求体 + Error.message）逐字节一致
-∧ 两侧 JS 错误列表一致  → 打印 EQUIV_SENTINEL_OK，退出 0；否则逐条打 diff，退出 1。
+∧ 两侧 JS 错误列表一致 ∧ CSS 文本级一致 ∧ 计算样式逐元素一致 ∧ 外链确已加载
+→ 打印 EQUIV_SENTINEL_OK，退出 0；否则逐条打 diff，退出 1。
 
-用法：``python tools/equivalence/group_frontend_equiv.py``（可加 ``-v`` 打全量轨迹）
+用法
+----
+``python tools/equivalence/group_frontend_equiv.py``            刀12 默认旧侧（k12 快照）
+``python tools/equivalence/group_frontend_equiv.py --old tools/equivalence/_old/group_old_k11.html``
+``... -v``        打全量轨迹
+``... --runs 3``  连跑 3 次自证确定性
+``... --old-md5 e5c46769``  可选：额外硬校验旧侧 md5 前缀
 """
 
 import argparse
@@ -59,9 +83,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 UI_DIR = os.path.join(ROOT, "agent-team", "ui")
 OLD_DIR = os.path.join(ROOT, "tools", "equivalence", "_old")
-OLD_HTML = os.path.join(OLD_DIR, "group_old_k11.html")
+K11_HTML = os.path.join(OLD_DIR, "group_old_k11.html")   # 刀11 基线（JS 文本级判据的固定锚）
+K12_HTML = os.path.join(OLD_DIR, "group_old_k12.html")   # 刀12 基线（--old 默认值）
 NEW_HTML = os.path.join(UI_DIR, "group.html")
 NEW_JS = os.path.join(UI_DIR, "group_transport.js")
+NEW_CSS = os.path.join(UI_DIR, "group.css")
+
+# 刀12 基线快照的 md5：**只**用来判定「本刀的增量互补证据（重组回填）适不适用」。
+# --old 传别的快照（例如 k11）时，旧侧与新侧的差异不止 style 段这一处，重组自然不等，
+# 那条子判据据此显式声明「不适用」而不是悄悄放过 —— 见 css_text_level()。
+K12_MD5 = "e5c4676943d70073fd881d936226a2ad"
 
 TSVC_HOST = "<host>"
 TSVC_ORIGIN = "http://" + TSVC_HOST + ":9981"
@@ -246,7 +277,8 @@ def wire_slice(a, b):
 
 
 STATIC_ROOTS = {"old": OLD_DIR, "new": UI_DIR}
-ROOT_STATIC = {"/md.js", "/tex.js", "/hl.js", "/codeblock.js", "/group_transport.js"}
+ROOT_STATIC = {"/md.js", "/tex.js", "/hl.js", "/codeblock.js", "/group_transport.js",
+               "/group.css"}
 MIME = {".js": "text/javascript; charset=utf-8", ".html": "text/html; charset=utf-8",
         ".css": "text/css; charset=utf-8"}
 
@@ -517,6 +549,113 @@ PROBE_JS = r"""
 IDENT_PROBES = ["typeof api", "typeof tApi", "typeof pull", "typeof boot",
                 "API", "TSVC", "TGROUP_DEFAULT", "typeof window.api", "typeof window.tApi"]
 
+# ---------------------------------------------------------------- 刀12 · 计算样式
+# 固定属性表：口径必须「与时间无关」—— 这里一条 transition / animation / transform
+# 都不收（它们随时钟变化，会把装置变成掷骰子）。其余全是布局/盒模型/排版/配色的
+# **最终计算值**（getComputedStyle 的字符串，颜色一律 rgb(...) 形式）。
+STYLE_PROPS = [
+    "display", "position", "z-index", "box-sizing", "float", "clear", "vertical-align",
+    "width", "height", "min-width", "min-height", "max-width", "max-height",
+    "top", "right", "bottom", "left",
+    "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "padding-top", "padding-right", "padding-bottom", "padding-left",
+    "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+    "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
+    "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+    "border-top-left-radius", "border-top-right-radius",
+    "border-bottom-left-radius", "border-bottom-right-radius",
+    "overflow", "overflow-x", "overflow-y", "text-overflow",
+    "color", "background-color", "background-image", "background-size",
+    "background-position", "background-repeat", "box-shadow", "outline-width",
+    "font-family", "font-size", "font-weight", "font-style", "line-height",
+    "letter-spacing", "text-align", "text-decoration-line", "text-transform",
+    "white-space", "word-break", "overflow-wrap", "list-style-type",
+    "flex-direction", "flex-wrap", "flex-grow", "flex-shrink", "flex-basis",
+    "align-items", "align-self", "align-content", "justify-content",
+    "gap", "row-gap", "column-gap",
+    "grid-template-columns", "grid-template-rows", "grid-auto-flow",
+    "grid-auto-columns", "grid-auto-rows", "grid-column-start", "grid-column-end",
+    "grid-row-start", "grid-row-end",
+    "opacity", "visibility", "cursor", "pointer-events", "user-select",
+]
+
+# 等样式稳定：readyState === 'complete' 且 styleSheets 的表数与各表 cssRules 条数
+# **连续两次采样不变**（100ms 一拍，最多 50 拍 ≈ 5s）。不稳就等，等不到就如实回报。
+STYLE_WAIT_JS = r"""
+(function () {
+  function snap() {
+    var a = [document.styleSheets.length];
+    for (var i = 0; i < document.styleSheets.length; i++) {
+      var n;
+      try { n = document.styleSheets[i].cssRules.length; } catch (e) { n = "ERR:" + e.name; }
+      a.push(n);
+    }
+    return a.join(",");
+  }
+  return new Promise(function (resolve) {
+    var prev = null, tries = 0, stable = false;
+    (function tick() {
+      var cur = snap();
+      tries++;
+      if (document.readyState === "complete" && prev !== null && cur === prev) { stable = true; }
+      prev = cur;
+      if (stable || tries >= 50) {
+        resolve(JSON.stringify({ready: document.readyState, snap: cur,
+                                ticks: tries, stable: stable}));
+        return;
+      }
+      setTimeout(tick, 100);
+    })();
+  });
+})()
+"""
+
+# 样式表清点 + 反向证据的原料：每张表的来源（href / 挂载节点）、规则条数，
+# 以及把所有表的 cssRules 逐条 cssText 拼起来的那一大串（Python 侧再取长度与 md5）。
+SHEETS_JS = r"""
+(function () {
+  var out = {sheets: [], joined: ""};
+  var parts = [];
+  for (var i = 0; i < document.styleSheets.length; i++) {
+    var s = document.styleSheets[i];
+    var rec = {href: s.href || null,
+               owner: s.ownerNode ? s.ownerNode.nodeName.toLowerCase() : null,
+               media: String((s.media && s.media.mediaText) || ""),
+               disabled: !!s.disabled, rules: -1, err: null};
+    try {
+      var r = s.cssRules;
+      rec.rules = r.length;
+      var t = "";
+      for (var k = 0; k < r.length; k++) { t += r[k].cssText; }
+      parts.push(t);
+    } catch (e) { rec.err = String(e && e.name); }
+    out.sheets.push(rec);
+  }
+  out.joined = parts.join("");
+  return JSON.stringify(out);
+})()
+"""
+
+COMPUTED_JS_TMPL = r"""
+(function () {
+  var PROPS = %s;
+  var els = document.querySelectorAll("body *");
+  var out = [];
+  for (var i = 0; i < els.length; i++) {
+    var e = els[i], cs = getComputedStyle(e), vals = [];
+    for (var j = 0; j < PROPS.length; j++) {
+      vals.push(PROPS[j] + "=" + cs.getPropertyValue(PROPS[j]));
+    }
+    var cls = e.getAttribute("class");
+    var sigp = e.tagName.toLowerCase()
+             + (e.id ? "#" + e.id : "")
+             + (cls ? "." + cls.trim().split(/\s+/).join(".") : "");
+    out.push(String(i).padStart(4, "0") + " | " + sigp + " | " + vals.join("; "));
+  }
+  return JSON.stringify(out);
+})()
+"""
+
 # 函数级冻结输入（401 那例放最后：它会写 location.href）
 FROZEN = [
     ("api",  "GET",   "/api/me", None),
@@ -561,8 +700,8 @@ NORM_RULES = [
      re.compile(r"next=[^\s&\"]*"), "next=<PAGE>"),
     ("Referer: <referer>（两侧页面 URL 天然不同）",
      re.compile(r"^(Referer|referer):\s.*$", re.M), r"\1: <referer>"),
-    ("<page-url>（正文/URL 里出现的本页绝对地址）",
-     re.compile(r"http://127\.0\.0\.1:\d+/(?:old/group_old_k11\.html|new/group\.html)"), "<page-url>"),
+    ("<page-url>（正文/URL 里出现的本页绝对地址；只匹配 /old/ /new/ 下的 .html 本体）",
+     re.compile(r"http://127\.0\.0\.1:\d+/(?:old|new)/[A-Za-z0-9_.-]+\.html"), "<page-url>"),
     ("<port>（桩后端每次运行端口不同；仅用于两次运行间可比，同一次运行两侧端口相同）",
      re.compile(r"127\.0\.0\.1:\d+"), "127.0.0.1:<port>"),
     ("<ts13>（13 位毫秒时戳，防御性规则）", re.compile(r"\b\d{13}\b"), "<ts13>"),
@@ -653,6 +792,25 @@ def client_ident(recs):
     return sorted(seen)
 
 
+DOC_REQ_RX = re.compile(r"^/(old|new)/")
+
+
+def doc_reqs(recs):
+    """本侧发生过的「文档本体 + 静态子资源」请求（去重计数排序）。
+
+    用途是刀12 的线级反向证据：NEW 侧必须真的去取过 ``/group.css``，
+    OLD 侧必须一次都没取过（它的样式是内联的）。两侧天然不同，故**不做逐行 diff**，
+    只对这两条事实各下一个断言。
+    """
+    cnt = {}
+    for r in recs:
+        p = r["path"].split("?", 1)[0]
+        if p in ROOT_STATIC or DOC_REQ_RX.match(p):
+            k = "%s %s" % (r["method"], p)
+            cnt[k] = cnt.get(k, 0) + 1
+    return ["%s ×%d" % (k, cnt[k]) for k in sorted(cnt)]
+
+
 def run_side(name, page_url, browser, stub_port, verbose):
     port = free_port()
     profile = tempfile.mkdtemp(prefix="k11_%s_" % name)      # 两侧各自独立 profile，localStorage 天然隔离
@@ -715,6 +873,16 @@ def run_side(name, page_url, browser, stub_port, verbose):
             "JSON.stringify((function(){try{return (%s);}catch(e){return '<<throw>> '+e.message;}})())" % e))
             for e in IDENT_PROBES]
 
+        # ---------- A3 样式（刀12 新增；取值点在启动 settle 之后、任何动作之前）----------
+        res["style_wait"] = json.loads(cdp.evaluate(STYLE_WAIT_JS))
+        sh = json.loads(cdp.evaluate(SHEETS_JS, await_promise=False))
+        joined = sh.pop("joined")
+        sh["total"] = len(joined)
+        sh["md5"] = hashlib.md5(joined.encode("utf-8")).hexdigest()
+        res["sheets"] = sh
+        res["computed"] = json.loads(cdp.evaluate(
+            COMPUTED_JS_TMPL % json.dumps(STYLE_PROPS), await_promise=False))
+
         # ---------- A2 轮询窗口 ----------
         cdp.evaluate("window.__tr.length = 0; 1")
         cdp.pump(SETTLE_POLL)
@@ -761,7 +929,9 @@ def run_side(name, page_url, browser, stub_port, verbose):
         res["action_steps"] = steps
         res["action_trace"] = cdp.evaluate("JSON.stringify(window.__tr)")
         res["errs"] = json.loads(cdp.evaluate("JSON.stringify(window.__errs)"))
-        res["client_ident"] = client_ident(wire_slice(w0, wire_len()))
+        mine = wire_slice(w0, wire_len())
+        res["client_ident"] = client_ident(mine)
+        res["doc_reqs"] = doc_reqs(mine)
         cdp.close()
     finally:
         proc.kill()
@@ -776,11 +946,91 @@ BLOCKS = [("B1", 555, 555), ("B2", 560, 586), ("B3", 1468, 1468),
           ("B4", 1469, 1469), ("B5", 1475, 1486)]
 
 
+STYLE_OPEN = b"<style>\n"
+STYLE_CLOSE = b"</style>\n"
+LINK_LINE = b'<link rel="stylesheet" href="/group.css">\n'
+
+
+def css_text_level(old_html):
+    """刀12 第 0 类判据：CSS 字节同源 + 新 group.html 的字节账 + 重组互补证据。"""
+    print("---- 3.0 CSS 文本级（刀12）：外链件 == 旧快照内联 style 段，逐字节 ----")
+    old = open(old_html, "rb").read()
+    new = open(NEW_HTML, "rb").read()
+    css = open(NEW_CSS, "rb").read()
+
+    a = old.find(STYLE_OPEN)
+    b = old.find(b"</style>")
+    if a < 0 or b < 0:
+        print("  ✗ 旧快照里找不到 <style>\\n … </style> 段（找到 %d / %d）" % (a, b))
+        return False
+    ia, ib = a + len(STYLE_OPEN), b
+    inner = old[ia:ib]
+    block = old[a:b + len(STYLE_CLOSE)]
+    ok = True
+
+    print("  旧快照 %s" % old_html)
+    print("    <style> 段     offset [%d, %d)  共 %d B" % (a, a + len(block), len(block)))
+    print("    样式内容       offset [%d, %d)  %6d B  md5 %s"
+          % (ia, ib, len(inner), hashlib.md5(inner).hexdigest()))
+    print("  新件   %s" % NEW_CSS)
+    print("    文件内容                        %6d B  md5 %s"
+          % (len(css), hashlib.md5(css).hexdigest()))
+    eq = inner == css
+    ok &= eq
+    print("    ✓ 两侧字节相等: %s（长度 %d == %d ｜ md5 %s == %s）" % (
+        eq, len(inner), len(css),
+        hashlib.md5(inner).hexdigest()[:8], hashlib.md5(css).hexdigest()[:8]))
+    print("    首 40 B: %r" % css[:40])
+    print("    末 40 B: %r" % css[-40:])
+
+    # --- 新 group.html 的字节账 ---
+    n_close = new.count(b"</style>")
+    n_link = new.count(b"<link")
+    at = new.find(LINK_LINE)
+    print("  新件   %s" % NEW_HTML)
+    print("    字节数 %d  md5 %s" % (len(new), hashlib.md5(new).hexdigest()))
+    print("    </style> 计数 %d（应 0）｜ <link 计数 %d（应 1）｜ <link> 行 %d B @ offset %d（旧 <style> 也在 %d）"
+          % (n_close, n_link, len(LINK_LINE), at, a))
+    ok &= (n_close == 0 and n_link == 1 and at == a)
+    # 位置不变 = 层叠顺序不变：<link> 仍夹在 </title> 与 </head> 之间
+    pos_ok = new.find(b"</title>") < at < new.find(b"</head>")
+    print("    <link> 仍在 </title>(@%d) 之后、</head>(@%d) 之前 → 层叠顺序同序: %s"
+          % (new.find(b"</title>"), new.find(b"</head>"), pos_ok))
+    ok &= pos_ok
+    print("    字节账 %d − %d + %d = %d ｜ 与实测 %d 相符: %s"
+          % (len(old), len(block), len(LINK_LINE),
+             len(old) - len(block) + len(LINK_LINE), len(new),
+             len(old) - len(block) + len(LINK_LINE) == len(new)))
+
+    # --- 重组互补证据：把那 42 B 换回 31095 B 的 style 段 → 应与旧快照逐字节相等 ---
+    old_md5 = hashlib.md5(old).hexdigest()
+    recon = new[:at] + block + new[at + len(LINK_LINE):]
+    same = recon == old
+    print("    重组回填（新件的 <link> 行 ← 原 style 段）→ %d B ｜ 与旧快照逐字节相等: %s"
+          % (len(recon), same))
+    if old_md5 == K12_MD5:
+        ok &= same and len(old) - len(block) + len(LINK_LINE) == len(new)
+        print("      （旧侧是刀12 基线快照 md5 %s → 这条是**硬判据**：两侧唯一差异就是这一处）"
+              % K12_MD5[:8])
+    else:
+        print("      （旧侧 md5 %s 不是刀12 基线 %s → 两侧差的不止 style 段这一处，"
+              % (old_md5[:8], K12_MD5[:8]))
+        print("        重组互补证据**对该旧侧不适用**，不计入判定；CSS 字节同源那条照样是硬判据）")
+    print("  CSS 文本级结论: %s" % ("一致" if ok else "不一致"))
+    return ok
+
+
 def text_level():
-    """证明「零逻辑改动」：新件里的每一段 == 旧快照同段的那几行，逐字节。"""
-    old = open(OLD_HTML, "rb").read().split(b"\n")
+    """证明「零逻辑改动」：新件里的每一段 == 刀11 快照同段的那几行，逐字节。
+
+    这条判据钉死在 ``group_old_k11.html``（而不是 ``--old`` 给的那个旧侧）——
+    它问的是「刀11 抽出的 group_transport.js 至今仍逐字节等于当初那 5 段」，
+    是一条**常驻回归**，与本次比的是哪个旧侧无关。
+    """
+    old = open(K11_HTML, "rb").read().split(b"\n")
     newjs = open(NEW_JS, "rb").read()
-    print("---- 3.1 文本级：5 段逐段字节相等 ----")
+    print("---- 3.1 JS 文本级（刀11 常驻回归，锚定 %s）：5 段逐段字节相等 ----"
+          % os.path.basename(K11_HTML))
     off, ok = 0, True
     for nm, a, b in BLOCKS:
         seg = b"".join(old[i - 1] + b"\n" for i in range(a, b + 1))
@@ -799,7 +1049,7 @@ def text_level():
                            b"async function tApi(") if p in cur]
     print("  group.html 残留（应为空）: %s" % residue)
     ok &= not residue
-    print("  文本级结论: %s" % ("一致" if ok else "不一致"))
+    print("  JS 文本级结论: %s" % ("一致" if ok else "不一致"))
     return ok
 
 
@@ -825,17 +1075,14 @@ def diff_lines(tag, a, b, verbose):
     return n
 
 
-def run_once(verbose):
-
-    class args(object):                     # 保持下文 args.verbose 的写法不变
-        pass
-    args.verbose = verbose
+def run_once(args):
+    old_html = os.path.abspath(args.old)
 
     print("=" * 78)
-    print("刀11 · 群聊前端传输客户端抽出 —— 等价装置")
+    print("刀11/刀12 · 群聊前端拆三件套 —— 等价装置")
     print("=" * 78)
 
-    for p in (OLD_HTML, NEW_HTML, NEW_JS):
+    for p in (old_html, NEW_HTML, NEW_JS, NEW_CSS, K11_HTML):
         if not os.path.isfile(p):
             print("缺件: " + p)
             return 1
@@ -843,26 +1090,35 @@ def run_once(verbose):
     def md5(p):
         return hashlib.md5(open(p, "rb").read()).hexdigest()
 
-    old_md5, new_md5, js_md5 = md5(OLD_HTML), md5(NEW_HTML), md5(NEW_JS)
+    old_md5, new_md5 = md5(old_html), md5(NEW_HTML)
+    js_md5, css_md5 = md5(NEW_JS), md5(NEW_CSS)
+    old_stat = (os.path.getsize(old_html), old_md5, os.path.getmtime(old_html))
     print("---- 装置自证：两侧来自两个不同的物理文件 ----")
-    print("  OLD html  %s  %8d B  md5 %s" % (OLD_HTML, os.path.getsize(OLD_HTML), old_md5))
+    print("  OLD html  %s  %8d B  md5 %s" % (old_html, os.path.getsize(old_html), old_md5))
     print("  NEW html  %s  %8d B  md5 %s" % (NEW_HTML, os.path.getsize(NEW_HTML), new_md5))
     print("  NEW js    %s  %8d B  md5 %s" % (NEW_JS, os.path.getsize(NEW_JS), js_md5))
-    self_ok = old_md5.startswith("c7ff8b4e") and new_md5 != old_md5
-    print("  旧侧 md5 前缀是 c7ff8b4e: %s ｜ 新侧 md5 != 旧侧: %s ｜ 不是自比: %s"
-          % (old_md5.startswith("c7ff8b4e"), new_md5 != old_md5, self_ok))
+    print("  NEW css   %s  %8d B  md5 %s" % (NEW_CSS, os.path.getsize(NEW_CSS), css_md5))
+    print("  刀11 锚   %s  %8d B  md5 %s" % (K11_HTML, os.path.getsize(K11_HTML), md5(K11_HTML)))
+    pin_ok = (not args.old_md5) or old_md5.startswith(args.old_md5)
+    self_ok = (new_md5 != old_md5) and pin_ok
+    print("  新侧 md5 != 旧侧: %s ｜ --old-md5 前缀校验: %s ｜ 不是自比: %s"
+          % (new_md5 != old_md5,
+             ("%s（要求前缀 %s）" % (pin_ok, args.old_md5)) if args.old_md5 else "未指定，不校验具体值",
+             self_ok))
     if not self_ok:
         print("装置自证不过（旧侧不是开工前快照，或两侧同一个文件）→ 停")
         return 1
 
+    css_ok = css_text_level(old_html)
     txt_ok = text_level()
 
     browser = find_browser()
+    STATIC_ROOTS["old"] = os.path.dirname(old_html)      # 旧侧页面从它自己所在目录发
     stub_port = free_port()
     srv = QuietServer(("127.0.0.1", stub_port), Stub)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = "http://127.0.0.1:%d" % stub_port
-    old_url = base + "/old/group_old_k11.html"
+    old_url = base + "/old/" + os.path.basename(old_html)
     new_url = base + "/new/group.html"
     print("---- 桩后端 ----")
     print("  浏览器      : %s" % browser)
@@ -904,6 +1160,88 @@ def run_once(verbose):
     bad += diff_lines("启动轨迹", ob, nb, args.verbose)
     bad += diff_lines("轮询轨迹", op, np_, args.verbose)
     bad += diff_lines("动作序轨迹", oa, na, args.verbose)
+
+    # ---------- 刀12 · 计算样式（逐元素逐属性）----------
+    print("  —— 计算样式（%d 个属性 × 文档序枚举 body * ；取值点：readyState=complete"
+          " 且 styleSheets 连续两次采样稳定之后）——" % len(STYLE_PROPS))
+    for side, r in (("OLD", o), ("NEW", n)):
+        w = r["style_wait"]
+        print("    %s| 稳定等待: ready=%s ｜ 采样稳定=%s ｜ 轮询 %d 拍 ｜ styleSheets 快照 [%s]"
+              % (side, w["ready"], w["stable"], w["ticks"], w["snap"]))
+        if not w["stable"]:
+            print("    %s| ✗ 5s 内没等到样式表稳定 —— 判红（不许拿不稳定的时刻取值）" % side)
+            bad += 1
+    oc, nc = o["computed"], n["computed"]
+    print("    元素数: OLD %d / NEW %d ｜ 相等: %s" % (len(oc), len(nc), len(oc) == len(nc)))
+    if len(oc) != len(nc):
+        bad += 1
+        # 多出来的是哪几个元素 —— 直接把签名打出来，别让读者靠猜。
+        # （这一段只加诊断，不改判定：元素数不等照样 +1 判红。）
+        longer, tag = (oc, "OLD") if len(oc) > len(nc) else (nc, "NEW")
+        for i in range(min(len(oc), len(nc)), len(longer)):
+            print("    ✗ %s 侧多出 [%s]" % (tag, " | ".join(longer[i].split(" | ")[:2])))
+    cdiff = 0
+    for i in range(min(len(oc), len(nc))):
+        if oc[i] != nc[i]:
+            cdiff += 1
+            if cdiff == 1:
+                print("    ✗ 首个分歧元素：")
+                print("      OLD| " + oc[i])
+                print("      NEW| " + nc[i])
+                a_kv = dict(kv.split("=", 1) for kv in oc[i].split(" | ")[2].split("; "))
+                b_kv = dict(kv.split("=", 1) for kv in nc[i].split(" | ")[2].split("; "))
+                for k in STYLE_PROPS:
+                    if a_kv.get(k) != b_kv.get(k):
+                        print("        · %s: OLD %r ｜ NEW %r" % (k, a_kv.get(k), b_kv.get(k)))
+    if cdiff == 0 and len(oc) == len(nc):
+        print("    ✓ 计算样式       两侧逐元素逐属性一致（%d 个元素 × %d 属性 = %d 个值）"
+              % (len(oc), len(STYLE_PROPS), len(oc) * len(STYLE_PROPS)))
+    else:
+        print("    计算样式分歧元素数: %d / %d" % (cdiff, min(len(oc), len(nc))))
+    bad += cdiff
+
+    # ---------- 刀12 · 反向证据：外链确已加载 ----------
+    print("  —— 反向证据：外链 /group.css 真的加载了（防「两个空页面也算一致」）——")
+    for side, r in (("OLD", o), ("NEW", n)):
+        for s in r["sheets"]["sheets"]:
+            print("    %s| 样式表 href=%s owner=<%s> media=%r disabled=%s 规则数=%d err=%s"
+                  % (side, s["href"], s["owner"], s["media"], s["disabled"], s["rules"], s["err"]))
+        print("    %s| 全部样式表 cssRules 的 cssText 拼接：%d 字符  md5 %s"
+              % (side, r["sheets"]["total"], r["sheets"]["md5"]))
+        if any(s["err"] for s in r["sheets"]["sheets"]):
+            print("    %s| ✗ 有样式表读 cssRules 报错（SecurityError 之类）" % side)
+            bad += 1
+    ext = [s for s in n["sheets"]["sheets"]
+           if s["href"] and s["href"].endswith("/group.css")]
+    ext_ok = len(ext) == 1 and ext[0]["rules"] > 0 and not ext[0]["err"]
+    print("    NEW 侧存在 href 以 /group.css 结尾且 cssRules.length>0 的样式表: %s（命中 %d 张，规则 %s）"
+          % (ext_ok, len(ext), ext[0]["rules"] if ext else "-"))
+    if not ext_ok:
+        bad += 1
+    inl = [s for s in o["sheets"]["sheets"] if s["href"] is None and s["owner"] == "style"]
+    inl_ok = len(inl) == 1 and inl[0]["rules"] > 0
+    print("    OLD 侧存在内联 <style> 样式表且 cssRules.length>0: %s（命中 %d 张，规则 %s）"
+          % (inl_ok, len(inl), inl[0]["rules"] if inl else "-"))
+    if not inl_ok:
+        bad += 1
+    len_ok = o["sheets"]["total"] == n["sheets"]["total"]
+    md5_ok = o["sheets"]["md5"] == n["sheets"]["md5"]
+    print("    CSSOM 归一后总长度 OLD %d == NEW %d: %s ｜ 拼接文本 md5 相同: %s"
+          % (o["sheets"]["total"], n["sheets"]["total"], len_ok, md5_ok))
+    if not len_ok:
+        bad += 1
+    if not md5_ok:
+        bad += 1
+    print("  —— 线级：静态件请求（两侧天然不同，只断言这两条事实，不逐行 diff）——")
+    for side, r in (("OLD", o), ("NEW", n)):
+        for line in r["doc_reqs"]:
+            print("    %s| %s" % (side, line))
+    new_got = [x for x in n["doc_reqs"] if x.startswith("GET /group.css ")]
+    old_got = [x for x in o["doc_reqs"] if x.startswith("GET /group.css ")]
+    print("    NEW 侧确实请求过 /group.css: %s ｜ OLD 侧一次都没请求（样式是内联的）: %s"
+          % (bool(new_got), not old_got))
+    if not new_got or old_got:
+        bad += 1
 
     print("  —— 函数级冻结输入（请求行 + 请求头 + 请求体 + Error.message 逐字节）——")
     fz = 0
@@ -955,9 +1293,18 @@ def run_once(verbose):
         print("    （无 —— 一条归一化规则都没触发）")
     for k, v in sorted(NORM_HITS.items()):
         print("    · %s  命中 %d 次" % (k, v))
-    print("  文本级一致: %s ｜ 逐条 diff 行数合计: %d" % (txt_ok, bad))
+    # 旧侧是「等价旧侧」，装置全程只读它；跑完再验一次没被谁顺手改掉
+    now_stat = (os.path.getsize(old_html), md5(old_html), os.path.getmtime(old_html))
+    old_intact = now_stat == old_stat
+    print("  旧侧快照跑完仍未被改写: %s（%d B / md5 %s / mtime %.6f）"
+          % (old_intact, now_stat[0], now_stat[1], now_stat[2]))
+    if not old_intact:
+        print("    ✗ 开工时 %d B / md5 %s / mtime %.6f" % old_stat)
+        bad += 1
+    print("  CSS 文本级一致: %s ｜ JS 文本级一致: %s ｜ 逐条 diff 行数合计: %d"
+          % (css_ok, txt_ok, bad))
 
-    if txt_ok and bad == 0:
+    if css_ok and txt_ok and bad == 0:
         print("EQUIV_SENTINEL_OK")
         return 0
     print("EQUIV_SENTINEL_FAIL")
@@ -969,19 +1316,25 @@ def run_once(verbose):
 PORT_RX = re.compile(r"127\.0\.0\.1:\d+")
 
 
-def repeat(n, verbose):
+def repeat(args):
     """连跑 N 次子进程；每次都必须 OK，且**把随机端口归一后 N 份输出逐字节相同**。"""
+    n = args.runs
     print("=" * 78)
     print("确定性自证：同一份树连跑 %d 次（每次一个干净子进程）" % n)
     print("=" * 78)
     outs, paths, codes = [], [], []
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
-    cmd = [sys.executable, os.path.abspath(__file__)] + (["-v"] if verbose else [])
+    cmd = [sys.executable, os.path.abspath(__file__), "--old", os.path.abspath(args.old)]
+    if args.old_md5:
+        cmd += ["--old-md5", args.old_md5]
+    if args.verbose:
+        cmd += ["-v"]
+    print("  子进程命令行: %s" % " ".join(cmd[1:]))
     for i in range(1, n + 1):
         t0 = time.time()
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
         txt = p.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
-        path = os.path.join(tempfile.gettempdir(), "k11_run%d.txt" % i)
+        path = os.path.join(tempfile.gettempdir(), "k12_run%d.txt" % i)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(txt)
         outs.append(txt)
@@ -1029,10 +1382,14 @@ def main():
     ap.add_argument("--runs", type=int, default=1,
                     help="连跑 N 次自证确定性（默认 1；>1 时每次起一个干净子进程，"
                          "要求次次 OK 且归一随机端口后 N 份输出逐字节相同）")
+    ap.add_argument("--old", default=K12_HTML,
+                    help="旧侧 HTML 路径（默认 _old/group_old_k12.html；传 k11 快照也能跑）")
+    ap.add_argument("--old-md5", default="",
+                    help="可选：额外硬校验旧侧 md5 前缀。不给就只校验「新旧 md5 不同」")
     args = ap.parse_args()
     if args.runs > 1:
-        return repeat(args.runs, args.verbose)
-    return run_once(args.verbose)
+        return repeat(args)
+    return run_once(args)
 
 
 # ---------------------------------------------------------------- 已知偏差
@@ -1043,6 +1400,12 @@ def main():
 #    动作本身，掐掉定时器是为了不让调度抖动伪造出 diff。两侧同一套代码、同一时机。
 # 3) 根路径 /group_transport.js 对两侧都发得出来，但旧页面压根不引用它 ——
 #    它只会出现在新侧的文档子资源请求里，而子资源请求不进 window.__tr（探针只包 fetch）。
+# 4) /group.css 同理：桩对两侧都发得出来，只有新侧会去取。这不是「偏差」而是本刀要证的事，
+#    所以它被抬成**正面断言**（doc_reqs：NEW 必须取过、OLD 必须一次没取过），
+#    而不是靠「两侧都没差」蒙混过去。
+# 5) 计算样式只在启动 settle 之后、动作序之前取一次。动作序会改 DOM（开对话框、加消息），
+#    那之后的样式属于「动作后的状态」，已由动作序轨迹与 JS 错误列表覆盖；
+#    这里刻意不取第二次，免得把 headless 的布局抖动当成被测差异。
 
 if __name__ == "__main__":
     sys.exit(main())
