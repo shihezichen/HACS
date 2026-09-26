@@ -35,7 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from team import call_one, REQ_FMT  # noqa: E402  复用现成的 A2A 信封与点名实现
+from team_cli_core import call_one, REQ_FMT  # noqa: E402  复用现成的 A2A 信封与点名实现（L1 通行层，刀15 起不再经组合根 team.py）
 
 # 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_CHAT_BASE = os.environ.get("AGENT_TEAM_CHAT_BASE") or "http://<host>:9984"

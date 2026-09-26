@@ -44,9 +44,19 @@
       "note": "A2A 调用客户端"
     },
     "agent-team/team.py": {
+      "layer": "C",
+      "port": null,
+      "note": "组合根：成员侧 CLI 的**进程入口**（shell/argv 入口，argv 与输出一字未改）。刀15（阶段3）搬迁后只剩四件事 —— argv 解析（build_common_parser/build_parser 的子命令树）＋装配注入（import L1 team_cli_core / L3 team_group 并 set_defaults(func=…)）＋分派（main）＋入口呈现（打印）。层归属由 L1 改 C 的理由：搬迁后它必须调用 L3 域件，而 L1→L3 是反向依赖；C 排在 layer_order 最前，C→任意层成立、任意层→C 违规，正合「进程入口装配件」。先例＝a2a_svc.py。**残留已收口（主控 2026-09-27 00:xx，Claude 1700s 超时 → 降级 DeepSeek 自执行）**：cmd_who / cmd_say / cmd_broadcast 三个命令体 + say 四辅助函数（derive_default_session / make_say_session_id / resolve_say_session_id / build_say_envelope）已逐字节下沉到 L1 team_cli_core.py，team.py 只 re-export（模块属性面与搬迁前逐名一致；差异只剩 glob/hashlib/tempfile/threading/urllib 五个 stdlib 泄漏名未复刻 —— 无任何调用方，属实现细节）。同时修 group_watch.py（L3）的 `from team import call_one, REQ_FMT` → `from team_cli_core import ...`（改归 C 后 L3→C 会触发检查1 反向依赖报红）。team.py 现为纯组合根：argv 解析 + 装配注入 + 分派 + 打印"
+    },
+    "agent-team/team_cli_core.py": {
       "layer": "L1",
       "port": null,
-      "note": "成员侧命令行客户端"
+      "note": "L1 通行层：成员侧 CLI 的管道件（刀15 阶段3 从 team.py 摘出，逐字节原样）。连接与扇出（discover_online / call_one / run_pool / collect_heartbeats）＋身份与口令（infer_member / resolve_password_file / resolve_member_and_password）＋输入与限幅（read_text / clamp_timeout）＋节流防轰炸（check_and_mark_dedup / rollback_dedup，含锁与原子落盘）＋上述实现的常量（MAX_TIMEOUT / DEFAULT_NATS_HOSTS / HB_PREFIX / REQ_FMT / DEDUP_WINDOW_SECONDS / DEFAULT_DEDUP_FILE）。不含任何群聊/会议语义（检查2 命中 0）；被 C team.py 与 L3 team_group.py 共同 import"
+    },
+    "agent-team/team_group.py": {
+      "layer": "L3",
+      "port": null,
+      "note": "L3 协作域：成员侧 CLI 的群聊 + 会议业务（刀15 阶段3 从 L1 team.py 逐字节搬入，零行为改变）。临时会议 meet（make_session_id / build_meeting_body / append_jsonl / cmd_meet）＋会议回放 history（cmd_history）＋临时群 group（_chat_call / _chat_member / _chat_error / cmd_group_say / cmd_group_pull / cmd_group_show）＋域内默认值（DEFAULT_MEETINGS_FILE / DEFAULT_CHAT_BASE）。依赖方向 L3→L1 team_cli_core；**不得 import 组合根 team.py**。等价证据 tools/equivalence/team_cli_equiv.py（CLI 级 56 例冻结矩阵）"
     },
     "agent-team/team_call.py": {
       "layer": "L1",
