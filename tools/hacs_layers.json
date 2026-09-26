@@ -31,7 +31,7 @@
     "agent-team/a2a_edge.py": {
       "layer": "L1",
       "port": 9920,
-      "note": "A2A 边缘端点实现（通行层：收发/鉴权/回合循环）。只声明能力端口（backend_of / session_headers / read_usage / pressure / get_routes），不 import 任何上层件；未注入时一律降级为「不知道」，绝不编造数字"
+      "note": "A2A 边缘端点实现（通行层：收发/鉴权/回合循环）。只声明能力端口（backend_of / session_headers / read_usage / pressure / get_routes），不 import 任何上层件；未注入时一律降级为「不知道」，绝不编造数字。阶段2 刀9：HTTP 面（应答出口 + 两个 do_* 的路径分派 + _read_body）收进 L1 web_gateway —— A2AHandler 继承 GW.handler_class()，路由改 @GW.route 登记表，请求体改 @GW.pre 读一次，响应形态三件套（server_version=a2a_svc/<VERSION> / sys_version=\\\"\\\" / HTTP/1.1）在子类覆盖；组合根 a2a_svc.py 不动，注入路由协议靠 req.svc = A2AHandler 实例本身保住"
     },
     "agent-team/a2a_svc.py": {
       "layer": "C",

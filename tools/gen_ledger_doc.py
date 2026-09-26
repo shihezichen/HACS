@@ -78,7 +78,7 @@ def layer_table(layer):
 BASELINE = {
     # 前两项由 check_layers.py 实时打印（'分层门禁 · 台账（件数 N，层间 import 边 M）'）——
     # 动结构后必须同步这两个数；下面其余各项是**刀 3 时点**的实测，不是随生成重算。
-    'files': 62, 'edges': 51, 'direction': 0, 'bizwords': 48,
+    'files': 62, 'edges': 52, 'direction': 0, 'bizwords': 48,
     'hardcode_files': 25, 'storage': 11, 'storage_over': 2,
     # 刀 3 后：宿主字面量拆成「真硬编码（路径）」与「提示级（IP/端口默认值）」两个口径。
     'host_path_files': 42, 'host_path_sites_before': 111, 'host_path_sites_after': 80,
@@ -591,8 +591,11 @@ HTML_HEAD = """<!DOCTYPE html>
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v5</b> · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c 与基线重算 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更（v5）：① 阶段 2 <b>刀 8a·8b</b> —— <code>chat_svc.py</code>（9980 / 9984 对话台）的<b>应答出口</b>、<b>非 GET 方法分派</b>（8a）与 <b>GET/HEAD 整张路由表 + 前端页服务</b>（8b）全部收进 L1 <code>web_gateway.py</code>；
+      版本 <b>v6</b> · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c·9 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v6）：① 阶段 2 <b>刀 9</b> —— <code>a2a_edge.py</code>（9920 A2A 端点）的 <b>HTTP 面</b>（应答出口 <code>_send_json</code>、两个 <code>do_*</code> 的路径分派、<code>_read_body</code>）收进 L1 <code>web_gateway.py</code>：<code>A2AHandler</code> 改继承 <code>GW.handler_class()</code>，路由改 <code>@GW.route</code> 登记表（<code>/healthz</code>、<code>/agents</code> 精确 + <code>/a2a</code> 的 GET/POST 前缀 + <code>@GW.not_found</code>），请求体改 <code>@GW.pre</code> 读一次并缓存；响应形态三件套（<code>server_version="a2a_svc/&lt;VERSION&gt;"</code> / <code>sys_version=""</code> / HTTP/1.1）在子类覆盖。<b>组合根 <code>a2a_svc.py</code> 一个字节未动</b>（已拍板：这一刀动的是 a2a_edge），注入路由协议靠把 <code>req.svc</code> 设为 <code>A2AHandler</code> 实例本身保住。<br>
+      ② 等价证据 <code>tools/equivalence/a2a_edge_equiv.py</code> <b>46/46</b> 逐例一致（原 23 例一字未改；新增 23 例 = 路径判据边角 12 + 带体 6（含 300KB &gt; MAX_BODY_BYTES 的超大体）+ <b>keep-alive 同连接裸字节</b> 5）；另做<b>独立复核</b>：以本刀开工前快照 <code>_old/a2a_edge_old_k9.py</code> 为旧侧、直接对照<b>改前 vs 改后 46/46</b>（不复用装置旧侧）；线上四台逐字节对照（13 条只读探针 × 4 节点 + keep-alive 面）<b>0 处不一致</b>，<code>deploy.py --status</code> 漂移 0、健康 <b>11/11</b>。<br>
+      ③ <b>3.2 基线重算</b>：登记件数 <b>62</b>（不变）、层间 import 边 51 → <b>52</b> —— <code>a2a_edge</code> 自本刀起 import L1 <code>web_gateway</code>（同层，方向合法），+1 条边。<br>
+      上一轮（v5）：① 阶段 2 <b>刀 8a·8b</b> —— <code>chat_svc.py</code>（9980 / 9984 对话台）的<b>应答出口</b>、<b>非 GET 方法分派</b>（8a）与 <b>GET/HEAD 整张路由表 + 前端页服务</b>（8b）全部收进 L1 <code>web_gateway.py</code>；
       等价证据 <code>tools/equivalence/chat_svc_http_equiv.py</code> <b>311/311</b> 逐字节一致（状态码 + 状态原因 + <b>有序</b>响应头 + 归一后正文），四台的 L1 已落（<code>deploy.py --status</code> 漂移 0、健康 11/11）。
       ② <b>刀 8c</b> —— 等价装置 FakeDB 的形状按生产契约真实化（<code>set_session_meta</code> / <code>memo_get</code> / <code>memo_write</code> / <code>list_messages</code> / <code>todos_purge</code>）：
       311 例<b>不再有任何一例走 500 兜底</b>（500 例数 19 → <b>0</b>，2xx 126 → 143），生产代码一字未动；同步更正 <code>_old/chat_svc_old.py</code> 的来源登记（实为源码仓 rev 1264482 逐字节副本）。

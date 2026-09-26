@@ -34,8 +34,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
+
+import web_gateway                 # L1 同层：HTTP 入口件（应答出口 + 路由分派，传输不含语义）
 
 # ---- 本仓版本说明（HACS 仓内为脱敏版，勿直接覆盖生产文件）-------------------
 # 来源：thinkbook 节点生产版 a2a_svc.py，VERSION 2.2。
@@ -121,10 +123,16 @@ _CAP_WARNED = set() # type: set
 
 
 def install_capabilities(caps: Dict[str, Any]) -> None:
-    """由组合根在引导期调用：注入本件声明的能力实现（整表替换）。"""
+    """由组合根在引导期调用：注入本件声明的能力实现（整表替换）。
+
+    阶段2 刀9 起多做一件事：把 `get_routes()` 给出的**注入前缀**登记进 L1 网关的
+    前缀路由表（见 `_register_extra_routes()`）—— 迁移前它们是 do_GET 里那个 for
+    循环，运行期才知道有哪些前缀，写不成模块级的 @GW.route。
+    """
     _CAPS.clear()
     _CAPS.update(caps or {})
     _CAP_WARNED.clear()
+    _register_extra_routes()
 
 
 def _cap(name: str) -> Optional[Any]:
@@ -451,35 +459,347 @@ def _single_round(agent: Dict[str, Any], messages: List[Dict[str, str]],
 
 
 # ---------------------------------------------------------------- HTTP 处理
+#
+# 「应答出口」与「路由分派」这两层**传输职责**交给同层的 L1 `web_gateway`（阶段2 刀9）：
+#   · `send_response` → 逐条写头 → `end_headers` → 写 socket → 客户端早断时吞异常，
+#     全在 L1 的 `_reply()` 里；JSON 编码与 `Content-Type` 默认值走 L1 的 `envelope()`。
+#   · 迁移前 do_GET / do_POST 里那两串**有序 if 链**，全部改成下面的 @GW.route 登记表；
+#     未命中的落 `@GW.not_found`（本件的 404 信封**没有** `path` 字段，用不了 L1 的默认 404）。
+#   · 迁移前两个 do_* 开头各一句 `self._read_body()`，改成 `@GW.pre` 钩子读一次。
+# 本件只剩三样 L1 给不了的东西：
+#   · 每个响应一行 `<方法> <路径> -> <码> from=<成员> ip=<ip>` 的日志（要带鉴权成员名）；
+#   · `sys_version=""` + HTTP/1.1（保住 `Server: a2a_svc/<VERSION>` 与 keep-alive；
+#     L1 默认 HTTP/1.0 且不清 sys_version，不覆盖的话 Server 头会多出 " Python/3.x"）；
+#   · **注入路由的既有协议**：`handler(handler_self, parts) -> bool`，其中 handler_self
+#     必须提供 `_auth_peer()` / `_send_json()` / `.path`（原始路径串，含 query）三个成员。
+#     组合根（层 C）本刀一个字节都不动，所以这里把 `req.svc`（= A2AHandler 实例本身）
+#     原样当 handler_self 传过去，三个成员因此必须留在 A2AHandler 上。
+#
+# **迁移前后的路由顺序怎么保住**：迁移前 do_GET 是 healthz → agents → 注入路由 →
+# agent-card → 404 的一串 if。迁移后 L1 的分派是「精确表优先 → 前缀表按长度降序」：
+# `/healthz`、`/agents` 是精确登记，天然排在所有前缀之前；注入前缀（如 `/ctx-usage`，
+# 10 字符）按长度排在 `/a2a`（4 字符）之前 —— 与迁移前一致。更要紧的是，「注入路由 →
+# agent-card → 404」这后三判被收成**一个** `_gw_get_tail()`，`/a2a` 前缀、注入前缀、
+# 兜底三处全落它，所以这三判的相对顺序在迁移后根本没有第二种可能。
 
-class A2AHandler(BaseHTTPRequestHandler):
+GW = web_gateway.Gateway("a2a_svc", version=VERSION, quiet=True)
+
+#: 登记的处理函数一律**推式写出**（自己调 `_send_json()`），回这个占位信封；
+#: `_dispatch_gw()` 看见 `self._sent` 为真就把它丢掉，绝不会发第二份响应。
+#: 之所以不改成「返式」：注入路由的协议（handler 自己调 `_send_json` 并回 bool）
+#: 是组合根那边的既有契约，本刀不许动它，于是本件出口统一保持推式。
+_SENT = (204, None, {})  # type: Tuple[int, Any, Dict[str, Any]]
+
+#: 已经登记进 GW 前缀表的注入前缀。L1 的 `route(prefix=True)` 是 append，
+#: 而 `install_capabilities()` 允许被重复调用（幂等），不去重就会在前缀表里堆重复项。
+_GW_EXTRA_PREFIXES = set()  # type: set
+
+
+def _parts(raw_path: str) -> List[str]:
+    """路径切段 —— 与迁移前 `A2AHandler._path_parts()` **逐字同一行**实现。
+
+    判据不能换成 L1 的 `Request.path`：`urlsplit()` 会把 `#fragment` 切掉、把 `//x`
+    当 netloc（于是 `//healthz` 的 path 是空串、切出来零段），空段则全丢（于是
+    `/a2a//tester/messages` 照旧算三段）。这些边角行为迁移前后必须一模一样。
+    """
+    return [p for p in urllib.parse.urlsplit(raw_path).path.split("/") if p]
+
+
+def _register_extra_routes() -> None:
+    """把注入前缀登记成 L1 的 **GET** 前缀路由（由 `install_capabilities()` 调用）。
+
+    只登记 GET：迁移前那个 `for prefix, handler in _extra_routes()` 循环只出现在
+    do_GET 里，do_POST 从来不查注入路由。
+
+    前缀在注入侧是**首段名**（如 "ctx-usage"），而 L1 的前缀匹配比的是带头斜杠的
+    归一化路径，故补一个 "/"。登记的处理函数一律是 `_gw_get_tail` —— 它内部仍
+    **逐条**跑 `_extra_routes()`（顺序与「返回 False 就往下走」的短路语义照旧），
+    所以两件事天然成立：
+      · 重复调用只需按前缀去重，不必也不能按 handler 去重；
+      · 换了一套能力表时，旧前缀即使留在表里也无害 —— `_gw_get_tail` 读的是**当下**
+        的 `_extra_routes()`，对不上就按迁移前的顺序继续往下走（agent-card → 404）。
+    """
+    for prefix, _handler in _extra_routes():
+        key = "/" + str(prefix).lstrip("/")
+        if key in _GW_EXTRA_PREFIXES:
+            continue
+        _GW_EXTRA_PREFIXES.add(key)
+        GW.route(key, _gw_get_tail, methods=("GET",), prefix=True)
+
+
+@GW.pre
+def _gw_pre(req: "web_gateway.Request") -> Any:
+    """所有方法的公共前奏：**先把请求体读完并缓存**。
+
+    迁移前 do_GET / do_POST 开头各有一句 `self._read_body()` —— GET 读完即弃、POST
+    拿去解 JSON，但「必须先读干」这件事两边一样：不读干的话 keep-alive 连接上的下一个
+    请求会错位。这里读一次、缓存到 `self._body_raw`，POST 那条路由直接用这份缓存，
+    裸字节语义（Content-Length 解析失败按 0、超限只读前 MAX_BODY_BYTES）一字未改。
+
+    **不加 try**：迁移前 `_read_body()` 是在 do_* 里同步抛的，抛出去由
+    BaseHTTPRequestHandler / socketserver 兜底；这里抛出去 L1 的 `dispatch()` 同样不接
+    （它只接 `HttpError`），落点与迁移前是同一处。
+    """
+    req.svc._body_raw = req.svc._read_body()
+    return None
+
+
+@GW.route("/healthz", methods=("GET",))
+def _gw_get_healthz(req: "web_gateway.Request") -> Any:
+    """GET /healthz —— **不鉴权**（探活得能匿名打）。迁移前 do_GET 的第 1 判。"""
+    req.svc._send_json(200, {"ok": True, "node": Runtime.node_id,
+                             "version": VERSION, "protocolVersion": PROTOCOL_VERSION,
+                             "agents": sorted(Runtime.agents.keys()),
+                             "ts": int(time.time())})
+    return _SENT
+
+
+@GW.route("/agents", methods=("GET",))
+def _gw_get_agents(req: "web_gateway.Request") -> Any:
+    """GET /agents —— 本机承载的成员清单。迁移前 do_GET 的第 2 判，逐行照搬。
+
+    **不做成 `@GW.auth` 全局鉴权钩子**：/healthz 与「未知路径」这两支迁移前根本不鉴权，
+    挂全局钩子会把它们从 200/404 变成 401（顺序行为就变了）。
+    """
+    svc = req.svc
+    peer = svc._auth_peer()
+    if peer is None:
+        svc._send_json(401, {"ok": False, "error": "unauthorized"})
+        return _SENT
+    listing = {}
+    for aid, cfg in Runtime.agents.items():
+        listing[aid] = {"description": cfg.get("description") or "",
+                        "skills": cfg.get("skills") or []}
+    svc._send_json(200, {"ok": True, "node": Runtime.node_id, "agents": listing}, peer)
+    return _SENT
+
+
+@GW.route("/a2a", methods=("GET",), prefix=True)
+def _gw_get_tail(req: "web_gateway.Request") -> Any:
+    """迁移前 do_GET 的**后三判**（注入路由 → agent-card → 兜底 404），原样一串。
+
+    这一个函数同时是三处的落点，正因为它就是「healthz / agents 都没命中之后剩下的
+    那一串 if」：
+      · `/a2a` 前缀路由（agent-card 那条）；
+      · `install_capabilities()` 动态登记的注入前缀（如 `/ctx-usage`）；
+      · `@GW.not_found` 的 GET 支 —— 其余一切未命中路径（`/`、`/nope`、`//healthz`…）。
+    三处跑同一串，顺序与短路语义就不可能跑偏；尤其「注入路由必须排在 agent-card
+    之前」这条，迁移前靠 if 的书写顺序，迁移后靠这里的书写顺序，仍是同一件事。
+    """
+    svc = req.svc
+    parts = req.parts
+
+    # 注入路由（组合根在引导期登记的能力端点，如 /ctx-usage/<agent_id>）。
+    # 本件只做**通用分发**：路径首段等于已登记 prefix 就交给它；语义与响应构造
+    # 全在注入方，本件不认识。handler 返回 True = 已应答；False = 继续往下走（含 404）。
+    # `svc` 就是 A2AHandler 实例，即注入协议里的 handler_self（见本节开头）。
+    for prefix, handler in _extra_routes():
+        if parts and parts[0] == prefix and handler(svc, parts):
+            return _SENT
+
+    # /a2a/<agent_id>/.well-known/agent-card.json —— 公开，不鉴权
+    if len(parts) == 4 and parts[0] == "a2a" and parts[2] == ".well-known" \
+            and parts[3] == "agent-card.json":
+        agent_id = parts[1]
+        cfg = Runtime.agents.get(agent_id)
+        if cfg is None:
+            svc._send_json(404, {"ok": False, "error": "unknown_agent"})
+            return _SENT
+        svc._send_json(200, build_agent_card(agent_id, cfg))
+        return _SENT
+
+    svc._send_json(404, {"ok": False, "error": "not_found"})
+    return _SENT
+
+
+@GW.route("/a2a", methods=("POST",), prefix=True)
+def _gw_post_messages(req: "web_gateway.Request") -> Any:
+    """POST /a2a/<agent_id>/messages —— 迁移前 do_POST 的全部内容，逐行照搬。
+
+    形状判定留在函数体内（`len(parts) == 3 and ... parts[2] == "messages"`），不交给
+    L1 的前缀匹配：L1 只认「归一化路径等于 /a2a 或以 /a2a/ 开头」，段数与末段名还得
+    自己判 —— 这正是迁移前 do_POST 的第一行 if，一字未改。形状不对落**裸** 404
+    （与 `@GW.not_found` 的 POST 支同一句文案）。
+    """
+    svc = req.svc
+    parts = req.parts
+    if not (len(parts) == 3 and parts[0] == "a2a" and parts[2] == "messages"):
+        svc._send_json(404, {"ok": False, "error": "not_found"})
+        return _SENT
+
+    peer = svc._auth_peer()
+    if peer is None:
+        svc._send_json(401, {"ok": False, "error": "unauthorized"})
+        return _SENT
+
+    agent_id = parts[1]
+    cfg = Runtime.agents.get(agent_id)
+    if cfg is None:
+        svc._send_json(404, {"ok": False, "error": "unknown_agent"})
+        return _SENT
+
+    # 请求体在 `@GW.pre` 里就读干了（迁移前是 do_POST 开头那句 `raw = self._read_body()`），
+    # 这里用的是同一份裸字节 —— 超限只读了前 MAX_BODY_BYTES，于是 JSON 解析失败 → 400，
+    # 与迁移前逐字一致。
+    raw = svc._body_raw
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except Exception:
+        svc._send_json(400, {"ok": False, "error": "bad_request"})
+        return _SENT
+    if not isinstance(body, dict):
+        svc._send_json(400, {"ok": False, "error": "bad_request"})
+        return _SENT
+
+    text = body.get("text")
+    if not isinstance(text, str) or not text.strip():
+        svc._send_json(400, {"ok": False, "error": "bad_request"})
+        return _SENT
+
+    try:
+        timeout_s = float(body.get("timeout_s") or DEFAULT_TIMEOUT_S)
+    except (TypeError, ValueError):
+        svc._send_json(400, {"ok": False, "error": "bad_request"})
+        return _SENT
+    if timeout_s <= 0:
+        timeout_s = DEFAULT_TIMEOUT_S
+
+    session_id = body.get("session_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        session_id = None
+    else:
+        session_id = session_id.strip()[:SESSION_ID_MAX]
+    started = time.time()
+    code, result = call_backend(cfg, text, timeout_s, session_id=session_id, caller=peer)
+    elapsed_ms = int((time.time() - started) * 1000)
+
+    if code != 200:
+        svc._send_json(code, result)
+        return _SENT
+    # 透传续跑循环元数据（B2）：loop_rounds=实际跑了多少轮，loop_stop=为何停下
+    # （done / blocked / max_rounds / budget / round_error）。单回合时这两项缺省。
+    resp = {"ok": True, "agent": agent_id, "reply": result["reply"],
+            "elapsed_ms": elapsed_ms, "session_id": session_id,
+            "peer": peer}
+    if "loop_rounds" in result:
+        resp["loop_rounds"] = result["loop_rounds"]
+    if "loop_stop" in result:
+        resp["loop_stop"] = result["loop_stop"]
+    svc._send_json(200, resp, peer)
+    return _SENT
+
+
+@GW.not_found
+def _gw_not_found(req: "web_gateway.Request") -> Any:
+    """没登记的路径。
+
+    · GET —— 转 `_gw_get_tail()`：迁移前 healthz / agents 之外的 GET **一律**要过
+      「注入路由 → agent-card → 404」这一串，未知路径也不例外（注入方完全可能登记一个
+      本件不认识的前缀，那时这一跳就是它的入口）。
+    · POST —— 落**裸** 404，与迁移前 do_POST 末尾那一行逐字一致（**没有** `path` 字段，
+      所以不能用 L1 的 `_default_not_found`）。
+    · 其余方法到不了这里：`handler_class()` 会把没登记的 do_<METHOD> 删掉，
+      PUT / DELETE / PATCH / HEAD / OPTIONS 照旧落基类的 501。
+    """
+    if req.method == "GET":
+        return _gw_get_tail(req)
+    req.svc._send_json(404, {"ok": False, "error": "not_found"})
+    return _SENT
+
+
+# 必须在全部 @GW.route 之后取：`handler_class()` 会按「已登记的方法」删掉多余的
+# do_<METHOD>。本件只登记 GET / POST，于是 PUT / DELETE / PATCH / HEAD / OPTIONS
+# 全被删掉、落回基类的 501 —— 与迁移前「A2AHandler 只有 do_GET / do_POST」逐字一致。
+# 注入前缀是运行期（`install_capabilities()`）才登记的，排在本行之后，但它们**只登记
+# GET**，而 GET 在这一行之前已经有登记，方法集合不变 —— 所以删法不受影响。
+_GatewayHandler = GW.handler_class()
+
+
+class A2AHandler(_GatewayHandler):
+    """L1 网关处理器 + 本件特有的差异（阶段2 刀9）。
+
+    应答出口与路由分派都沿用同层的 `web_gateway`；这里只留三样：响应形态三件套、
+    带成员名的那行日志，以及注入路由协议要求 handler_self 提供的三个成员
+    （`_auth_peer()` / `_send_json()` / `.path`）。
+    """
+
     # 注意：server_version 是**线上协议身份**（Server 响应头），不是模块名 ——
     # 抽件不改对外可见行为，故保持 "a2a_svc/<版本>" 原样。
+    # sys_version / protocol_version 也必须在这里覆盖：L1 的 GatewayHandler 用的是
+    # 基类默认的 sys_version（"Python/3.x"）和 HTTP/1.0，照抄就会多出一截 Server 头、
+    # 并丢掉 keep-alive。
     server_version = "a2a_svc/" + VERSION
     sys_version = ""
     protocol_version = "HTTP/1.1"
 
+    #: 本次请求是否已经写出响应（登记的处理函数一律推式出口，见 `_SENT`）。
+    #: keep-alive 上同一个 handler 实例要服务多个请求，所以每次进 `_dispatch_gw()` 都重置。
+    _sent = False
+    #: `@GW.pre` 读干并缓存的请求体裸字节（POST 那条路由解 JSON 用的就是它）。
+    _body_raw = b""
+
     # --- 基础工具 -------------------------------------------------
     def log_message(self, fmt: str, *args: Any) -> None:
-        """屏蔽 BaseHTTPRequestHandler 默认的 stderr 日志，统一由 _send_json 打一行。"""
+        """屏蔽 BaseHTTPRequestHandler 默认的 stderr 日志，统一由 _send_json 打一行。
+        （L1 的 quiet=True 已经接管了一层，这里照旧显式留着，口径不变。）"""
         return
+
+    # --- 入口：两个方法的路由分派全在 L1 ---------------------------
+    def do_GET(self) -> None:  # noqa: N802
+        self._dispatch_gw()
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._dispatch_gw()
+
+    def _dispatch_gw(self) -> None:
+        """GET / POST 的统一入口：路由分派交给 L1（模块顶部的 @GW.route 登记表）。
+
+        三处覆盖缺一不可：
+          · `req.path` —— L1 的 `Request` 只做 `partition("?")`，**不剥 #fragment**；
+            迁移前判路径用的是 `urlsplit()`，`/healthz#x` 在它眼里就是 `/healthz`。
+            不覆盖的话这类路径会从 200 变成 404。
+          · `req.parts` —— 各路由内部的判据仍是迁移前那份 parts（见 `_parts()`），
+            于是 `/a2a//tester/messages` 照旧当三段认、`//healthz` 照旧切出零段。
+          · `req.svc` —— 注入路由协议里的 handler_self（见本节开头）。
+        登记的处理函数一律自己调 `_send_json()` 写出、回占位信封，所以 `self._sent`
+        为真时直接把信封丢掉，绝不发第二份响应。
+
+        **不加 try**：迁移前 do_GET / do_POST 就没有兜底 except，异常照旧往上抛给
+        BaseHTTPRequestHandler / socketserver。
+        """
+        self._sent = False
+        raw = self.path
+        req = web_gateway.Request(self)
+        req.svc = self
+        req.raw_path = raw
+        req.path = urllib.parse.urlsplit(raw).path.rstrip("/") or "/"
+        req.parts = _parts(raw)
+        status, body, headers = GW.dispatch(req)
+        if not self._sent:          # 兜底：理论上走不到（每条路径都写过）
+            self._reply(status, body, headers)
 
     def _send_json(self, code: int, payload: Dict[str, Any],
                    peer: Optional[str] = None) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except Exception:
-            pass
+        """本件唯一的 JSON 应答出口；socket 那一段全在 L1 的 `_reply()` 里
+        （写头 / end_headers / 写体 / 客户端早断时吞异常，迁移前那个 try 就是它）。
+
+        头的顺序就是发出去的字节顺序：Content-Type（L1 的 `envelope()` 补上，值与
+        迁移前逐字相同）→ Content-Length。Content-Length 在这里显式补，口径与
+        迁移前的 `send_header("Content-Length", str(len(body)))` 一致。
+        日志仍是**先写响应、后记一行**，字段与顺序一字未动。
+        """
+        code, body, out = web_gateway.envelope(code, payload)
+        out["Content-Length"] = str(len(body))
+        self._sent = True
+        self._reply(code, body, out)
         LOG.info("%s %s -> %d from=%s ip=%s", self.command, self.path, code,
                  peer or "-", self.client_address[0] if self.client_address else "-")
 
     def _read_body(self) -> bytes:
-        """必须读完请求体，否则 keep-alive 连接会错位。"""
+        """必须读完请求体，否则 keep-alive 连接会错位。
+
+        迁移后由 `@GW.pre` 调（迁移前是两个 do_* 各调一次），函数体一字未改。
+        """
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -511,118 +831,6 @@ class A2AHandler(BaseHTTPRequestHandler):
             if hmac.compare_digest(digest, known):
                 matched = pid
         return matched
-
-    def _path_parts(self) -> List[str]:
-        path = urllib.parse.urlsplit(self.path).path
-        return [p for p in path.split("/") if p]
-
-    # --- 路由 -----------------------------------------------------
-    def do_GET(self) -> None:  # noqa: N802
-        self._read_body()
-        parts = self._path_parts()
-
-        if parts == ["healthz"]:
-            self._send_json(200, {"ok": True, "node": Runtime.node_id,
-                                  "version": VERSION, "protocolVersion": PROTOCOL_VERSION,
-                                  "agents": sorted(Runtime.agents.keys()),
-                                  "ts": int(time.time())})
-            return
-
-        if parts == ["agents"]:
-            peer = self._auth_peer()
-            if peer is None:
-                self._send_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            listing = {}
-            for aid, cfg in Runtime.agents.items():
-                listing[aid] = {"description": cfg.get("description") or "",
-                                "skills": cfg.get("skills") or []}
-            self._send_json(200, {"ok": True, "node": Runtime.node_id, "agents": listing}, peer)
-            return
-
-        # 注入路由（组合根在引导期登记的能力端点，如 /ctx-usage/<agent_id>）。
-        # 本件只做**通用分发**：路径首段等于已登记 prefix 就交给它；语义与响应构造
-        # 全在注入方，本件不认识。handler 返回 True = 已应答；False = 继续往下走（含 404）。
-        for prefix, handler in _extra_routes():
-            if parts and parts[0] == prefix and handler(self, parts):
-                return
-
-        # /a2a/<agent_id>/.well-known/agent-card.json —— 公开，不鉴权
-        if len(parts) == 4 and parts[0] == "a2a" and parts[2] == ".well-known" \
-                and parts[3] == "agent-card.json":
-            agent_id = parts[1]
-            cfg = Runtime.agents.get(agent_id)
-            if cfg is None:
-                self._send_json(404, {"ok": False, "error": "unknown_agent"})
-                return
-            self._send_json(200, build_agent_card(agent_id, cfg))
-            return
-
-        self._send_json(404, {"ok": False, "error": "not_found"})
-
-    def do_POST(self) -> None:  # noqa: N802
-        raw = self._read_body()
-        parts = self._path_parts()
-
-        if not (len(parts) == 3 and parts[0] == "a2a" and parts[2] == "messages"):
-            self._send_json(404, {"ok": False, "error": "not_found"})
-            return
-
-        peer = self._auth_peer()
-        if peer is None:
-            self._send_json(401, {"ok": False, "error": "unauthorized"})
-            return
-
-        agent_id = parts[1]
-        cfg = Runtime.agents.get(agent_id)
-        if cfg is None:
-            self._send_json(404, {"ok": False, "error": "unknown_agent"})
-            return
-
-        try:
-            body = json.loads(raw.decode("utf-8"))
-        except Exception:
-            self._send_json(400, {"ok": False, "error": "bad_request"})
-            return
-        if not isinstance(body, dict):
-            self._send_json(400, {"ok": False, "error": "bad_request"})
-            return
-
-        text = body.get("text")
-        if not isinstance(text, str) or not text.strip():
-            self._send_json(400, {"ok": False, "error": "bad_request"})
-            return
-
-        try:
-            timeout_s = float(body.get("timeout_s") or DEFAULT_TIMEOUT_S)
-        except (TypeError, ValueError):
-            self._send_json(400, {"ok": False, "error": "bad_request"})
-            return
-        if timeout_s <= 0:
-            timeout_s = DEFAULT_TIMEOUT_S
-
-        session_id = body.get("session_id")
-        if not isinstance(session_id, str) or not session_id.strip():
-            session_id = None
-        else:
-            session_id = session_id.strip()[:SESSION_ID_MAX]
-        started = time.time()
-        code, result = call_backend(cfg, text, timeout_s, session_id=session_id, caller=peer)
-        elapsed_ms = int((time.time() - started) * 1000)
-
-        if code != 200:
-            self._send_json(code, result)
-            return
-        # 透传续跑循环元数据（B2）：loop_rounds=实际跑了多少轮，loop_stop=为何停下
-        # （done / blocked / max_rounds / budget / round_error）。单回合时这两项缺省。
-        resp = {"ok": True, "agent": agent_id, "reply": result["reply"],
-                "elapsed_ms": elapsed_ms, "session_id": session_id,
-                "peer": peer}
-        if "loop_rounds" in result:
-            resp["loop_rounds"] = result["loop_rounds"]
-        if "loop_stop" in result:
-            resp["loop_stop"] = result["loop_stop"]
-        self._send_json(200, resp, peer)
 
 
 def build_agent_card(agent_id: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -729,6 +937,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if Runtime.allow_anon:
         LOG.warning("A2A_ALLOW_ANON=1 已开启，鉴权被跳过（仅限本地调试）")
 
+    # 起服务这两行**刀9 没动**：L1 的 `GW.serve()` 会用 `GW.handler_class()` 现造一个
+    # **裸的** GatewayHandler（HTTP/1.0、没有 `_send_json` / `_auth_peer` / `_read_body`），
+    # 用它起服务等于把本件的响应形态与注入路由协议全丢掉；必须绑本件自己的 A2AHandler
+    # 子类。内部形态与 `GW.serve()` 完全一样（ThreadingHTTPServer + daemon_threads=True），
+    # 同层的 blackboard_svc / cli_backend / chat_svc 迁移后也都是这么写的。
     httpd = ThreadingHTTPServer((args.host, args.port), A2AHandler)
     httpd.daemon_threads = True
     bound_host, bound_port = httpd.server_address[0], httpd.server_address[1]

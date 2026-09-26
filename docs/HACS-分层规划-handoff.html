@@ -77,8 +77,9 @@
     <h1>HACS 分层规划 · Handoff</h1>
     <div class="sub">Human-Agent Communication System — 分层与解耦方案（资深架构评审结论）</div>
     <div class="verline">
-      <b>v9</b> · 刷新日期 <b>2026-09-25</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5，刀 5 升 v6，刀 6 升 v7，刀 7a 升 v8，刀 7b 升 v9<br>
+      <b>v11</b> · 刷新日期 <b>2026-09-26</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5，刀 5 升 v6，刀 6 升 v7，刀 7a 升 v8，刀 7b 升 v9，刀 8a·8b·8c 升 v10，刀 9 升 v11<br>
       本次内容：对「通行层 / 前台层」两分法的评审 → 五层 + 三横切 + 组合根的目标划分 → 七条解耦判据 → 四处最痛耦合 → 六阶段落地计划<br>
+      <b>v11 变更（仅进度标注，方案未改）：</b>阶段 2 刀 <b>8a·8b·8c</b> 与 <b>9</b> 落地 —— <code>chat_svc.py</code> 的 HTTP 面（应答出口 / 非 GET 方法分派 / GET+HEAD 整张路由表 + 前端页服务）已收进 L1 <code>web_gateway.py</code>（等价 311/311）；<code>a2a_edge.py</code> 的 HTTP 面同样收进 L1（<code>A2AHandler</code> 继承 <code>GW.handler_class()</code>、路由改 <code>@GW.route</code> 登记表、请求体改 <code>@GW.pre</code> 读一次，<b>组合根 <code>a2a_svc.py</code> 一个字节未动</b>，等价 46/46 + 线上四台逐字节 0 处不一致）。判据与分期未改；逐刀证据与最新基线数字见台账（v6）。<br>
       <b>v9 变更（仅进度标注，方案未改）：</b>刀 <b>7b</b> 落地 —— 把 L3 <code>blackboard_svc.py</code> 的
       <b><code>do_GET</code> 路由判定收进 L1 <code>web_gateway.py</code></b>，刀 7 两刀合起来<b>收完</b>：本件的 HTTP 面
       现在只剩「路径 → 处理函数」的登记表加三处差异覆盖（响应形态 / 应答出口 / 路径归一），
@@ -606,7 +607,7 @@
 </table>
 
 <footer>
-  HACS 分层规划 · Handoff v9 · 2026-09-25 · 性质：规划中（阶段 1 刀 1+2+3、阶段 2 刀 1+2、阶段 4 刀 4、刀 5、刀 6、刀 7a+7b 已落地）<br>
+  HACS 分层规划 · Handoff v11 · 2026-09-26 · 性质：规划中（阶段 1 刀 1+2+3、阶段 2 刀 1+2、阶段 4 刀 4、刀 5、刀 6、刀 7a+7b、刀 8a+8b+8c、刀 9 已落地）<br>
   数字来自当日代码快照，会漂移；落地前请复核。本文件即该规划的唯一权威版本，改动请升版本号。
 </footer>
 
