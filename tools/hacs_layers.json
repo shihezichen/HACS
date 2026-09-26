@@ -416,7 +416,8 @@
         "follow_up": "承接件 agent-team/node_profile.py 的层标是 L0，而 L0 仍在 storage_handle_forbidden_layers 里 —— 检查4 因此对它打 ⚠ 且无例外可循。本刀**不动判据**（契约明令不许放宽），把口子如实留在这里：要么认「L0 nodelet 的探针职责本就包含只读宿主真源」而把 L0 移出禁止层，要么给 node_profile.py 登记一条新例外。二选一由主控定，另开一刀。"
       }
     ],
-    "host_path_owner": "agent-team/node_paths.py"
+    "host_path_owner": "agent-team/node_profile.py",
+    "host_path_owner_readme": "口径（刀22 阶段4 更新）：**宿主事实的真源 = L0 节点档案 agent-team/node_profile.py**；同层 agent-team/node_paths.py 是**本机路径默认值的委托面**（它持有的 runtime/etc/log/node/claude/codex/pi 那组字面量仍是合法去处，检查3 只扫 L1–L4，L0 两件都不在扫描面内）。本键是单值字符串（check_hardcode 按 endswith 匹配），只能写一个，故写真源那一件；两件都是 L0，语义上共同构成「宿主字面量的唯一合法去处」。刀22 把散在 13 个非 L0 件里的 15 处非环回宿主事实（协作域节点地址 ×12、绝对路径常量 ×3）收进 node_profile.py 的 ⑧⑨ 两组，调用方 env 变量名与覆盖优先级一字未改。收口后检查3 在 L1–L4 的**非环回**命中 = 0；余下命中全是 127.0.0.1 等本地环回默认（合法，不收）与 3 处正则串被 PATH_RX 误判（blackboard_svc.py 的 `Z:\\-+.`、cli_backend.py 的 `d:\\s*(...)`、session_ctx_archiver.py 的 `n:\\n((?:[`），均非宿主事实。"
   },
   "ports": {
     "_readme": "端口登记（全节点同号；绑定面见各件源码的 --host）",

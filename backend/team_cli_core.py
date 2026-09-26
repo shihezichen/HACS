@@ -26,6 +26,7 @@ import tempfile
 import threading
 import time
 import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
+import node_profile as _npf  # L0 节点档案：宿主事实唯一真源（NATS 集群串；env 优先）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -37,9 +38,9 @@ MAX_TIMEOUT = 300.0
 DEFAULT_TIMEOUT = 120.0
 # 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime_dir()
-# 兜底默认值集中到 L0 node_paths（env 优先）
+# 兜底默认值集中到 L0 node_profile（env 优先）
 AGENT_TEAM_NATS_HOST = (os.environ.get("AGENT_TEAM_NATS_HOST")
-                        or "<host>:9930,<node-ip>:9930")  # <NODE_IP_1> 主 / <NODE_IP_2> 备
+                        or _npf.nats_hosts_default())  # <NODE_IP_1> 主 / <NODE_IP_2> 备
 DEFAULT_NATS_HOSTS = AGENT_TEAM_NATS_HOST
 DEFAULT_PORT = 9930
 HB_PREFIX = "team.hb."

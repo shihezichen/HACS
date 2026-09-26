@@ -24,9 +24,10 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from nats_client import NatsClient, NatsError, read_secret_file  # noqa: E402
+import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（NATS 中枢；env 优先）
 
 # PHASE2_TODO: 待节点注入 env 后删除
-DEFAULT_HOST = os.environ.get("AGENT_TEAM_NATS_HOST") or "<host>"
+DEFAULT_HOST = os.environ.get("AGENT_TEAM_NATS_HOST") or _npf.nats_host_default()
 DEFAULT_PORT = 9930
 MAX_TIMEOUT_S = 300.0
 

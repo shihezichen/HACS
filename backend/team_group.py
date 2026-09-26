@@ -32,6 +32,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（对话台基址；env 优先）
+
 from team_cli_core import (  # noqa: E402
     TeamCliError,
     call_one,
@@ -46,8 +48,8 @@ from team_cli_core import (  # noqa: E402
 
 DEFAULT_MEETINGS_FILE = os.path.join(os.path.expanduser("~"), ".team_meetings.jsonl")
 #: 人机对话台（群的家）—— 群消息走 HTTP 落库，NATS 只管唤醒通知（契约 §I）
-# 兜底默认值集中到 L0 node_paths（env 优先）
-DEFAULT_CHAT_BASE = os.environ.get("AGENT_TEAM_CHAT_BASE") or os.environ.get("TEAM_CHAT_BASE") or "http://<host>:9984"
+# 兜底默认值集中到 L0 node_profile（env 优先）
+DEFAULT_CHAT_BASE = os.environ.get("AGENT_TEAM_CHAT_BASE") or os.environ.get("TEAM_CHAT_BASE") or _npf.chat_base_default()
 
 
 # ---------------------------------------------------------------- meet：临时会议

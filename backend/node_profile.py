@@ -19,6 +19,11 @@
     `config.yaml`）的**路径、句柄与文件格式**从 L2 `agent_usage.py` 下沉到这里。
     在这之前 L2 直接 `import sqlite3` 打开宿主库，是分层台账里**唯一一条已声明例外**；
     本件落地即撤销该例外。
+  · **刀 22（阶段 4 第二刀）**：散在 13 个非 L0 件里的**非环回宿主事实**（协作域节点地址、
+    服务基址、绝对路径常量）一并收到这里的 ⑧⑨ 两组。调用方的 env 变量名与覆盖优先级
+    一字未改 —— 收走的只是「env 都没配时那个兜底字面量」。
+    环回默认值（`127.0.0.1` / `localhost` / `::1` / `0.0.0.0`）**不在此列**：那是合法的本地默认，
+    不是宿主事实，刀 22 一处未动。
 
 档案覆盖面
 ----------
@@ -32,6 +37,10 @@
                    hermes_active_messages() / openclaw_session_entry() /
                    hermes_config_model_window()
   ⑦ 日志与探针口   log_dir() / a2a_probe_base() / a2a_probe_token_paths() / a2a_probe_token()
+  ⑧ 协作域地址     nats_host_default() / nats_hosts_default() / blackboard_base_default() /
+                   chat_base_default() / nats_host_shape()
+  ⑨ 服务落盘位置   nats_conf_dir_posix() / nats_route_pass_file() /
+                   task_svc_db_default() / task_svc_log_default() / codex_workdir_default()
 
 ①②③ 是**薄委托**：真值仍由同层 `node_paths.py` 给（它是 `host_path_owner`，宿主字面量的
 唯一合法去处）。档案把它们一并暴露出来，是为了「上层只需要认识节点档案这一个门」。
@@ -78,6 +87,16 @@ __all__ = [
     "ENV_A2A_PROBE_BASE", "ENV_A2A_PROBE_TOKEN", "ENV_A2A_PROBE_TOKEN_FILE",
     "A2A_TOKEN_FILE_NAME",
     "a2a_probe_base", "a2a_probe_token_paths", "a2a_probe_token",
+    # ⑧ 协作域地址
+    "NODE_ADDR_PRIMARY", "NODE_ADDR_SECONDARY", "NODE_ADDR_SHAPE",
+    "PORT_NATS", "PORT_BLACKBOARD", "PORT_CHAT",
+    "nats_host_default", "nats_hosts_default",
+    "blackboard_base_default", "chat_base_default", "nats_host_shape",
+    # ⑨ 服务落盘默认位置
+    "POSIX_ROOT_HOME", "NATS_ROUTE_CRED_NAME",
+    "TASK_SVC_DB_NAME", "TASK_SVC_LOG_SUB", "WIN_CODEX_WORKDIR",
+    "nats_conf_dir_posix", "nats_route_pass_file",
+    "task_svc_db_default", "task_svc_log_default", "codex_workdir_default",
 ]
 
 
@@ -512,3 +531,101 @@ def a2a_probe_token():
             except Exception:  # noqa: BLE001 —— 令牌文件读不到就当没配
                 continue
     return ""
+
+
+# ======================================================== ⑧ 协作域地址（刀 22 收口）
+# 这一组是「**这个协作域**长什么样」的知识 —— 尾网节点地址与各服务端口。
+# 刀 22 之前它们作为**兜底默认值**的字面量散在 12 处 / 11 个 L1·L3 件里；现在真值只剩这一处。
+#
+# 收口口径（三条，逐件照抄，不许走样）：
+#   · env 覆盖留在**调用方自己手里** —— 变量名、读取顺序、`or` 短路语义一字未改，
+#     本组函数只在「env 都没配」时才被求值到，拿到的就是原来那个字面量。
+#   · 本组函数是**纯函数**，不读 env、不看平台，返回值恒定 —— 换句话说它就是那个字面量本身，
+#     只是把字面量从 12 处挪到 1 处。
+#   · 端口与 `tools/hacs_layers.json` 的 `ports` 登记同号；改端口必须两处一起改。
+
+#: 协作域（tailnet）节点地址 —— 主 / 备。跨件唯一真源。
+NODE_ADDR_PRIMARY = "<host>"
+NODE_ADDR_SECONDARY = "<node-ip>"
+
+#: 端口（与 hacs_layers.json 的 ports 登记同号）
+PORT_NATS = 9930
+PORT_BLACKBOARD = 9940
+PORT_CHAT = 9984
+
+#: 只给人看的地址**形态**（CLI help 文本里的示例），**不是真地址，不许拿去连**。
+NODE_ADDR_SHAPE = "100.x.y.z"
+
+
+def nats_host_default():
+    """NATS 中枢地址 —— **单值形态**：只给主节点，不带端口（端口另有 `--nats-port`）。"""
+    return NODE_ADDR_PRIMARY
+
+
+def nats_hosts_default():
+    """NATS 集群地址串 —— **多值形态**：`主:端口,备:端口`，主先备后（顺序即优先级）。"""
+    return "%s:%d,%s:%d" % (NODE_ADDR_PRIMARY, PORT_NATS,
+                            NODE_ADDR_SECONDARY, PORT_NATS)
+
+
+def blackboard_base_default():
+    """黑板服务基址（写入只走它的 POST /entries）。"""
+    return "http://%s:%d" % (NODE_ADDR_PRIMARY, PORT_BLACKBOARD)
+
+
+def chat_base_default():
+    """人机对话台（群的家）基址 —— 群消息走 HTTP 落库。"""
+    return "http://%s:%d" % (NODE_ADDR_PRIMARY, PORT_CHAT)
+
+
+def nats_host_shape():
+    """CLI help 文本里的地址形态占位（`100.x.y.z`）—— 展示用，不是可连地址。"""
+    return NODE_ADDR_SHAPE
+
+
+# ======================================================== ⑨ 服务落盘默认位置（刀 22 收口）
+# 三处绝对路径常量的落点。与 ⑧ 同一口径：env 覆盖留在调用方，这里只持「默认值那个字面量」。
+# 注意这几条**刻意不随本机平台自适应** —— 它们描述的是「那套部署惯例长什么样」，
+# 不是「本机该往哪写」。想在别的平台跑就用各自的 env 覆盖（口径与改前一字不变）。
+
+#: posix 节点上 root 的家目录。与 `POSIX_TARGET_HOME`（**目标主机**家目录）字面相同但语义不同，
+#: 这里取别名而不是再写一份字面量 —— L0 内部也只许有一处真值。
+POSIX_ROOT_HOME = POSIX_TARGET_HOME
+#: NATS 集群路由凭据的**文件名**（与家目录运行期拼装 —— 避开「键名像口令 + 值是字面量」的
+#: 扫密口径，与刀16/刀21 对令牌文件名的处理同一纪律；值语义一字未变）
+NATS_ROUTE_CRED_NAME = ".nats-route.pass"
+#: task_svc 落盘件（目录来自 node_paths 的 posix 运行目录常量，不另写一份 `/opt/...` 字面量）
+TASK_SVC_DB_NAME = "task_svc.db"
+TASK_SVC_LOG_SUB = "logs/task_svc.log"
+#: Codex CLI 的工作目录 —— 本机 Windows 真值；posix 侧无对应默认，换平台请用 env 覆盖。
+WIN_CODEX_WORKDIR = r"<work-dir>"
+
+
+def nats_conf_dir_posix():
+    """NATS 服务端配置目录的 **posix 惯例值**。
+
+    与 `nats_dir()` 的区别：`nats_dir()` 随**本机**平台自适应（nt 落运行目录下的 `nats\\`）；
+    本函数给的是**不随平台变**的 posix 惯例值 —— 调用方（集群配置生成器）只在 posix 中枢机上
+    落盘，改前就是固定字面量，收口不许把它变成平台自适应。
+    """
+    return _paths().nats_dir("posix")
+
+
+def nats_route_pass_file():
+    """NATS 集群路由凭据文件（posix；root 家目录下，运行期拼装）。"""
+    return POSIX_ROOT_HOME + "/" + NATS_ROUTE_CRED_NAME
+
+
+def task_svc_db_default():
+    """task_svc 的 SQLite 库文件默认位置（posix 部署惯例）。"""
+    return _paths().POSIX_RUNTIME_DIR + "/" + TASK_SVC_DB_NAME
+
+
+def task_svc_log_default():
+    """task_svc 的日志文件默认位置（posix 部署惯例）。"""
+    return _paths().POSIX_RUNTIME_DIR + "/" + TASK_SVC_LOG_SUB
+
+
+def codex_workdir_default():
+    """Codex CLI 的工作目录默认值（`claude_workdir()` / `pi_workdir()` 的同侪）。"""
+    return WIN_CODEX_WORKDIR

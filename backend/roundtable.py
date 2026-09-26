@@ -81,6 +81,7 @@ import urllib.request
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
+import node_profile as _npf  # L0 节点档案：宿主事实唯一真源（黑板基址 / NATS 中枢；env 优先）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -2280,11 +2281,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", default=None, help="从 PG 里已有的 session_id 续跑")
     parser.add_argument("--dsn-file", default=os.environ.get("AGENT_TEAM_PG_ENV_FILE") or (AGENT_TEAM_ETC_DIR + "/pg.env"),
                         help="systemd 环境文件，从中取 BB_PG_DSN=")
-    parser.add_argument("--blackboard", default=os.environ.get("AGENT_TEAM_BB_BASE") or "http://<host>:9940",
+    parser.add_argument("--blackboard", default=os.environ.get("AGENT_TEAM_BB_BASE") or _npf.blackboard_base_default(),
                         help="黑板服务地址（写入只走它的 POST /entries）")
     parser.add_argument("--token-file", default=os.environ.get("AGENT_TEAM_TOKEN_FILE") or (AGENT_TEAM_ETC_DIR + "/client-token"),
                         help="黑板 / A2A 的 Bearer token 文件路径")
-    parser.add_argument("--nats-host", default=os.environ.get("AGENT_TEAM_NATS_HOST") or "<host>", help="NATS 中枢地址")
+    parser.add_argument("--nats-host", default=os.environ.get("AGENT_TEAM_NATS_HOST") or _npf.nats_host_default(), help="NATS 中枢地址")
     parser.add_argument("--nats-port", type=int, default=9930, help="NATS 端口，默认 9930")
     parser.add_argument("--nats-user", default=None, help="自己的 NATS 用户名")
     parser.add_argument("--nats-password-file", default=None, help="自己的 NATS 口令文件")

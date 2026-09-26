@@ -89,6 +89,7 @@ import http.cookies
 import ipaddress
 import json
 import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
+import node_profile as _npf  # L0 节点档案：宿主事实唯一真源（协作域基址；env 优先）
 import logging
 import os
 import re
@@ -112,8 +113,8 @@ AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime
 AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
 # 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_DOMAIN = os.environ.get("AGENT_TEAM_DOMAIN") or "example.com"
-# 兜底默认值集中到 L0 node_paths（env 优先）
-AGENT_TEAM_BB_BASE = os.environ.get("AGENT_TEAM_BB_BASE") or "http://<host>:9940"
+# 兜底默认值集中到 L0 node_profile（env 优先）
+AGENT_TEAM_BB_BASE = os.environ.get("AGENT_TEAM_BB_BASE") or _npf.blackboard_base_default()
 
 DEFAULT_UPSTREAM = AGENT_TEAM_BB_BASE
 DEFAULT_TOKEN_FILE = os.environ.get("AGENT_TEAM_TOKEN_FILE") or AGENT_TEAM_ETC_DIR + "/client-token"

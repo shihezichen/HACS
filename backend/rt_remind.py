@@ -47,6 +47,7 @@ import os
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
+import node_profile as _npf  # L0 节点档案：宿主事实唯一真源（NATS 中枢；env 优先）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -549,7 +550,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S,
                         help="单次点名等回包上限秒，默认 %d（最大 %d）"
                              % (DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S))
-    parser.add_argument("--nats-host", default=os.environ.get("AGENT_TEAM_NATS_HOST") or "<host>", help="NATS 中枢地址")
+    parser.add_argument("--nats-host", default=os.environ.get("AGENT_TEAM_NATS_HOST") or _npf.nats_host_default(), help="NATS 中枢地址")
     parser.add_argument("--nats-port", type=int, default=9930, help="NATS 端口，默认 9930")
     parser.add_argument("--nats-user", default=None, help="自己的 NATS 用户名")
     parser.add_argument("--nats-password-file", default=None, help="自己的 NATS 口令文件")

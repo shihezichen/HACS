@@ -38,6 +38,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from nats_client import NatsClient, read_secret_file  # noqa: E402
+import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（help 文本里的地址形态）
 
 MAX_TIMEOUT = 300.0
 DEFAULT_TIMEOUT = 120.0
@@ -162,7 +163,7 @@ def main(argv=None):
     ap.add_argument("--text-file", default=None, help="正文文件（UTF-8）")
     ap.add_argument("--subject", default="群发", help="主题标签（仅记录/展示用）")
     ap.add_argument("--session-id", default=None, help="会话 id（同一 id 各成员有上下文）")
-    ap.add_argument("--nats-host", required=True, help="NATS 中枢地址（如 <host>）")
+    ap.add_argument("--nats-host", required=True, help="NATS 中枢地址（如 %s）" % _npf.nats_host_shape())
     ap.add_argument("--nats-port", type=int, default=9930, help="NATS 端口（默认 9930）")
     ap.add_argument("--user", required=True, help="自己的 NATS 用户名（通常 hermes）")
     ap.add_argument("--password-file", required=True, help="NATS 口令文件")

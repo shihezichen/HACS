@@ -30,6 +30,7 @@ import time
 import urllib.error
 import urllib.request
 import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
+import node_profile as _npf  # L0 节点档案：宿主事实唯一真源（协作域基址 / NATS 集群串；env 优先）
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -37,10 +38,10 @@ if HERE not in sys.path:
 
 from team_cli_core import call_one, REQ_FMT  # noqa: E402  复用现成的 A2A 信封与点名实现（L1 通行层，刀15 起不再经组合根 team.py）
 
-# 兜底默认值集中到 L0 node_paths（env 优先）
-AGENT_TEAM_CHAT_BASE = os.environ.get("AGENT_TEAM_CHAT_BASE") or "http://<host>:9984"
-# 兜底默认值集中到 L0 node_paths（env 优先）
-AGENT_TEAM_NATS_HOST = os.environ.get("AGENT_TEAM_NATS_HOST") or os.environ.get("AGENT_TEAM_NATS") or "<host>:9930,<node-ip>:9930"
+# 兜底默认值集中到 L0 node_profile（env 优先）
+AGENT_TEAM_CHAT_BASE = os.environ.get("AGENT_TEAM_CHAT_BASE") or _npf.chat_base_default()
+# 兜底默认值集中到 L0 node_profile（env 优先）
+AGENT_TEAM_NATS_HOST = os.environ.get("AGENT_TEAM_NATS_HOST") or os.environ.get("AGENT_TEAM_NATS") or _npf.nats_hosts_default()
 # 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime_dir()
 
