@@ -62,6 +62,9 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import embedder  # noqa: E402
+# L2 适配层：pgvector 文本字面量的**单一出处**（刀16）。本件原先那份实现与它逐字节相同，
+# 只是少了 None 分支（本件的 SQL 不会传 None）—— 换成它后行为一分不差。
+from pg_literals import vector_literal  # noqa: E402
 
 COUNT_SQL = "SELECT count(*) FROM blackboard_entries WHERE embedding IS NULL"
 FETCH_SQL = ("SELECT entry_id, content FROM blackboard_entries "
@@ -76,9 +79,11 @@ TRIGGER_HINT = (
     "只影响本连接），要么按本文件顶部注释里的方案 B 把触发器收窄。")
 
 
-def _vector_literal(values: Sequence[float]) -> str:
-    """pgvector 文本字面量，与 blackboard_svc._vector_literal 同一口径。"""
-    return "[" + ",".join(repr(float(x)) for x in values) + "]"
+# pgvector 文本字面量，与 blackboard_svc._vector_literal 同一口径 —— 刀16 起这句
+# 「同一口径」由**同一份实现**保证，不再靠人肉对齐；这里只留同名别名，175 行的调用点没动。
+# （旧实现少了 None 分支：传 None 会抛 TypeError，新实现返回 None。该分支经查**不可达** ——
+#  embedder.embed_texts 整批失败时返回 None 且本件在此前已 return 3，绝不返回含 None 的列表。）
+_vector_literal = vector_literal
 
 
 def _import_psycopg2() -> Any:

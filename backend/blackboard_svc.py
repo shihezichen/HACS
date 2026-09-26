@@ -106,6 +106,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import embedder  # 同目录模块；导入只读环境变量，不会加载模型
 import web_gateway  # L1 通行层：HTTP 应答出口与非 GET 方法的路由分发
+# L2 适配层：pgvector 文本字面量与时间归一的**单一出处**（刀16 从本件收口，实现未改一字）
+from pg_literals import to_utc, vector_literal
 
 VERSION = "1.9"
 # 兜底默认值集中到 L0 node_paths（env 优先）
@@ -445,11 +447,10 @@ def row_to_entry(row: Sequence[Any]) -> Dict[str, Any]:
     }
 
 
-def _vector_literal(embedding: Optional[Sequence[float]]) -> Optional[str]:
-    """pgvector 的文本字面量形式，避免为了一列向量引入 pgvector 的 python 适配器。"""
-    if embedding is None:
-        return None
-    return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+# pgvector 的文本字面量形式，避免为了一列向量引入 pgvector 的 python 适配器。
+# 刀16：实现搬去 L2 pg_literals.vector_literal（逐字节原样），这里只留同名别名 ——
+# 本模块的调用点与模块属性面（blackboard_svc._vector_literal）一个字没动。
+_vector_literal = vector_literal
 
 
 def insert_entry(author: str, topic: str, kind: str, content: str,
@@ -830,28 +831,11 @@ def utc_now() -> datetime.datetime:
     return datetime.datetime.now(UTC)
 
 
-def _to_utc(value: Any) -> Optional[datetime.datetime]:
-    """把 timestamptz / ISO 字符串统一成带 UTC 时区的 datetime；认不出来返回 None。
-
-    裸时间（没带时区）一律按 UTC 解释 —— 宁可口径单一，也不要"看你在哪台机器上跑"。
-    """
-    if isinstance(value, datetime.datetime):
-        moment = value
-    elif isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        if text[-1] in ("Z", "z"):
-            text = text[:-1] + "+00:00"
-        try:
-            moment = datetime.datetime.fromisoformat(text)
-        except ValueError:
-            return None
-    else:
-        return None
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    return moment.astimezone(UTC)
+# 把 timestamptz / ISO 字符串统一成带 UTC 时区的 datetime；认不出来返回 None。
+# 裸时间（没带时区）一律按 UTC 解释 —— 宁可口径单一，也不要"看你在哪台机器上跑"。
+# 刀16：实现搬去 L2 pg_literals.to_utc（逐字节原样，含同一个 UTC 常量），这里只留同名
+# 别名 —— 本模块的调用点与模块属性面（blackboard_svc._to_utc）一个字没动。
+_to_utc = to_utc
 
 
 def is_overdue(due_at: Any, status: Any, open_states: Sequence[str],

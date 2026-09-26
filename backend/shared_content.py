@@ -72,6 +72,10 @@ import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import embedder  # 同目录模块；导入只读环境变量，不会加载模型
+# L2 适配层：pgvector 文本字面量与时间归一的**单一出处**（刀16）。本件原本自带的两份
+# 同名实现与它逐字节相同，现在直接用它 —— 对外名 vector_literal / to_utc 一个字没改，
+# 本件 20+ 处调用点也一行没动。本件自己的 UTC / now_utc() 仍是本件的，不从这儿取。
+from pg_literals import to_utc, vector_literal
 
 VERSION = "1.0"
 
@@ -134,29 +138,10 @@ def iso(value: Any) -> Optional[str]:
     return moment.isoformat() if moment else None
 
 
-def to_utc(value: Any) -> Optional[datetime.datetime]:
-    """timestamptz / ISO 字符串统一成带 UTC 时区的 datetime；认不出来返回 None。
-
-    裸时间（不带时区）一律按 UTC 解释 —— 口径与 blackboard_svc._to_utc 一字不差，
-    两边算出来的"过期没过期"必须是同一件事。
-    """
-    if isinstance(value, datetime.datetime):
-        moment = value
-    elif isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        if text[-1] in ("Z", "z"):
-            text = text[:-1] + "+00:00"
-        try:
-            moment = datetime.datetime.fromisoformat(text)
-        except ValueError:
-            return None
-    else:
-        return None
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    return moment.astimezone(UTC)
+# to_utc：timestamptz / ISO 字符串统一成带 UTC 时区的 datetime；认不出来返回 None。
+# 裸时间（不带时区）一律按 UTC 解释 —— 口径与 blackboard_svc._to_utc 一字不差，
+# 两边算出来的"过期没过期"必须是同一件事。刀16 起这件事**只有一份实现**，见本件顶部的
+# `from pg_literals import to_utc`（原实现逐字节搬过去，blackboard_svc 那份也指向它）。
 
 
 def fmt_time(value: Any) -> str:
@@ -650,11 +635,8 @@ def compute_embedding(title: str, body: str) -> Optional[List[float]]:
     return vector if len(vector) == embedder.embed_dim() else None
 
 
-def vector_literal(embedding: Optional[Sequence[float]]) -> Optional[str]:
-    """pgvector 的文本字面量形式，避免为了一列向量引入 pgvector 的 python 适配器。"""
-    if embedding is None:
-        return None
-    return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+# vector_literal：pgvector 的文本字面量形式，避免为了一列向量引入 pgvector 的 python
+# 适配器。刀16 起实现在 L2 pg_literals.vector_literal，见本件顶部的 import（逐字节原样）。
 
 
 _LIKE_SPECIAL_RE = re.compile(r"([\\%_])")

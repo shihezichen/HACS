@@ -99,6 +99,12 @@
       "duty": "适配层：模型执行器「怎么调」（ssh 二进制/反向目标/私钥与 known_hosts/远端命令行/编码口径/超时与限速默认值/subprocess 与输出解析）+ Agent 展示名（兜底表 + AGENT_TEAM_DISPLAY_NAMES 覆盖 + display_name 语义）",
       "note": "L2 适配层：模型富化执行器 + Agent 展示名（阶段1 刀3 从 chat_svc(L3) 下沉）。**不含**提示词模板/队列 worker/写库/台账 —— 那些是「调什么」，留在 L3；失败一律降级返回 (None, 原因)，绝不编造。唯一依赖者 chat_svc.py（运行节点 lobster）。刀 4：远端执行器路径改取 node_paths.target_claude_exec(目标)（本机真值不再冒充远端真值），新增 probe() 通道自检（不写库不改状态）。刀 14（阶段3）：增公开面 `DISPLAY_NAMES_FALLBACK`，与私有原名 `_DISPLAY_NAMES_FALLBACK` **同一个对象**（不是拷贝），私有原名保留不动；`__all__` 追加 —— 上层件引用兜底表一律走这个公开名"
     },
+    "agent-team/pg_literals.py": {
+      "layer": "L2",
+      "port": null,
+      "duty": "适配层：对外部存储（PostgreSQL / pgvector）的**类型口径适配** —— pgvector 文本字面量 vector_literal（含 None 分支与 repr(float(x)) 格式）+ timestamptz / ISO 字符串归一 to_utc（Z/z→+00:00、裸时间按 UTC 解释、认不出来返回 None）+ 常量 UTC",
+      "note": "L2 适配层：pgvector 字面量与时间归一的**单一出处**（刀16 阶段3 新增）。收口前同一份实现在 L3 抄了三遍 —— blackboard_svc._vector_literal/_to_utc、shared_content.vector_literal/to_utc、backfill_embeddings._vector_literal（三份函数体逐字节相同，backfill 那份只少 None 分支）。本件函数体逐字节照抄 blackboard_svc 的原实现，三个调用件各留同名别名 → 调用点与模块属性面一行没动。纯标准库（只 import datetime / typing），不 import psycopg2、不持任何连接、无状态无 I/O。被 L3 三件 import（L3→L2 正向）。等价证据 tools/equivalence/pg_literals_equiv.py"
+    },
     "agent-team/cli_backend.py": {
       "layer": "L2",
       "port": 9970,
@@ -112,7 +118,7 @@
     "agent-team/blackboard_svc.py": {
       "layer": "L3",
       "port": 9940,
-      "note": "黑板服务"
+      "note": "黑板服务。刀16（阶段3）：pgvector 字面量与时间归一**已收口到 L2 pg_literals.py** —— 本件的 _vector_literal / _to_utc 改为指向 pg_literals.vector_literal / to_utc 的同名别名（实现逐字节搬走，调用点与模块属性面一行没动）；本件自己的 UTC 常量与 utc_now() 保留不动"
     },
     "agent-team/blackboard_view.py": {
       "layer": "L3",
@@ -142,7 +148,7 @@
     "agent-team/shared_content.py": {
       "layer": "L3",
       "port": null,
-      "note": "临时共享区"
+      "note": "临时共享区。刀16（阶段3）：pgvector 字面量与时间归一**已收口到 L2 pg_literals.py** —— 本件的 vector_literal / to_utc 改为从 pg_literals import（对外名不变，内部 20+ 处调用点一行没动）；本件自己的 UTC / now_utc() / iso() / fmt_time() 保留不动"
     },
     "agent-team/embedder.py": {
       "layer": "L3",
@@ -152,7 +158,7 @@
     "agent-team/backfill_embeddings.py": {
       "layer": "L3",
       "port": null,
-      "note": "向量回填"
+      "note": "向量回填。刀16（阶段3）：pgvector 字面量**已收口到 L2 pg_literals.py** —— 删本地 _vector_literal，改 import 并留同名别名（175 行调用点走位置参数，未动）。原实现少 None 分支、形参名叫 values，两处差异都不可达（vec 来自 embedder 恒非 None，调用点非关键字），已在等价装置 A' 段登记"
     },
     "agent-team/group_watch.py": {
       "layer": "L3",
