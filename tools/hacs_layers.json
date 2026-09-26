@@ -193,7 +193,7 @@
     "agent-team/ui/group.css": {
       "layer": "L4",
       "port": null,
-      "note": "群聊前端·渲染壳之样式表（刀12 从 group.html 的 <style> 逐字节抽出，零行为改变）"
+      "note": "群聊前端·渲染壳之样式表（刀12 从 group.html 的 <style> 逐字节抽出，零行为改变；刀19 删掉只服务「任务清单面板」的死规则——刀18 已把该面板子树整棵下线——31078 B → 27996 B，活规则集合逐字节原样保留）"
     },
     "agent-team/ui/group_transport.js": {
       "layer": "L4",

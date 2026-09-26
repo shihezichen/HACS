@@ -1,5 +1,19 @@
 # -*- coding: utf-8 -*-
-"""刀11/刀12/刀13/刀18 · 群聊前端「拆三件套」等价装置（无头浏览器 + CDP，纯 stdlib）。
+"""刀11/刀12/刀13/刀18/刀19 · 群聊前端「拆三件套」等价装置（无头浏览器 + CDP，纯 stdlib）。
+
+刀19 改动概要（**只换基、只加严，一类判据没删、一个期望值没下调**）：
+
+* 刀18 下线面板子树之后，``group.css`` 里只服务该面板的规则成了纯死样式
+  （``#taskbtn``/``#taskpanel``/``#tp-head``/``#tp-err``/``#tp-list``/``.titem*``/
+  ``#tp-add*``，以及窄屏 ``@media`` 里的 ``#taskpanel{width:94vw}``）——
+  容器不在 DOM 里，选择器在活 DOM 上一个都匹配不到。刀19 整段删除，31078 → 27996 B。
+* 于是第 0 类 CSS 文本级锚**换基**：``css_text_level()`` 从「整块相等」→
+  ``CSS_DROPPED`` 之外的保留块纯拼接 + 尾部残余 0 B + 反向断言 + 字节账 +
+  交错重组（两段账都平）+ 残留扫描（``#taskpanel``/``#tp-`` 一个字节不许剩）。
+  与刀18 的 ``js_view_text_level()`` 同一套路、同强度。改基前的装置原件另存
+  ``_old/group_frontend_equiv_old_k19.py``。
+* 计算样式 / CSSOM / 外链反向证据**一条没动**：两侧本来就同发 ``agent-team/ui/group.css``
+  这一份，删的又是活 DOM 匹配不到的规则 —— 全绿即是「这些规则确实是死的」的浏览器级取证。
 
 刀18 改动概要（**只换基、只加严，一类判据没删、一个期望值没下调**）：
 
@@ -48,7 +62,9 @@
 刀12 追加了三类判据（只加不减，原有各类一条没动）：
 
 * **第 0 类 · CSS 文本级**：旧快照内联 ``<style>``…``</style>`` 之间的字节
-  **==** ``agent-team/ui/group.css`` 的字节；外加新 ``group.html`` 的字节账
+  **==** ``agent-team/ui/group.css`` 的字节（刀19 起换基为 **``CSS_DROPPED`` 之外的
+  保留块纯拼接 + 尾部残余 0 B**，另加 ``CSS_DROPPED`` 反向断言、字节账、交错重组与残留扫描，
+  同强度，见 ``CSS_DROPPED`` 处的注释）；外加新 ``group.html`` 的字节账
   （``</style>`` 计 0 / ``<link`` 计 1 / 总字节）与**重组互补证据**
   （把新件那 42 B 的 ``<link>`` 行换回原 31095 B 的 style 段 → 与旧快照逐字节相等，
   证明「只换了这一处」）。
@@ -1245,6 +1261,25 @@ def js_view_text_level(old_html):
     return ok
 
 
+# 刀12 立、刀19 **换基**（不是放宽）：`group.css` 原本 == k12 快照那个唯一内联
+# <style> 块的**全部**字节（31078 B）。刀18 已把「任务清单面板」子树从 group_view.js
+# 整棵下线（`#taskpanel` 不在 DOM 里、group.html 里无该容器、JS 零引用），本刀据此
+# 证明那段样式是**死规则**（选择器在活 DOM 上一个都匹配不到）并整段删除；锚从
+# 「整块相等」换成「**剩余分块纯拼接** 且尾部残余 0 B」——与 3.0b JS 文本级同一
+# 套路、**同强度**：保留块仍逐字节对 k12 冻结快照，拼接仍必须**恰好**铺满整件，
+# 一个字节的私货都塞不进来。下线的两段另立 CSS_DROPPED 做**反向断言**（字节不许
+# 出现）、字节账、交错重组（两段账都平）与残留扫描。
+# 行号 = k12 内联 style 块内的 1-based 行号（该块逐字节 == 刀19 之前的 group.css）。
+# 第 4 项为行内子串：那行 @media 里只有 `#taskpanel{width:94vw}` 是死的，同一行的
+# `header button{padding:6px 9px}` 仍作用于活元素，**不动**——所以按字节切片而非整行。
+CSS_DROPPED = [
+    ("S1", 328, 369, None),                      # 面板段头注释 + #taskbtn/#taskpanel/#tp-*/.titem*
+    ("S2", 370, 370, b"#taskpanel{width:94vw}"),  # 窄屏 @media 里的面板宽度（行内子串）
+]
+# 刀19 反向断言用：删干净之后，这些字面量在 group.css 里一处都不许再出现。
+CSS_RESIDUE = [b"#taskpanel", b"#tp-", b".titem", b"#taskbtn"]
+
+
 def css_text_level():
     """刀12 第 0 类判据：CSS 字节同源 + 字节账 + 重组互补证据（刀13 起改成**常驻回归**）。
 
@@ -1257,8 +1292,15 @@ def css_text_level():
     同一套路），**期望数字一个没下调**：31078 B / 31095 B / 42 B / offset 173 /
     ``</style>``=0 / ``<link>``=1 / 110833 B，全部照旧。
     活件也不脱钩：末尾多加一条**全链重组** —— 从活的 ``group.html`` 两步走回 k12 快照。
+
+    刀19 **换基**：``group.css`` 不再整块等于那段内联 ``<style>``（任务面板死样式已
+    删除），改成 **``CSS_DROPPED`` 之外的保留块纯拼接 + 尾部残余 0 B**，另加反向断言、
+    字节账、交错重组与残留扫描（同强度，见 ``CSS_DROPPED`` 处的注释）。
+    字节账那几条**期望数字一个没下调**：31078 B / 31095 B / 42 B / offset 173 /
+    ``</style>``=0 / ``<link>``=1 / 110833 B 全部照旧 —— 它们问的是 ``group.html``
+    那一换，本刀一个字节都没碰 ``group.html``。
     """
-    print("---- 3.0 CSS 文本级（刀12 常驻回归，锚定 %s ↔ %s）：外链件 == 内联 style 段，逐字节 ----"
+    print("---- 3.0 CSS 文本级（刀12 立 / 刀19 换基，锚定 %s ↔ %s）：外链件 == 内联 style 段的保留分块，逐字节 ----"
           % (os.path.basename(K12_HTML), os.path.basename(K13_HTML)))
     old = open(K12_HTML, "rb").read()
     new = open(K13_HTML, "rb").read()
@@ -1280,13 +1322,94 @@ def css_text_level():
     print("    样式内容       offset [%d, %d)  %6d B  md5 %s"
           % (ia, ib, len(inner), hashlib.md5(inner).hexdigest()))
     print("  新件   %s" % NEW_CSS)
-    print("    文件内容                        %6d B  md5 %s"
-          % (len(css), hashlib.md5(css).hexdigest()))
-    eq = inner == css
-    ok &= eq
-    print("    ✓ 两侧字节相等: %s（长度 %d == %d ｜ md5 %s == %s）" % (
-        eq, len(inner), len(css),
-        hashlib.md5(inner).hexdigest()[:8], hashlib.md5(css).hexdigest()[:8]))
+    print("    文件内容                        %6d B  md5 %s  换行 %d 个"
+          % (len(css), hashlib.md5(css).hexdigest(), css.count(b"\n")))
+
+    # --- 刀19 换基：整块相等 → 剩余分块纯拼接（同强度，见 CSS_DROPPED 处的注释）---
+    ilines = inner.split(b"\n")
+    if ilines[-1] != b"":
+        print("  ✗ k12 内联 style 块不是以换行收尾，分块锚无法成立")
+        return False
+    ilines = [x + b"\n" for x in ilines[:-1]]
+    nline = len(ilines)
+    coff = [0]
+    for line in ilines:
+        coff.append(coff[-1] + len(line))
+
+    # 把「行区间 / 行内子串」折算成 k12 内联块里的字节区间 [s, e)，并校验严格递增不重叠
+    spans, prev = [], 0
+    for nm, la, lb, sub in CSS_DROPPED:
+        s, e = coff[la - 1], coff[lb]
+        if sub is not None:
+            one = inner[s:e]
+            if one.count(sub) != 1:
+                print("  ✗ %s：k12 内联块行 %d 里 %r 出现 %d 次（应 1）"
+                      % (nm, la, sub, one.count(sub)))
+                return False
+            s, e = s + one.index(sub), s + one.index(sub) + len(sub)
+        if not prev <= s < e:
+            print("  ✗ %s：下线段不是严格递增 / 不重叠（prev %d ｜ [%d, %d)）" % (nm, prev, s, e))
+            return False
+        spans.append((nm, la, lb, s, e))
+        prev = e
+
+    print("    分块锚：k12 内联块共 %d 行 %d B ｜ 下线 %d 段 → 保留 %d 块"
+          % (nline, len(inner), len(spans), len(spans) + 1))
+    off, cur = 0, 0                      # off = 新件写头 ｜ cur = 旧块读头
+    for i, (_nm, _la, _lb, s, e) in enumerate(
+            spans + [(None, 0, 0, len(inner), len(inner))]):
+        seg = inner[cur:s]
+        got = css[off:off + len(seg)]
+        eq1 = got == seg
+        ok &= eq1
+        print("      K%d k12 内联块字节 [%6d,%6d) %6d B → 新件偏移 %6d  字节相等: %s"
+              % (i + 1, cur, s, len(seg), off, eq1))
+        off += len(seg)
+        cur = e
+    tail = css[off:]
+    print("      新件尾部残余 %d B（应为 0，证明新件 = 保留块纯拼接、无任何私货）: %r"
+          % (len(tail), tail[:40]))
+    ok &= len(tail) == 0
+
+    # 反向断言：下线的两段在新件里一个字节都不剩
+    dropped_bytes = 0
+    for nm, la, lb, s, e in spans:
+        seg = inner[s:e]
+        dropped_bytes += len(seg)
+        gone = seg not in css
+        ok &= gone
+        print("      %s k12 内联块行 %3d-%-3d 字节 [%6d,%6d) %5d B → 新件里已无此段: %s ｜ 首个非空行 %r"
+              % (nm, la, lb, s, e, len(seg), gone,
+                 next((x for x in seg.split(b"\n") if x.strip()), b"")[:48]))
+    acct = len(css) + dropped_bytes == len(inner)
+    ok &= acct
+    print("      字节账：新件 %d B + 下线 %d B = %d B ｜ == k12 内联块 %d B: %s"
+          % (len(css), dropped_bytes, len(css) + dropped_bytes, len(inner), acct))
+
+    # 交错重组：保留块与下线段按文档序纯拼接 → 逐字节还原 k12 内联块（两段账都平）
+    recon, cur = [], 0
+    for _nm, _la, _lb, s, e in spans:
+        recon.append(inner[cur:s])
+        recon.append(inner[s:e])
+        cur = e
+    recon.append(inner[cur:])
+    inter = b"".join(recon)
+    inter_ok = inter == inner
+    ok &= inter_ok
+    print("      交错重组（保留块 + 下线段，文档序）→ %d B ｜ == k12 内联块逐字节: %s"
+          % (len(inter), inter_ok))
+
+    # 反向断言（刀19 契约要求的那条）：新件里不许再出现任务面板的选择器字面量
+    cres = [p for p in CSS_RESIDUE if p in css]
+    ok &= not cres
+    print("      源码残留扫描 %s（应为空）: %s"
+          % ([p.decode() for p in CSS_RESIDUE], [p.decode() for p in cres]))
+    # 正向配对：下线段确实是面板段（防「删错段也能拼平」）——每段都得命中面板字面量
+    for nm, _la, _lb, s, e in spans:
+        hit = [p.decode() for p in CSS_RESIDUE if p in inner[s:e]]
+        ok &= bool(hit)
+        print("      %s 段内命中面板字面量 %s（非空 = 删掉的确实是任务面板那段）" % (nm, hit))
+
     print("    首 40 B: %r" % css[:40])
     print("    末 40 B: %r" % css[-40:])
 

@@ -325,49 +325,7 @@
   #addagent{font-family:"Segoe MDL2 Assets","Segoe Fluent Icons",-apple-system,"Segoe UI",sans-serif}
   #addagent:disabled{filter:grayscale(1) opacity(.45)}
   #send { padding: 0; width: 40px; min-width: 40px; text-align: center; font-size: 17px; line-height: 1; }
-  /* ===== 任务清单面板（task_svc :9981 · 群任务清单 v1）=====
-     position:fixed 脱离文档流：不动三段式、不动 #log 唯一滚动容器；
-     面板内部自己的列表才滚动（#tp-list）。 */
-  #taskbtn{white-space:nowrap}
-  #taskpanel{position:fixed;top:var(--hx-top-h);bottom:var(--hx-bottom-h);right:0;
-             width:400px;max-width:94vw;background:#141721;border-left:1px solid var(--line);
-             display:flex;flex-direction:column;transform:translateX(101%);
-             transition:transform .18s ease;z-index:20;box-shadow:-14px 0 30px rgba(0,0,0,.5)}
-  #taskpanel.on{transform:translateX(0)}
-  #tp-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:9px 10px;
-           border-bottom:1px solid var(--line);background:var(--panel)}
-  #tp-head b{font-size:13px}
-  #tp-head .g{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #tp-head button{padding:4px 9px;font-size:12px}
-  #tp-err{flex:0 0 auto;display:none;padding:8px 10px;background:#2a1416;border-bottom:1px solid #5a2422;
-          color:var(--err);font-size:12px;font-weight:600}
-  #tp-list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 10px}
-  .titem{border:1px solid var(--line);border-radius:8px;background:#1a1e28;padding:7px 9px;margin-bottom:7px}
-  .titem.sp{border-color:#6b4a12;box-shadow:inset 3px 0 0 var(--warn)}
-  .titem.done{opacity:.62}
-  .titem .tl{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-  .titem .tid{font-size:11px;color:var(--accent);font-family:ui-monospace,Consolas,monospace}
-  .titem .tseq{font-size:11px;color:#5d6577}
-  .titem .tpri{font-size:10px;padding:1px 6px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
-  .titem .tpri.special{color:var(--warn);border-color:#5a4624}
-  .titem .tt{font-size:13px;font-weight:600;margin:4px 0 3px;word-break:break-word}
-  .titem .tm{font-size:11px;color:var(--dim);word-break:break-all}
-  .titem .ta{display:flex;align-items:center;gap:8px;margin-top:6px}
-  .titem select{background:#0f1218;color:var(--fg);border:1px solid var(--line);border-radius:6px;
-                padding:3px 6px;font:inherit;font-size:12px}
-  .titem .tmore{font-size:11px;color:var(--accent);cursor:pointer;user-select:none}
-  .titem .tc{display:none;margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);
-             font-size:12px;color:var(--dim);white-space:pre-wrap;word-break:break-word}
-  .titem .tc.on{display:block}
-  #tp-add{flex:0 0 auto;border-top:1px solid var(--line);padding:8px 10px;background:var(--panel)}
-  #tp-add input,#tp-add select{width:100%;background:#0f1218;color:var(--fg);border:1px solid var(--line);
-        border-radius:7px;padding:6px 8px;font:inherit;font-size:12px;margin-bottom:6px}
-  #tp-add .row{margin-bottom:0}
-  #tp-add .row input,#tp-add .row select{margin-bottom:0}
-  #tp-add .row select{flex:0 0 92px;width:auto}
-  #tp-add .row input{flex:1 1 auto;min-width:0}
-  #tp-add button{padding:6px 11px;font-size:12px;white-space:nowrap}
-  @media (max-width:640px){#taskpanel{width:94vw}header button{padding:6px 9px}}
+  @media (max-width:640px){header button{padding:6px 9px}}
 
   /* ===== #432-3：左栏两个 TAB（「我的群」/「任务队列」）=====
      数据源与右侧抽屉同一套：task_svc :9981 的 GET /tasks?group=<本群 session_id>（CORS *）。
