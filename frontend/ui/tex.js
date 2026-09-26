@@ -288,9 +288,11 @@
   };
 
   // ---------- 对外入口 ----------
-  function toMathML(tex) {
+  // opts.display === false -> 行内 MathML（不占整行）；默认块级（保持旧行为）
+  function toMathML(tex, opts) {
     var t = String(tex == null ? "" : tex).trim();
     if (!t) return "";
+    var inline = !!(opts && opts.display === false);
     var body;
     try {
       body = new Parser(tokenize(t)).run();
@@ -298,6 +300,9 @@
       return '<span class="md-mathraw">' + esc(t) + "</span>";
     }
     if (!body) body = "<mtext>" + esc(t) + "</mtext>";
+    if (inline) {
+      return '<math xmlns="http://www.w3.org/1998/Math/MathML" class="md-mathml md-math-inline">' + body + "</math>";
+    }
     return '<math xmlns="http://www.w3.org/1998/Math/MathML" display="block" class="md-mathml">' + body + "</math>";
   }
 

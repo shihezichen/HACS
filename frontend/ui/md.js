@@ -58,15 +58,37 @@
       return "\u0000M" + (store.length - 1) + "\u0000";
     }
     var T = function () { return (typeof window !== "undefined" && window.TeX) ? window.TeX : null; };
+
+    // ---- 方案A：LaTeX 语法归一化（ASCII 上下标 -> 花括号分组）----
+    // Agent 常写 E=mc^2 / \int_0^1 / x_i^2，tex.js 分词器只吃单字符脚本；
+    // 归一化成 E=mc^{2} / \int_{0}^{1} 才能被正确排成上标/下标。
+    function normTex(t) {
+      var x = String(t == null ? "" : t);
+      // ^ 或 _ 后跟「一组花括号」保持不变；否则把紧随的 ASCII 片段包成花括号
+      x = x.replace(/([_^])(\{[^{}]*\}|[^\s{}]+)/g, function (m, op, body) {
+        if (body.charAt(0) === "{") return op + body;
+        // 只取首位数字/字母，其余交回（x^2y -> x^{2}y）
+        var head = body.charAt(0);
+        var rest = body.slice(1);
+        return op + "{" + head + "}" + rest;
+      });
+      // \frac12 -> \frac{1}{2}；\sqrt3 -> \sqrt{3}
+      x = x.replace(/\\frac\s*([0-9])([0-9])/g, "\\frac{$1}{$2}");
+      x = x.replace(/\\sqrt\s*([0-9])(?![0-9{])/g, "\\sqrt{$1}");
+      return x;
+    }
+
     function block(tex) {
       var t = T();
-      if (t && t.toMathML) return stash(t.toMathML(tex));
-      return stash('<div class="md-mathblock">' + esc(tex) + "</div>");
+      var body = normTex(tex);
+      if (t && t.toMathML) return stash(t.toMathML(body));
+      return stash('<div class="md-mathblock">' + esc(body) + "</div>");
     }
     function inl(tex) {
       var t = T();
-      if (t && t.toMathMLInline) return stash(t.toMathMLInline(tex));
-      return stash('<span class="md-math">' + esc(tex) + "</span>");
+      var body = normTex(tex);
+      if (t && t.toMathMLInline) return stash(t.toMathMLInline(body));
+      return stash('<span class="md-math">' + esc(body) + "</span>");
     }
     var s = String(src == null ? "" : src);
 
@@ -150,16 +172,49 @@
     return { html: h + "</tbody></table>", next: i };
   }
 
-  function renderBlock(rawSrc) {
+  // 方案A：段落里可能混着公式占位符（\u0000M<n>\u0000）。
+  // 先按占位符把段落切成「文本片段 / 公式片段」：文本片段才做换行，
+  // 公式片段原样贴回 —— 否则 <br> 会灌进 MathML 内部，把 E=mc<sup>2</sup> 劈成两行。
+  function _phStore(store) { return store || []; }
+  function _splitByPh(joined) {
+    var re = /\u0000M\d+\u0000/g;
+    var parts = [], phs = [], last = 0, m;
+    while ((m = re.exec(joined)) !== null) {
+      parts.push(joined.slice(last, m.index));
+      phs.push(m[0]);
+      last = m.index + m[0].length;
+    }
+    parts.push(joined.slice(last));
+    return { parts: parts, phs: phs };
+  }
+  function paraToHtml(para, store) {
+    var joined = para.join("\n");
+    if (!/\u0000M\d+\u0000/.test(joined)) {
+      return "<p>" + para.map(inline).join("<br>") + "</p>";
+    }
+    var sp = _splitByPh(joined);
+    var buf = [], k;
+    for (k = 0; k < sp.parts.length; k++) {
+      if (sp.parts[k] !== "") buf.push(inline(sp.parts[k]).replace(/\n/g, "<br>"));
+      if (k < sp.phs.length) {
+        var idx = parseInt(sp.phs[k].replace(/[^0-9]/g, ""), 10);
+        buf.push(store[idx] == null ? sp.phs[k] : store[idx]);
+      }
+    }
+    return "<p>" + buf.join("") + "</p>";
+  }
+
+  function renderBlock(rawSrc, store) {
     // 安全铁律：进 renderBlock 之前先整段 HTML 转义。
     // 之后的 inline() 只负责「在已转义文本上加标签」，任何原始 HTML 都不会漏到输出里。
     var lines = esc(rawSrc).replace(/\r\n?/g, "\n").split("\n");
     var out = [], i = 0, para = [];
+    var MSTORE = _phStore(store);
 
     function flushPara() {
       if (!para.length) return;
-      // 「段内单换行」→ 空格（markdown 习惯）；空行已经切段
-      out.push("<p>" + para.map(inline).join("<br>") + "</p>");
+      // 「段内单换行」→ <br>（markdown 习惯）；空行已经切段
+      out.push(paraToHtml(para, MSTORE));
       para = [];
     }
 
@@ -264,7 +319,8 @@
 
   function render(src) {
     var ex = extractMath(src);
-    return enhance(restoreMath(renderBlock(ex.text), ex.store));
+    // 公式占位符在 renderBlock 内已按「段」还原（fix2），这里兜一次列表/引用/表格里的残留
+    return enhance(restoreMath(renderBlock(ex.text, ex.store), ex.store));
   }
 
   global.MD = { render: render, _esc: esc, _inline: inline };

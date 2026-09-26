@@ -322,9 +322,15 @@
   /* #477：文字按钮改图标 —— .ico 统一成方形图标钮，尺寸与 .ghost 同高，
      无文字所以靠 title/aria-label 保留语义（鼠标悬停有提示、读屏器能念）。 */
   .ghost.ico { padding: 0; width: 38px; min-width: 38px; height: 34px; text-align: center;
-    font-size: 17px; line-height: 1;
-               font-size: 15px; line-height: 1; overflow: hidden; }
+    font-size: 17px; line-height: 1; overflow: hidden; }
   .ghost.ico:disabled { opacity: .45; }
+  /* #addagent：双人图标本体是彩色 emoji，黑白主题里用 filter 压成单色，
+     字号略降（彩色字形视觉比线条粗），跟 ◀ / ⊟ / ＋ 尽量同排。 */
+  /* #addagent：图标走 Windows 自带图标字体 Segoe MDL2 Assets 的线框字形，
+     走 color 着色（--fg #e6e8ee）—— 天然单色细线，与 ◀ / ⊟ / ✕ / ＋ 同族。
+     不用 filter、不降字号，尺寸与同排图标完全一致。 */
+  #addagent{font-family:"Segoe MDL2 Assets","Segoe Fluent Icons",-apple-system,"Segoe UI",sans-serif}
+  #addagent:disabled{filter:grayscale(1) opacity(.45)}
   #send { padding: 0; width: 40px; min-width: 40px; text-align: center; font-size: 17px; line-height: 1; }
   /* ===== 任务清单面板（task_svc :9981 · 群任务清单 v1）=====
      position:fixed 脱离文档流：不动三段式、不动 #log 唯一滚动容器；
@@ -440,7 +446,8 @@
   <span class="spacer"></span>
   <button class="ghost ico" id="newbtn" title="建群（新建一个群）" aria-label="建群">＋</button>
 
-  <button class="ghost ico" id="refresh" title="刷新群列表与聊天记录" aria-label="刷新">🔄</button>
+
+  <button class="ghost ico" id="refresh" title="刷新群列表与聊天记录" aria-label="刷新">↻</button>
 </header>
 
 <main>
@@ -468,8 +475,10 @@
       <span class="title" id="gtitle">未选群</span>
       <span id="gmeta" class="pendo"></span>
       <span class="spacer"></span>
+      <!-- #addagent：把名册里的 Agent 拉进当前群（同排：折叠/展开 · 添加 Agent · 关群） -->
+      <button class="ghost ico" id="addagent" title="添加 Agent 加入本群" aria-label="添加 Agent"></button>
       <button class="ghost ico" id="tgall" title="一键折叠本群所有主题组" aria-label="折叠/展开全部主题组">⊟</button>
-      <button class="ghost ico" id="closebtn" disabled title="宣布散会（关群，归档后不能再发言）" aria-label="散会">🚪</button>
+      <button class="ghost ico" id="closebtn" disabled title="宣布散会（关群，归档后不能再发言）" aria-label="散会">✕</button>
     </div>
     <div id="pending"></div>
     <!-- #438-3：按发言者过滤消息（多选；全不选 = 全显）。放在 #log 外面 ——
@@ -496,6 +505,16 @@
 
 
 
+
+<dialog id="adddlg">
+  <h2>添加 Agent 加入本群</h2>
+  <div class="note" style="margin-bottom:10px" id="addnote">选择要拉进本群的 Agent（已在群里的置灰不可选）：</div>
+  <div class="mentions" id="addsel"></div>
+  <div class="row" style="margin-top:14px;justify-content:flex-end">
+    <button class="ghost" id="addcancel">取消</button>
+    <button id="addok">加入</button>
+  </div>
+</dialog>
 
 <dialog id="dlg">
   <h2>建一个新群</h2>
@@ -1018,6 +1037,7 @@ async function openGroup(s) {
   const open = s.state === "open";
   $("send").disabled = !open;
   $("closebtn").disabled = !(open && (!MYID || mid(MYID) === "" || s.created_by === MYID));
+  const ab = $("addagent"); if (ab) ab.disabled = !open;   // #addagent：归档群不能加人
   $("log").innerHTML = '<div class="loading"><span class="spin"></span>正在加载聊天记录…</div>';
   topicReset();
   acClose();
@@ -1349,6 +1369,59 @@ function openDialog() {
   $("dlg").showModal();
 }
 
+// #addagent：把名册里的 Agent 拉进当前群。
+//   数据源 GET /api/agents（名册）；已在本群的置灰；
+//   提交 POST /api/sessions/{sid}/members {members:[...]}，响应返成员全量 → 重载当前群。
+function openAddDialog() {
+  if (!CUR) { alert("先选一个群，再添加 Agent。"); return; }
+  if (CUR.state !== "open") { alert("本群已散会（归档），不能再加人。"); return; }
+  const box = $("addsel"); box.innerHTML = "";
+  const inGroup = new Set(groupMemberIds());
+  const list = AGENTS.slice().sort((a, b) => String(mid(a)).localeCompare(String(mid(b))));
+  if (!list.length) box.innerHTML = '<div class="note">没取到 Agent 名册（/api/agents）。</div>';
+  list.forEach(a => {
+    const id = mid(a); if (!id) return;
+    const c = document.createElement("span");
+    const already = inGroup.has(id);
+    c.className = "chip" + (already ? " on" : "");
+    c.textContent = "@" + id + (already ? "（已在群）" : "");
+    c.dataset.m = id;
+    if (already) {
+      c.style.opacity = ".45"; c.style.cursor = "not-allowed";
+      c.title = "已经在群里了";
+    } else {
+      c.onclick = () => c.classList.toggle("on");
+    }
+    box.appendChild(c);
+  });
+  const n = $("addnote");
+  if (n) n.textContent = "选择要拉进本群的 Agent（已在群里的置灰不可选）—— 共 " +
+    list.length + " 个，当前群 " + inGroup.size + " 人。";
+  $("addok").disabled = false;
+  $("adddlg").showModal();
+}
+
+async function addAgentsToGroup() {
+  if (!CUR) return;
+  const ids = [];
+  document.querySelectorAll("#addsel .chip.on").forEach(c => {
+    if (c.style.cursor !== "not-allowed" && c.dataset.m) ids.push(c.dataset.m);
+  });
+  if (!ids.length) { alert("先点选至少一个 Agent。"); return; }
+  $("addok").disabled = true;
+  try {
+    await api("POST", "/api/sessions/" + encodeURIComponent(CUR.session_id) + "/members", { members: ids });
+    $("adddlg").close();
+    await loadGroups();
+    const fresh = GROUPS.find(x => x.session_id === CUR.session_id);
+    if (fresh) await openGroup(fresh); else await pull(true);
+  } catch (e) {
+    alert("添加失败：" + e.message);
+  } finally {
+    $("addok").disabled = false;
+  }
+}
+
 async function createGroup() {
   const title = $("gt").value.trim() || "临时群";
   const members = [];
@@ -1370,6 +1443,9 @@ $("collapsebtn").onclick = asideToggle;      // #418-3 折叠左栏
 $("splitchev").onclick = asideToggle;        // #418-3 分隔条上的箭头：展开 / 折叠
 $("gcancel").onclick = () => $("dlg").close();
 $("gok").onclick = createGroup;
+$("addagent").onclick = openAddDialog;
+$("addcancel").onclick = () => $("adddlg").close();
+$("addok").onclick = addAgentsToGroup;
 $("refresh").onclick = () => { loadGroups().then(() => { if (CUR) pull(); }).catch(e => alert(e.message)); };
 $("send").onclick = send;
 $("closebtn").onclick = closeGroup;

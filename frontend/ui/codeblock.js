@@ -42,6 +42,16 @@
     return m;
   }
 
+  // 行内公式判定：短、且不含「天生块级」的命令（积分/求和/连乘/极限/分式/根式）
+  var RE_BLOCKISH = /\\(int|iint|iiint|oint|sum|prod|coprod|lim|frac|dfrac|tfrac|sqrt|begin|matrix|cases|over|displaystyle|atop)\b/;
+  function isInlineFormulaLine(t) {
+    if (!isPureFormulaLine(t)) return false;
+    if (t.length > 40) return false;
+    if (RE_BLOCKISH.test(t)) return false;
+    if (t.indexOf("\\") >= 0 && /\\\\(?![a-zA-Z])/.test(t)) return false;   // 含 \ 换行 -> 块级
+    return true;
+  }
+
   function isPureFormulaLine(t) {
     if (!t) return false;
     if (t.length > 400) return false;
@@ -62,29 +72,43 @@
     var lines = raw.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(function (l) { return l !== ""; });
     if (!lines.length) return null;
 
-    // 整段就是一条公式
+    // 整段就是一条公式（短的按行内，长的/含块级命令的按块级）
     if (lines.length === 1 && isPureFormulaLine(lines[0])) {
-      return T().toMathML(lines[0]);
+      return T().toMathML(lines[0], { display: !isInlineFormulaLine(lines[0]) });
     }
     // 多行但整体就是一条公式（LaTeX 常被拆行写）
     var joined = lines.join(" ");
     if (lines.length > 1 && lines.every(function (l) { return !looksLikeLabelLine(l); }) &&
         isPureFormulaLine(joined)) {
-      return T().toMathML(joined);
+      return T().toMathML(joined, { display: !isInlineFormulaLine(joined) });
     }
 
     // 混合：把公式行挑出来做成独立块
     var out = [], buf = [], i;
-    function flushProse() {
+    // 「标签行」判定：以冒号结尾（中/英文冒号都可）—— 如「块级公式：」
+    function isLabelLine(t) { return /[:\uff1a]\s*$/.test(t); }
+    // keepOpen=true：后面紧跟公式，且末行是标签行 -> 标签行不落 <p>，
+    //   用行内 <span class="md-lab"> 收尾，避免「</p> + 块级 <math>」被 margin 撑开一大截
+    function flushProse(keepOpen) {
       if (!buf.length) return;
+      var last = buf[buf.length - 1];
+      if (keepOpen && isLabelLine(last)) {
+        var head = buf.slice(0, -1);
+        if (head.length) {
+          out.push("<p>" + head.map(function (l) { return linkifyPlain(l); }).join("<br>") + "</p>");
+        }
+        out.push('<span class="md-lab">' + linkifyPlain(last) + "</span>");
+        buf = [];
+        return;
+      }
       out.push("<p>" + buf.map(function (l) { return linkifyPlain(l); }).join("<br>") + "</p>");
       buf = [];
     }
     for (i = 0; i < lines.length; i++) {
       var l = lines[i];
       if (isPureFormulaLine(l)) {
-        flushProse();
-        out.push(T().toMathML(l));
+        flushProse(true);   // true: 末行是「xx：」标签行时，标签不落 <p>，与公式同处一块
+        out.push(T().toMathML(l, { display: !isInlineFormulaLine(l) }));
       } else {
         buf.push(l);
       }
