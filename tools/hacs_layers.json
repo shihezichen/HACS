@@ -167,7 +167,12 @@
     "agent-team/ui/group.html": {
       "layer": "L4",
       "port": null,
-      "note": "群聊前端单文件 —— ⚠️ 壳/视图/传输三合一（拆分点）"
+      "note": "群聊前端 —— 传输客户端已抽出（见 group_transport.js）；剩「壳 + 业务视图」，仍待继续拆"
+    },
+    "agent-team/ui/group_transport.js": {
+      "layer": "L4",
+      "port": null,
+      "note": "群聊前端·传输客户端（同源 /api 客户端 + 任务服务客户端 + 端点常量）—— 刀11 从 group.html 抽出，零行为改变"
     },
     "agent-team/task_sys/patch_group_html.py": {
       "layer": "L4",

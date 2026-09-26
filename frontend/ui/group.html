@@ -531,6 +531,7 @@
 <script src="/tex.js"></script>
 <script src="/hl.js"></script>
 <script src="/codeblock.js"></script>
+<script src="/group_transport.js"></script>
 <script>
 
 /* ⚠️ 状态声明必须放脚本最前面：文件后面的 boot() 会同步走到访问它们的路径，
@@ -552,38 +553,9 @@ const TQRANK = { doing: 0, open: 1, done: 2 };                       // 在办�
 let ATAB = "groups";
 "use strict";
 const $ = (id) => document.getElementById(id);
-const API = "";              // 同源托管：直接打本站 /api
 let WHO = null, MYID = "", AGENTS = [], GROUPS = [], CUR = null, CURSOR = 0, TIMER = null;
 const SEEN = new Set();   // 已渲染过的 message_id：轮询只追加新的，防重复
 const LS_LAST = "group.last_sid";   // 记住上次看的群，刷新后回到原处
-
-async function api(method, path, body) {
-  const opt = { method, credentials: "include", headers: {} };
-  if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
-  const r = await fetch(API + path, opt);
-  const txt = await r.text();
-  let data = null; try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = txt; }
-  if (r.status === 401) {
-    // 未登录：本服务不自己发登录页 —— 转交门户登录页，并把「回本页」带上
-    const back = encodeURIComponent(location.pathname + location.search);
-    location.href = "/login?next=" + back;
-    throw new Error("需要登录，正在跳转登录页…");
-  }
-  if (!r.ok) {
-    const code = (data && data.error && (data.error.code || data.error)) || ("HTTP " + r.status);
-    const hint = {
-      mention_required: "Agent 发言必须 @（人不需要）",
-      unknown_mention: "提到了不在群里的人",
-      unknown_member: "有成员不存在（看名册）",
-      only_owner_can_close: "只有发起人能宣布散会",
-      session_archived: "这个群已经散会（归档）了",
-      creator_required: "建群必须由人发起",
-      bad_json: "请求体不是合法 JSON"
-    }[code] || "";
-    throw new Error(code + (hint ? " — " + hint : ""));
-  }
-  return data;
-}
 
 const esc = (s) => String(s == null ? "" : s)
   .replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -1465,25 +1437,10 @@ boot().catch(e => { $("who").textContent = "启动失败：" + e.message; });
 
 // ================= 任务清单面板（task_svc :9981 · 群任务清单 v1） =================
 // 数据源：程序维护的任务清单（SQLite），不依赖任何 Agent/LLM 记忆。
-const TSVC = "http://<tailnet-host>:9981";
-const TGROUP_DEFAULT = "meet_20260921_demo01";
 const TSTATUS = { pending: "待开始", running: "进行中", done: "已完成", failed: "失败" };
 let TPOLL = null;
 // #432-3：任务查询分组 = 当前打开的群（原来写死 demo01，切群后清单不跟着走）
 function tgid() { return (CUR && CUR.session_id) || TGROUP_DEFAULT; }
-
-async function tApi(method, path, body) {
-  const opt = { method, headers: {} };
-  if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
-  const r = await fetch(TSVC + path, opt);
-  const txt = await r.text();
-  let d = null; try { d = txt ? JSON.parse(txt) : null; } catch (e) { d = txt; }
-  if (!r.ok) {
-    const code = (d && d.error && (d.error.code || d.error)) || ("HTTP " + r.status);
-    throw new Error(code);
-  }
-  return d;
-}
 
 function tErrShow(msg) {
   const e = $("tp-err");

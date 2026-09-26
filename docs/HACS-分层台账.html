@@ -78,8 +78,12 @@
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v6</b> · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c·9 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更（v6）：① 阶段 2 <b>刀 9</b> —— <code>a2a_edge.py</code>（9920 A2A 端点）的 <b>HTTP 面</b>（应答出口 <code>_send_json</code>、两个 <code>do_*</code> 的路径分派、<code>_read_body</code>）收进 L1 <code>web_gateway.py</code>：<code>A2AHandler</code> 改继承 <code>GW.handler_class()</code>，路由改 <code>@GW.route</code> 登记表（<code>/healthz</code>、<code>/agents</code> 精确 + <code>/a2a</code> 的 GET/POST 前缀 + <code>@GW.not_found</code>），请求体改 <code>@GW.pre</code> 读一次并缓存；响应形态三件套（<code>server_version="a2a_svc/&lt;VERSION&gt;"</code> / <code>sys_version=""</code> / HTTP/1.1）在子类覆盖。<b>组合根 <code>a2a_svc.py</code> 一个字节未动</b>（已拍板：这一刀动的是 a2a_edge），注入路由协议靠把 <code>req.svc</code> 设为 <code>A2AHandler</code> 实例本身保住。<br>
+      版本 <b>v7</b> · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c·9·10·11 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v7）：① 阶段 2 <b>刀 10 · 前端运行真值收口</b> —— 判真值判出一个<b>假绿灯</b>：<code>deploy.py --status</code> 报四台<b>漂移 0</b>，但那<i>只覆盖部署表里的件</i>，<code>ui/</code> <b>静态资产从来不在表里</b>，于是前端在龙虾机上被直改（<code>#addagent</code> 加人对话框 / <code>#477</code> 图标 / <code>md.js</code> LaTeX 归一化）<b>整整两天对源码仓不可见</b>（源码仓 <code>group.html</code> 109101 B / <code>7f75ddb8</code> ≠ 线上 112774 B / <code>c7ff8b4e</code>；逐行 diff 证明<b>线上是严格超集</b> → 线上为真值）。处置：以线上字节<b>逐字节回写</b>源码仓 4 件（<code>group.html</code> + <code>md.js</code>/<code>tex.js</code>/<code>codeblock.js</code>），再把 <code>ui/</code> 五件<b>补登进 lobster 部署段</b>（<code>services=[]</code> —— <code>chat_svc._send_file</code> 每请求现读磁盘，静态件免重启）→ 受管件 14 → 19。<b>顺序不可反</b>：先回写再拆分；反了就是拿陈旧源码去部署，把线上多出来的功能<b>就地回退</b>。<br>
+      ② 阶段 2 <b>刀 11 · 群聊前端「传输客户端」抽出</b>（前端拆三件套第一刀）—— 新件 <code>agent-team/ui/group_transport.js</code>（1983 B，<b>5 段纯拼接</b>：<code>API</code> 常量 + <code>api()</code> + <code>TSVC</code>/<code>TGROUP_DEFAULT</code> + <code>tApi()</code>；<b>无 IIFE、无 <code>type=module</code>、无 <code>"use strict"</code></b> —— 原内联脚本里那句 <code>"use strict"</code> 落在语句之后属<b>无效指令</b>，页面实际<b>非严格模式</b>，新件加严格模式反而会改语义）；<code>group.html</code> 删 5 段及各自紧随的空行、加 1 行 <code>&lt;script src="/group_transport.js"&gt;</code>（在内联脚本之前），112774 → <b>110833 B</b>。剩「壳 + 业务视图」待后续刀继续拆。<br>
+      ③ 等价证据 <code>tools/equivalence/group_frontend_equiv.py</code>（无头 Edge + 手写 RFC6455 的 CDP，纯 stdlib；旧侧 = 开工前快照 <code>_old/group_old_k11.html</code>，装置开头<b>硬校验「旧侧 md5 前缀 = c7ff8b4e 且新旧 md5 不同」</b>防自比；<code>TSVC</code> 硬编码端点靠 CDP <code>Fetch</code> 域拦截 + <code>fulfillRequest</code> 合成应答，被测代码一字未动）：文本级 <b>5/5 逐段 <code>==</code></b>、标识符探针 <b>9/9</b>、启动轨迹 <b>4/4</b>、轮询轨迹 <b>1/1</b>、动作序轨迹 <b>13/13</b>、函数级 <b>7 例线级逐字节</b>、两侧 JS 错误 <b>0/0</b> —— 逐条 diff 合计 <b>0</b>（归一化只命中 <code>Referer</code>/端口/<code>next=</code>，「时间戳类规则一次都没触发」）。线上 9984 逐字节对照：served <code>group.html</code> <code>e5c46769</code> == 部署件、<code>/group_transport.js</code> 200 / 1983 B == 部署件；真机冒烟脚本序 <code>md·tex·hl·codeblock·group_transport·inline</code>、<code>api</code>/<code>tApi</code> 均 <code>function</code>；红点集合改前 = 改后 = <code>{blackboard_view, chat_svc, rt_remind, teamd}</code>（零 <code>.py</code> 改动，逻辑与实跑双证）。<br>
+      ④ <b>3.2 基线重算</b>：登记件数 62 → <b>63</b>（新增 L4 <code>group_transport.js</code>）、层间 import 边 <b>52</b>（不变 —— 前端件之间没有 import 边）。<br>
+      上一轮（v6）：① 阶段 2 <b>刀 9</b> —— <code>a2a_edge.py</code>（9920 A2A 端点）的 <b>HTTP 面</b>（应答出口 <code>_send_json</code>、两个 <code>do_*</code> 的路径分派、<code>_read_body</code>）收进 L1 <code>web_gateway.py</code>：<code>A2AHandler</code> 改继承 <code>GW.handler_class()</code>，路由改 <code>@GW.route</code> 登记表（<code>/healthz</code>、<code>/agents</code> 精确 + <code>/a2a</code> 的 GET/POST 前缀 + <code>@GW.not_found</code>），请求体改 <code>@GW.pre</code> 读一次并缓存；响应形态三件套（<code>server_version="a2a_svc/&lt;VERSION&gt;"</code> / <code>sys_version=""</code> / HTTP/1.1）在子类覆盖。<b>组合根 <code>a2a_svc.py</code> 一个字节未动</b>（已拍板：这一刀动的是 a2a_edge），注入路由协议靠把 <code>req.svc</code> 设为 <code>A2AHandler</code> 实例本身保住。<br>
       ② 等价证据 <code>tools/equivalence/a2a_edge_equiv.py</code> <b>46/46</b> 逐例一致（原 23 例一字未改；新增 23 例 = 路径判据边角 12 + 带体 6（含 300KB &gt; MAX_BODY_BYTES 的超大体）+ <b>keep-alive 同连接裸字节</b> 5）；另做<b>独立复核</b>：以本刀开工前快照 <code>_old/a2a_edge_old_k9.py</code> 为旧侧、直接对照<b>改前 vs 改后 46/46</b>（不复用装置旧侧）；线上四台逐字节对照（13 条只读探针 × 4 节点 + keep-alive 面）<b>0 处不一致</b>，<code>deploy.py --status</code> 漂移 0、健康 <b>11/11</b>。<br>
       ③ <b>3.2 基线重算</b>：登记件数 <b>62</b>（不变）、层间 import 边 51 → <b>52</b> —— <code>a2a_edge</code> 自本刀起 import L1 <code>web_gateway</code>（同层，方向合法），+1 条边。<br>
       上一轮（v5）：① 阶段 2 <b>刀 8a·8b</b> —— <code>chat_svc.py</code>（9980 / 9984 对话台）的<b>应答出口</b>、<b>非 GET 方法分派</b>（8a）与 <b>GET/HEAD 整张路由表 + 前端页服务</b>（8b）全部收进 L1 <code>web_gateway.py</code>；
@@ -131,22 +135,22 @@
 生成。<b>要改层归属，改 json 再重跑生成脚本</b>，别直接编辑 HTML 表格 —— 否则文档与门禁读的那份口径分家，
 门禁就白跑了。</p>
 <h2>二、件清单总表（按层）</h2>
-<p>共登记 <b>62 个件</b>、<b>37,816 行</b>。已排除 <code>tests/</code>、<code>__pycache__</code> 与归档目录。端口为「全节点同号」的约定值，实际绑定面见各件源码的 <code>--host</code>。</p>
+<p>共登记 <b>63 个件</b>、<b>37,892 行</b>。已排除 <code>tests/</code>、<code>__pycache__</code> 与归档目录。端口为「全节点同号」的约定值，实际绑定面见各件源码的 <code>--host</code>。</p>
 <h3>2.1 层规模一览</h3>
 <table><thead><tr><th>层</th><th>件数</th><th>行数</th><th>占运行件比重</th><th>层定位</th></tr></thead><tbody>
 <tr><td><b>C 组合根（进程入口装配）</b></td><td>1</td><td>124</td><td>0.3%</td><td>组合根（进程入口装配：只做装配与注入，不含业务与传输实现）</td></tr>
-<tr><td><b>L4 呈现层 Experience</b></td><td>3</td><td>2,433</td><td>6.4%</td><td>呈现层 Experience（静态壳 / 业务视图 / 网关：同源托管 · 反代 · 鉴权跳转 · SSE 聚合）</td></tr>
-<tr><td><b>L3 协作域 Domain</b></td><td>13</td><td>20,868</td><td>55.2%</td><td>协作域 Domain（群聊 / 待回应账 / 任务 / 会议 / 黑板 / 共享内容）</td></tr>
-<tr><td><b>L2 适配层 Adapter</b></td><td>4</td><td>1,723</td><td>4.6%</td><td>适配层 Adapter（Agent 差异唯一落脚点：调用 / 能力 / 上下文用量）</td></tr>
-<tr><td><b>L1 通行层 Transport</b></td><td>10</td><td>5,095</td><td>13.5%</td><td>通行层 Transport（投信封 / 保投到 / 不重复 / 可观测 / 成员入网控制面）</td></tr>
+<tr><td><b>L4 呈现层 Experience</b></td><td>4</td><td>2,509</td><td>6.6%</td><td>呈现层 Experience（静态壳 / 业务视图 / 网关：同源托管 · 反代 · 鉴权跳转 · SSE 聚合）</td></tr>
+<tr><td><b>L3 协作域 Domain</b></td><td>13</td><td>20,868</td><td>55.1%</td><td>协作域 Domain（群聊 / 待回应账 / 任务 / 会议 / 黑板 / 共享内容）</td></tr>
+<tr><td><b>L2 适配层 Adapter</b></td><td>4</td><td>1,723</td><td>4.5%</td><td>适配层 Adapter（Agent 差异唯一落脚点：调用 / 能力 / 上下文用量）</td></tr>
+<tr><td><b>L1 通行层 Transport</b></td><td>10</td><td>5,095</td><td>13.4%</td><td>通行层 Transport（投信封 / 保投到 / 不重复 / 可观测 / 成员入网控制面）</td></tr>
 <tr><td><b>L0 平台层 Host</b></td><td>11</td><td>1,693</td><td>4.5%</td><td>平台层 Host（进程监管 / 路径 / 凭据 / 日志 / 探针 / 部署件）</td></tr>
 <tr><td><b>X 横切（身份与授权）</b></td><td>1</td><td>1,397</td><td>3.7%</td><td>横切（身份与授权 / 契约与事件总线 / 可观测与门禁）</td></tr>
-<tr><td><b>T 工具面（不属运行路径）</b></td><td>19</td><td>4,483</td><td>11.9%</td><td>工具面（巡检 / 驱动 / 验收 / 一次性脚本；不属于运行路径）</td></tr>
+<tr><td><b>T 工具面（不属运行路径）</b></td><td>19</td><td>4,483</td><td>11.8%</td><td>工具面（巡检 / 驱动 / 验收 / 一次性脚本；不属于运行路径）</td></tr>
 </tbody></table>
 <h3>2.2 C 组合根（进程入口装配）（1 件 / 124 行）</h3>
 <table><thead><tr><th>件</th><th>行数</th><th>端口</th><th>层内/跨层依赖</th><th>一句话职责 · 台账备注</th></tr></thead><tbody><tr><td><code>a2a_svc.py</code></td><td>124</td><td><b>9920</b></td><td>a2a_edge, agent_usage</td><td>组合根：注入 L2 能力 + 注册 /ctx-usage，实现见 L1 a2a_edge.py。进程入口与命令行参数不变（systemd 单元 / Windows 计划任务都指向本件），argv 原样透传</td></tr></tbody></table>
-<h3>2.3 L4 呈现层 Experience（3 件 / 2,433 行）</h3>
-<table><thead><tr><th>件</th><th>行数</th><th>端口</th><th>层内/跨层依赖</th><th>一句话职责 · 台账备注</th></tr></thead><tbody><tr><td><code>task_sys/patch_group_html.py</code></td><td>227</td><td>—</td><td>—</td><td>往群页注入任务面板的补丁脚本</td></tr><tr><td><code>ui/group.html</code></td><td>2074</td><td>—</td><td>—</td><td>群聊前端单文件 —— ⚠️ 壳/视图/传输三合一（拆分点）</td></tr><tr><td><code>ui/serve.py</code></td><td>132</td><td><b>8080</b></td><td>—</td><td>前端开发服务器（生产不用）</td></tr></tbody></table>
+<h3>2.3 L4 呈现层 Experience（4 件 / 2,509 行）</h3>
+<table><thead><tr><th>件</th><th>行数</th><th>端口</th><th>层内/跨层依赖</th><th>一句话职责 · 台账备注</th></tr></thead><tbody><tr><td><code>task_sys/patch_group_html.py</code></td><td>227</td><td>—</td><td>—</td><td>往群页注入任务面板的补丁脚本</td></tr><tr><td><code>ui/group.html</code></td><td>2107</td><td>—</td><td>—</td><td>群聊前端 —— 传输客户端已抽出（见 group_transport.js）；剩「壳 + 业务视图」，仍待继续拆</td></tr><tr><td><code>ui/group_transport.js</code></td><td>43</td><td>—</td><td>—</td><td>群聊前端·传输客户端（同源 /api 客户端 + 任务服务客户端 + 端点常量）—— 刀11 从 group.html 抽出，零行为改变</td></tr><tr><td><code>ui/serve.py</code></td><td>132</td><td><b>8080</b></td><td>—</td><td>前端开发服务器（生产不用）</td></tr></tbody></table>
 <h3>2.4 L3 协作域 Domain（13 件 / 20,868 行）</h3>
 <table><thead><tr><th>件</th><th>行数</th><th>端口</th><th>层内/跨层依赖</th><th>一句话职责 · 台账备注</th></tr></thead><tbody><tr><td><code>backfill_embeddings.py</code></td><td>201</td><td>—</td><td>embedder</td><td>向量回填</td></tr><tr><td><code>blackboard_svc.py</code></td><td>4569</td><td><b>9940</b></td><td>embedder, node_paths, web_gateway</td><td>黑板服务</td></tr><tr><td><code>blackboard_view.py</code></td><td>3953</td><td><b>9941</b></td><td>node_paths, view_auth, web_gateway</td><td>看板只读视图 + 公网登录门户 —— ⚠️ 兼 L4（拆分点）</td></tr><tr><td><code>chat_svc.py</code></td><td>4817</td><td><b>9980</b></td><td>agent_model, ctx_watermark, node_paths, view_auth, web_gateway</td><td>对话台 —— ⚠️ 一文件承载 L4+L3 细节（拆分点）；L2 部分（模型执行器怎么调 + Agent 展示名）已下沉 agent_model.py，本件只留薄委托</td></tr><tr><td><code>embedder.py</code></td><td>165</td><td>—</td><td>—</td><td>语义检索向量化 —— ⚠️ 模型调用，宜归 L2</td></tr><tr><td><code>group_transcript_archiver.py</code></td><td>195</td><td>—</td><td>node_paths</td><td>群记录归档</td></tr><tr><td><code>group_watch.py</code></td><td>339</td><td>—</td><td>node_paths, team</td><td>群→点名投递桥（轮询）—— ⚠️ 应改事件驱动</td></tr><tr><td><code>roundtable.py</code></td><td>2426</td><td><b>9930</b></td><td>nats_client, node_paths</td><td>圆桌会议（经 NATS 推流）</td></tr><tr><td><code>rt_remind.py</code></td><td>629</td><td><b>9930</b></td><td>nats_client, node_paths</td><td>会议提醒</td></tr><tr><td><code>session_ctx_archiver.py</code></td><td>735</td><td>—</td><td>—</td><td>会话上下文归档</td></tr><tr><td><code>shared_content.py</code></td><td>1432</td><td>—</td><td>embedder, node_paths</td><td>临时共享区</td></tr><tr><td><code>task_svc.py</code></td><td>1017</td><td><b>9981</b></td><td>node_paths</td><td>群任务清单</td></tr><tr><td><code>task_sys/task_svc.py</code></td><td>390</td><td><b>9981</b></td><td>—</td><td>任务清单（另一份实现，需核对是否同源）</td></tr></tbody></table>
 <h3>2.5 L2 适配层 Adapter（4 件 / 1,723 行）</h3>
@@ -195,7 +199,7 @@
 </ul>
 <h3>3.2 基线（件数 / 层间 import 边 / 方向违规 —— 由 <code>check_layers.py</code> 实时打印后手抄，非随生成重算）</h3>
 <table><thead><tr><th>指标</th><th>实测</th><th>含义</th></tr></thead><tbody>
-<tr><td>登记件数</td><td><b>62</b></td><td>运行件 + 工具件，不含测试</td></tr>
+<tr><td>登记件数</td><td><b>63</b></td><td>运行件 + 工具件，不含测试</td></tr>
 <tr><td>层间 import 边</td><td><b>52</b></td><td>跨层引用（<b>含</b>共用底座件）；同层内引用不计</td></tr>
 <tr><td>方向违规</td><td><b>0</b></td><td>硬门禁今日通过</td></tr>
 </tbody></table>
@@ -246,7 +250,7 @@ L0 <code>node_paths.py</code>（≈19 件引用，按 <code>grep -l</code> 计�
 <h3>4.3 层 × 违例矩阵（一眼看哪里最脏）</h3>
 <table><thead><tr><th>层</th><th>件数</th><th>方向违规</th><th>L1 业务词</th><th>宿主硬编码件</th><th>越层持句柄</th></tr></thead><tbody>
 <tr><td><b>C 组合根（进程入口装配）</b></td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
-<tr><td><b>L4 呈现层 Experience</b></td><td>3</td><td>0</td><td>0</td><td>1</td><td>0</td></tr>
+<tr><td><b>L4 呈现层 Experience</b></td><td>4</td><td>0</td><td>0</td><td>1</td><td>0</td></tr>
 <tr><td><b>L3 协作域 Domain</b></td><td>13</td><td>0</td><td>0</td><td>5</td><td>0</td></tr>
 <tr><td><b>L2 适配层 Adapter</b></td><td>4</td><td>0</td><td>0</td><td>1</td><td>1</td></tr>
 <tr><td><b>L1 通行层 Transport</b></td><td>10</td><td>0</td><td>48</td><td>3</td><td>1</td></tr>
@@ -429,7 +433,7 @@ python tools/check_layers.py --json    # 机器可读</code></pre>
 第七节的进程实参为改写后的等价形式（结构与参数个数真实，<b>口令/令牌值已剔除</b>）。
 台账与规划文档同属长期参考件，<b>正文不含密钥、口令、令牌、连接串</b>，凭据一律只记录「在哪个路径」。</div>
 <footer>
-  HACS 分层台账 · v2 · 2026-09-25 · 阶段 0 产出 + 阶段 1 刀 1+2 ·
+  HACS 分层台账 · v7 · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c·9·10·11 ·
   规划文档：<code>docs/HACS-分层规划-handoff.html</code> ·
   机器可读孪生体：<code>tools/hacs_layers.json</code> · 门禁：<code>tools/check_layers.py</code> ·
   生成器：<code>tools/gen_ledger_doc.py</code><br>

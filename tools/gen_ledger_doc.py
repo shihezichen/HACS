@@ -78,7 +78,7 @@ def layer_table(layer):
 BASELINE = {
     # 前两项由 check_layers.py 实时打印（'分层门禁 · 台账（件数 N，层间 import 边 M）'）——
     # 动结构后必须同步这两个数；下面其余各项是**刀 3 时点**的实测，不是随生成重算。
-    'files': 62, 'edges': 52, 'direction': 0, 'bizwords': 48,
+    'files': 63, 'edges': 52, 'direction': 0, 'bizwords': 48,
     'hardcode_files': 25, 'storage': 11, 'storage_over': 2,
     # 刀 3 后：宿主字面量拆成「真硬编码（路径）」与「提示级（IP/端口默认值）」两个口径。
     'host_path_files': 42, 'host_path_sites_before': 111, 'host_path_sites_after': 80,
@@ -591,8 +591,12 @@ HTML_HEAD = """<!DOCTYPE html>
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v6</b> · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c·9 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更（v6）：① 阶段 2 <b>刀 9</b> —— <code>a2a_edge.py</code>（9920 A2A 端点）的 <b>HTTP 面</b>（应答出口 <code>_send_json</code>、两个 <code>do_*</code> 的路径分派、<code>_read_body</code>）收进 L1 <code>web_gateway.py</code>：<code>A2AHandler</code> 改继承 <code>GW.handler_class()</code>，路由改 <code>@GW.route</code> 登记表（<code>/healthz</code>、<code>/agents</code> 精确 + <code>/a2a</code> 的 GET/POST 前缀 + <code>@GW.not_found</code>），请求体改 <code>@GW.pre</code> 读一次并缓存；响应形态三件套（<code>server_version="a2a_svc/&lt;VERSION&gt;"</code> / <code>sys_version=""</code> / HTTP/1.1）在子类覆盖。<b>组合根 <code>a2a_svc.py</code> 一个字节未动</b>（已拍板：这一刀动的是 a2a_edge），注入路由协议靠把 <code>req.svc</code> 设为 <code>A2AHandler</code> 实例本身保住。<br>
+      版本 <b>v7</b> · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c·9·10·11 · 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v7）：① 阶段 2 <b>刀 10 · 前端运行真值收口</b> —— 判真值判出一个<b>假绿灯</b>：<code>deploy.py --status</code> 报四台<b>漂移 0</b>，但那<i>只覆盖部署表里的件</i>，<code>ui/</code> <b>静态资产从来不在表里</b>，于是前端在龙虾机上被直改（<code>#addagent</code> 加人对话框 / <code>#477</code> 图标 / <code>md.js</code> LaTeX 归一化）<b>整整两天对源码仓不可见</b>（源码仓 <code>group.html</code> 109101 B / <code>7f75ddb8</code> ≠ 线上 112774 B / <code>c7ff8b4e</code>；逐行 diff 证明<b>线上是严格超集</b> → 线上为真值）。处置：以线上字节<b>逐字节回写</b>源码仓 4 件（<code>group.html</code> + <code>md.js</code>/<code>tex.js</code>/<code>codeblock.js</code>），再把 <code>ui/</code> 五件<b>补登进 lobster 部署段</b>（<code>services=[]</code> —— <code>chat_svc._send_file</code> 每请求现读磁盘，静态件免重启）→ 受管件 14 → 19。<b>顺序不可反</b>：先回写再拆分；反了就是拿陈旧源码去部署，把线上多出来的功能<b>就地回退</b>。<br>
+      ② 阶段 2 <b>刀 11 · 群聊前端「传输客户端」抽出</b>（前端拆三件套第一刀）—— 新件 <code>agent-team/ui/group_transport.js</code>（1983 B，<b>5 段纯拼接</b>：<code>API</code> 常量 + <code>api()</code> + <code>TSVC</code>/<code>TGROUP_DEFAULT</code> + <code>tApi()</code>；<b>无 IIFE、无 <code>type=module</code>、无 <code>"use strict"</code></b> —— 原内联脚本里那句 <code>"use strict"</code> 落在语句之后属<b>无效指令</b>，页面实际<b>非严格模式</b>，新件加严格模式反而会改语义）；<code>group.html</code> 删 5 段及各自紧随的空行、加 1 行 <code>&lt;script src="/group_transport.js"&gt;</code>（在内联脚本之前），112774 → <b>110833 B</b>。剩「壳 + 业务视图」待后续刀继续拆。<br>
+      ③ 等价证据 <code>tools/equivalence/group_frontend_equiv.py</code>（无头 Edge + 手写 RFC6455 的 CDP，纯 stdlib；旧侧 = 开工前快照 <code>_old/group_old_k11.html</code>，装置开头<b>硬校验「旧侧 md5 前缀 = c7ff8b4e 且新旧 md5 不同」</b>防自比；<code>TSVC</code> 硬编码端点靠 CDP <code>Fetch</code> 域拦截 + <code>fulfillRequest</code> 合成应答，被测代码一字未动）：文本级 <b>5/5 逐段 <code>==</code></b>、标识符探针 <b>9/9</b>、启动轨迹 <b>4/4</b>、轮询轨迹 <b>1/1</b>、动作序轨迹 <b>13/13</b>、函数级 <b>7 例线级逐字节</b>、两侧 JS 错误 <b>0/0</b> —— 逐条 diff 合计 <b>0</b>（归一化只命中 <code>Referer</code>/端口/<code>next=</code>，「时间戳类规则一次都没触发」）。线上 9984 逐字节对照：served <code>group.html</code> <code>e5c46769</code> == 部署件、<code>/group_transport.js</code> 200 / 1983 B == 部署件；真机冒烟脚本序 <code>md·tex·hl·codeblock·group_transport·inline</code>、<code>api</code>/<code>tApi</code> 均 <code>function</code>；红点集合改前 = 改后 = <code>{blackboard_view, chat_svc, rt_remind, teamd}</code>（零 <code>.py</code> 改动，逻辑与实跑双证）。<br>
+      ④ <b>3.2 基线重算</b>：登记件数 62 → <b>63</b>（新增 L4 <code>group_transport.js</code>）、层间 import 边 <b>52</b>（不变 —— 前端件之间没有 import 边）。<br>
+      上一轮（v6）：① 阶段 2 <b>刀 9</b> —— <code>a2a_edge.py</code>（9920 A2A 端点）的 <b>HTTP 面</b>（应答出口 <code>_send_json</code>、两个 <code>do_*</code> 的路径分派、<code>_read_body</code>）收进 L1 <code>web_gateway.py</code>：<code>A2AHandler</code> 改继承 <code>GW.handler_class()</code>，路由改 <code>@GW.route</code> 登记表（<code>/healthz</code>、<code>/agents</code> 精确 + <code>/a2a</code> 的 GET/POST 前缀 + <code>@GW.not_found</code>），请求体改 <code>@GW.pre</code> 读一次并缓存；响应形态三件套（<code>server_version="a2a_svc/&lt;VERSION&gt;"</code> / <code>sys_version=""</code> / HTTP/1.1）在子类覆盖。<b>组合根 <code>a2a_svc.py</code> 一个字节未动</b>（已拍板：这一刀动的是 a2a_edge），注入路由协议靠把 <code>req.svc</code> 设为 <code>A2AHandler</code> 实例本身保住。<br>
       ② 等价证据 <code>tools/equivalence/a2a_edge_equiv.py</code> <b>46/46</b> 逐例一致（原 23 例一字未改；新增 23 例 = 路径判据边角 12 + 带体 6（含 300KB &gt; MAX_BODY_BYTES 的超大体）+ <b>keep-alive 同连接裸字节</b> 5）；另做<b>独立复核</b>：以本刀开工前快照 <code>_old/a2a_edge_old_k9.py</code> 为旧侧、直接对照<b>改前 vs 改后 46/46</b>（不复用装置旧侧）；线上四台逐字节对照（13 条只读探针 × 4 节点 + keep-alive 面）<b>0 处不一致</b>，<code>deploy.py --status</code> 漂移 0、健康 <b>11/11</b>。<br>
       ③ <b>3.2 基线重算</b>：登记件数 <b>62</b>（不变）、层间 import 边 51 → <b>52</b> —— <code>a2a_edge</code> 自本刀起 import L1 <code>web_gateway</code>（同层，方向合法），+1 条边。<br>
       上一轮（v5）：① 阶段 2 <b>刀 8a·8b</b> —— <code>chat_svc.py</code>（9980 / 9984 对话台）的<b>应答出口</b>、<b>非 GET 方法分派</b>（8a）与 <b>GET/HEAD 整张路由表 + 前端页服务</b>（8b）全部收进 L1 <code>web_gateway.py</code>；
@@ -622,7 +626,7 @@ HTML_HEAD = """<!DOCTYPE html>
 """
 HTML_FOOT = """
 <footer>
-  HACS 分层台账 · v2 · 2026-09-25 · 阶段 0 产出 + 阶段 1 刀 1+2 ·
+  HACS 分层台账 · v7 · 2026-09-25 首版 / 2026-09-26 阶段 2 刀 8a·8b·8c·9·10·11 ·
   规划文档：<code>docs/HACS-分层规划-handoff.html</code> ·
   机器可读孪生体：<code>tools/hacs_layers.json</code> · 门禁：<code>tools/check_layers.py</code> ·
   生成器：<code>tools/gen_ledger_doc.py</code><br>
