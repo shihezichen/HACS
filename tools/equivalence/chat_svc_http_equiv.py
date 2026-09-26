@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""chat_svc 的**应答出口 + 非 GET 分派**收进 L1 `web_gateway` 的字节级等价证据（可复跑）。
+"""chat_svc 的 HTTP 面收进 L1 `web_gateway` 的字节级等价证据（可复跑）。
+
+覆盖两刀：
+  · 刀 8a —— 应答出口（`_send_json` / `_redirect` / `_send_bytes`）+ 非 GET 方法分派；
+  · 刀 8b —— **GET / HEAD 的整张路由表 + 前端页服务**（`_send_file()` 的调用面）。
 
 用法：
     python tools/equivalence/chat_svc_http_equiv.py [--ref <迁移前的提交>]
@@ -8,8 +12,12 @@
              _old/chat_svc_old_8a.py；不给就用磁盘上已有的那份快照。
              快照作「旧实现」，工作树那份作「新实现」。
 
-做法：同一进程内起两份 ThreadingHTTPServer —— 旧 / 新 的 `ChatHandler`，各绑一个
-空闲高端口，跑同一张请求矩阵，逐例比对：
+做法：同一进程内起**三份** ThreadingHTTPServer，各绑一个空闲高端口：
+  · `_old/chat_svc_old.py`     —— 刀 8a 之前的实现，**刀 8a 及以前那 155 例的旧侧**；
+  · `_old/chat_svc_old_8b.py`  —— 刀 8a 收尾（9841382），**刀 8b 追加那 156 例的旧侧**；
+  · 工作树 `agent-team/chat_svc.py` —— 新实现，两组都拿它当新侧。
+两份基线**并存**：一刀一份、谁也不覆盖谁，旧刀的证据不会因为新刀换基线而静默失效。
+跑同一张请求矩阵，逐例比对：
 
     状态码 + 状态原因 + **可比响应头（含顺序）** + 正文（归一后逐字节）
 
@@ -47,6 +55,13 @@ import socket
 import subprocess
 import sys
 import threading
+
+# 本机的**系统代理**会把 `_calc_proxy()` 的 urllib 请求劫走 —— 见 `_DeadUpstream`：
+# 不绕开的话，「上游不可用」那几例的 502 正文里写的是**代理进程**的报错，而代理对一个
+# 连不上的目标时而回 RST、时而回 FIN，旧侧新侧各掷一次骰子就成了假不一致。
+# 必须设在**任何 urlopen 之前**：`urlopen` 首次调用会缓存全局 opener，而 ProxyHandler
+# 在构造时就把 `getproxies()` 快照下来了，之后再改环境变量不再生效。
+os.environ["no_proxy"] = os.environ["NO_PROXY"] = "127.0.0.1,localhost,::1"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -322,33 +337,37 @@ class _CalcUpstream(object):
 
 
 class _DeadUpstream(object):
-    """「后台没起」的**确定性**替身：接上就立刻关，两侧必得同一个 RemoteDisconnected。
+    """「后台没起」的**确定性**替身：bind 占住一个临时端口但**不 listen**，
+    连过去必是同一个 `ConnectionRefusedError`（Windows 10061 / POSIX ECONNREFUSED）。
 
-    为什么不直接指一个没人听的端口 —— 试过，不稳：Windows 上同一个刚释放的端口，
-    第一次连拿到的是 `RemoteDisconnected`（"Remote end closed..."），第二次是
-    `WinError 10054`，于是旧侧新侧的 502 正文（`scrubbed(exc)` 把 OS 原文带进了
-    message）差了 23 个字节 —— 一条**纯环境噪声**的假不一致。
-    这里自己造一个「accept 完就 close」的黑洞口，错误原文就固定了，
-    502 那一支照样是真的走「上游不可用」分支，只是不再随 OS 心情漂。
+    为什么不直接指一个「常识上没人用」的端口 —— 那是在赌机器状态，本机 calc 真起着
+    就假过、真没起才假死，用例的成败跟着环境漂。必须自己造口。
+
+    为什么不再用「accept 完就 close」的黑洞口（本函数的上一版）—— 那一版仍有竞态：
+    `close()` 时若请求字节已经躺在内核接收缓冲区里，走的是 **RST**（`WinError 10054`）；
+    若还没到，走的是 **FIN**（`RemoteDisconnected`）。`scrubbed(exc)` 会把 OS 原文带进
+    502 正文，于是旧侧新侧各自掷一次骰子，正文差几十个字节 —— 表现就是 C01..C03 /
+    D01..D02 里**每次换人**的假不一致。
+
+    bind 而不 listen 则没有这个缝：内核在 SYN 阶段就回 RST，握手从未建立，客户端拿到的
+    永远是 ConnectionRefused，错误原文固定。502 那一支照样真的走「上游不可用」分支。
+
+    另一半同样要命：`_calc_proxy()` 用的是 `urllib.request`，它**默认读系统代理**。本机
+    若开着代理（实测 `getproxies()` → `http://127.0.0.1:4780`），请求根本没发到死口，
+    报错来自**代理进程**，同样时 RST 时 FIN。所以模块顶部把 `no_proxy` 钉上（那里也
+    说明了为什么必须设在首次 urlopen 之前），两者齐备才谈得上确定。
+    实测：绕开代理后同一个 bind-不-listen 口连 30 次，30 次同一句 `WinError 10061`。
+
+    socket 全程**持有不关**（不是 bind 完就 close 释放）：端口被占着，跑例期间不会被
+    别的进程抢去变成一个活口；收尾时由调用方 `.close()`。也正因为要占住，这里**不设**
+    `SO_REUSEADDR` —— Windows 上那个选项会允许别人重复绑同一端口。
     """
 
     @staticmethod
     def make():
         srv = socket.socket()
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("127.0.0.1", 0))
-        srv.listen(8)
+        srv.bind(("127.0.0.1", 0))      # 只 bind，不 listen → 必然 ConnectionRefused
         port = srv.getsockname()[1]
-
-        def loop():
-            while True:
-                try:
-                    conn, _ = srv.accept()
-                except OSError:
-                    return
-                conn.close()
-
-        threading.Thread(target=loop, daemon=True).start()
         return srv, port
 
 
@@ -608,6 +627,279 @@ CASES_GET_8B = [
     ("G37 GET 大文件(1MB)",        "GET", "/big.bin", "cookie", None),
 ]
 
+# ================================================================== 刀8b 追加
+#
+# 刀8b 把 **GET 的路由表 + 前端页服务**收进 L1。上面那 155 例一个字不动（它们的
+# 旧侧是 `_old/chat_svc_old.py`，表里 GET 面原封不动，正好当「没被顺手改掉」的回归）；
+# 下面这些是**本刀新登记的每一条 GET/HEAD 路由**的逐条对照，旧侧换成本刀的基线
+# `_old/chat_svc_old_8b.py`（= 刀8a 入库的 9841382 那版），另起一个端口跑。
+#
+# 每条路由至少一例，且按要求覆盖四个形态维度：
+#   · 带 token（合法 cookie / tailnet）与不带 token（且非 tailnet）；
+#   · 带 `?query` 与不带；
+#   · 带尾斜杠与不带（`_dispatch_gw()` 的 rstrip 与 L1 登记侧的 rstrip 要对上）；
+#   · GET 与 HEAD（硬约束 5：HEAD 的既有口径不许动）。
+# 比对口径与上面完全一致（`run()` 原样复用）：状态码 + 状态原因 + **有序**响应头
+# + 归一后正文，逐字节。
+
+OLD_FILE_8B = os.path.join(OLD, "chat_svc_old_8b.py")
+
+# ---- K 组：本刀新登记的 GET/HEAD 路由（A 相 · 非 tailnet · 严格鉴权）----
+CASES_K8B_GET = [
+    # 1) /healthz —— 公开，不鉴权（硬约束 1：全局钩子会把它拦成 401）
+    ("K01 GET healthz 无token",        "GET",  "/healthz", "none", None),
+    ("K02 GET healthz 有cookie",       "GET",  "/healthz", "cookie", None),
+    ("K03 GET healthz 尾斜杠",          "GET",  "/healthz/", "none", None),
+    ("K04 GET healthz 带查询",          "GET",  "/healthz?a=1&a=2", "none", None),
+    ("K05 GET healthz 尾斜杠+查询",      "GET",  "/healthz/?a=1", "none", None),
+    ("K06 GET healthz #frag",          "GET",  "/healthz#x", "none", None),
+    ("K07 HEAD healthz 无token",       "HEAD", "/healthz", "none", None),
+    ("K08 HEAD healthz 尾斜杠",         "HEAD", "/healthz/", "none", None),
+    # 2) /login · /logout —— 302 转门户登录页，不鉴权
+    ("K09 GET login 无token",          "GET",  "/login", "none", None),
+    ("K10 GET login 有cookie",         "GET",  "/login", "cookie", None),
+    ("K11 GET login 尾斜杠",            "GET",  "/login/", "none", None),
+    ("K12 GET login 带 next",          "GET",  "/login?next=/g/abc", "none", None),
+    ("K13 GET login 尾斜杠+next",       "GET",  "/login/?next=/g/abc", "none", None),
+    ("K14 GET login 外站 next",         "GET",  "/login?next=http://evil.example/x", "none", None),
+    ("K15 GET login next 非/开头",      "GET",  "/login?next=abc", "none", None),
+    ("K16 GET logout 无token",         "GET",  "/logout", "none", None),
+    ("K17 GET logout 尾斜杠",           "GET",  "/logout/", "cookie", None),
+    ("K18 GET logout 带 next",         "GET",  "/logout?next=/x", "none", None),
+    ("K19 HEAD login 302",             "HEAD", "/login", "none", None),
+    ("K20 HEAD logout 302",            "HEAD", "/logout", "cookie", None),
+    # 3) /calc —— 前台页；路径被改写成写死的 /calc.html（不是 req.path）
+    ("K21 GET calc 无token",           "GET",  "/calc", "none", None),
+    ("K22 GET calc 有cookie",          "GET",  "/calc", "cookie", None),
+    ("K23 GET calc 尾斜杠",             "GET",  "/calc/", "cookie", None),
+    ("K24 GET calc 带查询",             "GET",  "/calc?x=1", "cookie", None),
+    ("K25 HEAD calc",                  "HEAD", "/calc", "cookie", None),
+    # 4) /calc/api/* —— 反代；**裸前缀与尾斜杠必须落静态**，不许被 L1 的前缀匹配吃掉
+    ("K26 GET calc/api/ok 无token",    "GET",  "/calc/api/ok", "none", None),
+    ("K27 GET calc/api/ok 有cookie",   "GET",  "/calc/api/ok", "cookie", None),
+    ("K28 GET calc/api/ok 带查询",      "GET",  "/calc/api/ok?a=1&b=2", "cookie", None),
+    ("K29 GET calc/api/nope 上游404",  "GET",  "/calc/api/nope", "cookie", None),
+    ("K30 GET calc/api 裸前缀",         "GET",  "/calc/api", "cookie", None),
+    ("K31 GET calc/api/ 尾斜杠",        "GET",  "/calc/api/", "cookie", None),
+    ("K32 GET calc/apix 近似",          "GET",  "/calc/apix", "cookie", None),
+    ("K33 HEAD calc/api/ok",           "HEAD", "/calc/api/ok", "cookie", None),
+    # 5) /calc/admin 与 /calc/admin/* —— 精确在前、前缀在后；两支的 404 文案不同，
+    #    **不许合并**（admin_ui_not_deployed vs not_found，逐字节各自成立）
+    ("K34 GET calc/admin 无token",     "GET",  "/calc/admin", "none", None),
+    ("K35 GET calc/admin 有cookie",    "GET",  "/calc/admin", "cookie", None),
+    ("K36 GET calc/admin 尾斜杠",       "GET",  "/calc/admin/", "cookie", None),
+    ("K37 GET calc/admin 带查询",       "GET",  "/calc/admin?x=1", "cookie", None),
+    ("K38 GET calc/admin/assets/a.js", "GET",  "/calc/admin/assets/a.js", "cookie", None),
+    ("K39 GET calc/admin 深层无扩展",    "GET",  "/calc/admin/x/y", "cookie", None),
+    ("K40 GET calc/adminx 近似",        "GET",  "/calc/adminx", "cookie", None),
+    ("K41 HEAD calc/admin",            "HEAD", "/calc/admin", "cookie", None),
+    # 6) /api/whoami · /api/agents —— 401 门槛（无 token）/ 200（有 cookie）
+    ("K42 GET whoami 无token",         "GET",  "/api/whoami", "none", None),
+    ("K43 GET whoami 坏cookie",        "GET",  "/api/whoami", "badcookie", None),
+    ("K44 GET whoami 有cookie",        "GET",  "/api/whoami", "cookie", None),
+    ("K45 GET whoami 尾斜杠",           "GET",  "/api/whoami/", "cookie", None),
+    ("K46 GET whoami 带查询",           "GET",  "/api/whoami?x=1", "cookie", None),
+    ("K47 HEAD whoami 无token",        "HEAD", "/api/whoami", "none", None),
+    ("K48 HEAD whoami 有cookie",       "HEAD", "/api/whoami", "cookie", None),
+    ("K49 GET agents 无token",         "GET",  "/api/agents", "none", None),
+    ("K50 GET agents 有cookie",        "GET",  "/api/agents", "cookie", None),
+    ("K51 GET agents 尾斜杠",           "GET",  "/api/agents/", "cookie", None),
+    ("K52 GET agents 带查询",           "GET",  "/api/agents?x=1", "cookie", None),
+    ("K53 HEAD agents 有cookie",       "HEAD", "/api/agents", "cookie", None),
+    # 7) /api/sessions（精确登记）
+    ("K54 GET sessions 无token",       "GET",  "/api/sessions", "none", None),
+    ("K55 GET sessions 有cookie",      "GET",  "/api/sessions", "cookie", None),
+    ("K56 GET sessions 尾斜杠",         "GET",  "/api/sessions/", "cookie", None),
+    ("K57 GET sessions 带筛选",         "GET",
+     "/api/sessions?kind=dm&state=open&mine=1", "cookie", None),
+    ("K58 HEAD sessions 有cookie",     "HEAD", "/api/sessions", "cookie", None),
+    # 8) /api/sessions/<sid>/...（前缀登记里那六条顺序敏感的正则）
+    ("K59 GET 群详情 无token",          "GET",  "/api/sessions/%s" % SID, "none", None),
+    ("K60 GET 群详情 有cookie",         "GET",  "/api/sessions/%s" % SID, "cookie", None),
+    ("K61 GET 群详情 尾斜杠",            "GET",  "/api/sessions/%s/" % SID, "cookie", None),
+    ("K62 GET 群详情 带查询",            "GET",  "/api/sessions/%s?x=1" % SID, "cookie", None),
+    ("K63 GET 群详情 不存在",            "GET",  "/api/sessions/%s" % SID_MISS, "cookie", None),
+    ("K64 GET messages 无token",       "GET",  "/api/sessions/%s/messages" % SID, "none", None),
+    ("K65 GET messages 有cookie",      "GET",  "/api/sessions/%s/messages" % SID, "cookie", None),
+    ("K66 GET messages 尾斜杠",         "GET",  "/api/sessions/%s/messages/" % SID, "cookie", None),
+    ("K67 GET messages 带分页",         "GET",
+     "/api/sessions/%s/messages?limit=3&before_seq=9" % SID, "cookie", None),
+    ("K68 GET messages 坏 seq",        "GET",
+     "/api/sessions/%s/messages?before_seq=abc" % SID, "cookie", None),
+    ("K69 GET memo 无token",           "GET",  "/api/sessions/%s/memo" % SID, "none", None),
+    ("K70 GET memo 有cookie",          "GET",  "/api/sessions/%s/memo" % SID, "cookie", None),
+    ("K71 GET memo 尾斜杠",             "GET",  "/api/sessions/%s/memo/" % SID, "cookie", None),
+    ("K72 GET todos/intents 无token",  "GET",
+     "/api/sessions/%s/todos/intents" % SID, "none", None),
+    ("K73 GET todos/intents 有cookie", "GET",
+     "/api/sessions/%s/todos/intents" % SID, "cookie", None),
+    ("K74 GET todos/intents 尾斜杠",    "GET",
+     "/api/sessions/%s/todos/intents/" % SID, "cookie", None),
+    ("K75 GET todos/intents 带查询",    "GET",
+     "/api/sessions/%s/todos/intents?limit=5" % SID, "cookie", None),
+    ("K76 GET todos 无token",          "GET",  "/api/sessions/%s/todos" % SID, "none", None),
+    ("K77 GET todos 有cookie",         "GET",  "/api/sessions/%s/todos" % SID, "cookie", None),
+    ("K78 GET todos 尾斜杠",            "GET",  "/api/sessions/%s/todos/" % SID, "cookie", None),
+    ("K79 GET todos 带筛选",            "GET",
+     "/api/sessions/%s/todos?owner=%s&status=todo&sort=ctime" % (SID, AGENT), "cookie", None),
+    ("K80 GET members 无token",        "GET",  "/api/sessions/%s/members" % SID, "none", None),
+    ("K81 GET members 有cookie",       "GET",  "/api/sessions/%s/members" % SID, "cookie", None),
+    ("K82 GET members 尾斜杠",          "GET",  "/api/sessions/%s/members/" % SID, "cookie", None),
+    ("K83 GET members 带查询",          "GET",
+     "/api/sessions/%s/members?detail=1" % SID, "cookie", None),
+    ("K84 HEAD 群详情",                 "HEAD", "/api/sessions/%s" % SID, "cookie", None),
+    ("K85 HEAD messages",              "HEAD", "/api/sessions/%s/messages" % SID, "cookie", None),
+    # 9) /api 面「形状不对」→ 501；**未登录时仍是 401**。
+    #    这一组就是硬约束 1 的正面证据：401 门槛在 501 兜底**之前**，位置没挪。
+    ("K86 GET api 未知路径 无token",     "GET",  "/api/zzz", "none", None),
+    ("K87 GET api 未知路径 有cookie",    "GET",  "/api/zzz", "cookie", None),
+    ("K88 GET sessions 未知子路径",      "GET",  "/api/sessions/%s/zzz" % SID, "cookie", None),
+    ("K89 GET sessions 子路径 无token",  "GET",  "/api/sessions/%s/zzz" % SID, "none", None),
+    ("K90 GET sessions 过深",           "GET",  "/api/sessions/%s/todos/zzz" % SID, "cookie", None),
+    ("K91 GET sid 超长(65位)",          "GET",
+     "/api/sessions/%s/messages" % ("x" * 65), "cookie", None),
+    ("K92 GET /api/todos 无 GET 面",    "GET",  "/api/todos/todo_0001", "cookie", None),
+    ("K93 GET /api/todos 无token",     "GET",  "/api/todos/todo_0001", "none", None),
+    ("K94 HEAD api 未知路径 无token",    "HEAD", "/api/zzz", "none", None),
+    ("K95 HEAD api 未知路径 有cookie",   "HEAD", "/api/zzz", "cookie", None),
+    ("K96 GET /api 裸段 有cookie",      "GET",  "/api", "cookie", None),
+    ("K97 GET /api 裸段 无token",       "GET",  "/api", "none", None),
+    ("K98 GET /apix 近似",              "GET",  "/apix", "cookie", None),
+]
+
+# ---- S 组：前端页服务（`/`、group.html、静态资源、SPA 兜底）----
+#
+# 硬约束 4：未知 GET 路径当前返回**整页 200**，不是 404 —— 这一组既逐字节对照旧侧，
+# 另有 `check_k8b_spa_fallback()` 单独把「200 且正文就是 group.html」钉死。
+CASES_K8B_STATIC = [
+    ("S01 GET 根 → group.html",        "GET",  "/", "cookie", None),
+    ("S02 GET 根 无token",              "GET",  "/", "none", None),
+    ("S03 GET 根 带查询",                "GET",  "/?x=1", "cookie", None),
+    ("S04 HEAD 根",                     "HEAD", "/", "cookie", None),
+    ("S05 GET group.html 直取",         "GET",  "/group.html", "cookie", None),
+    ("S06 GET group.html 无token",      "GET",  "/group.html", "none", None),
+    ("S07 GET group.html 带查询",        "GET",  "/group.html?v=2", "cookie", None),
+    ("S08 HEAD group.html",            "HEAD", "/group.html", "cookie", None),
+    ("S09 GET 子目录 index",             "GET",  "/sub", "cookie", None),
+    ("S10 GET 子目录 尾斜杠",             "GET",  "/sub/", "cookie", None),
+    ("S11 GET css MIME",               "GET",  "/a.css", "cookie", None),
+    ("S12 GET js MIME",                "GET",  "/a.js", "cookie", None),
+    ("S13 GET png MIME",               "GET",  "/a.png", "cookie", None),
+    ("S14 GET 1MB 二进制",               "GET",  "/big.bin", "cookie", None),
+    ("S15 GET SPA 兜底 未知路径",         "GET",  "/nope", "cookie", None),
+    ("S16 GET SPA 兜底 无token",         "GET",  "/nope", "none", None),
+    ("S17 GET SPA 兜底 多级路径",         "GET",  "/g/abc/def", "cookie", None),
+    ("S18 GET SPA 兜底 尾斜杠",           "GET",  "/nope/", "cookie", None),
+    ("S19 GET SPA 兜底 带查询",           "GET",  "/nope?x=1", "cookie", None),
+    ("S20 HEAD SPA 兜底",               "HEAD", "/nope", "cookie", None),
+    ("S21 GET 带扩展名未命中 → 404",       "GET",  "/nope.js", "cookie", None),
+    ("S22 GET 目录穿越",                 "GET",  "/../secret.txt", "cookie", None),
+    ("S23 GET 隐藏文件",                 "GET",  "/.hidden", "cookie", None),
+    ("S24 GET 排除表 serve.py",          "GET",  "/serve.py", "cookie", None),
+    ("S25 GET calc.html 直取",          "GET",  "/calc.html", "cookie", None),
+]
+
+# ---- T 组：tailnet 免登录（=「有 token」的另一种口径）下的 GET 面 ----
+CASES_K8B_TAILNET = [
+    ("T01 GET whoami tailnet",         "GET",  "/api/whoami", "none", None),
+    ("T02 GET agents tailnet",         "GET",  "/api/agents", "none", None),
+    ("T03 GET sessions tailnet",       "GET",  "/api/sessions", "none", None),
+    ("T04 GET 群详情 tailnet",          "GET",  "/api/sessions/%s" % SID, "none", None),
+    ("T05 GET messages tailnet",       "GET",  "/api/sessions/%s/messages" % SID, "none", None),
+    ("T06 GET memo tailnet",           "GET",  "/api/sessions/%s/memo" % SID, "none", None),
+    ("T07 GET todos tailnet",          "GET",  "/api/sessions/%s/todos" % SID, "none", None),
+    ("T08 GET todos/intents tailnet",  "GET",
+     "/api/sessions/%s/todos/intents" % SID, "none", None),
+    ("T09 GET members tailnet",        "GET",  "/api/sessions/%s/members" % SID, "none", None),
+    ("T10 GET api 未知 tailnet",        "GET",  "/api/zzz", "none", None),
+    ("T11 GET 根 tailnet",              "GET",  "/", "none", None),
+    ("T12 GET SPA 兜底 tailnet",        "GET",  "/nope", "none", None),
+    ("T13 HEAD whoami tailnet",        "HEAD", "/api/whoami", "none", None),
+    ("T14 GET healthz tailnet",        "GET",  "/healthz", "none", None),
+    ("T15 GET calc/admin tailnet",     "GET",  "/calc/admin", "none", None),
+]
+
+# ---- D 组：计算器后台不可用时，GET 面的其它路由不受影响 ----
+CASES_K8B_CALC_DOWN = [
+    ("D01 GET calc 上游死",             "GET",  "/calc/api/ok", "cookie", None),
+    ("D02 HEAD calc 上游死",            "HEAD", "/calc/api/ok", "cookie", None),
+    ("D03 GET healthz 仍正常",          "GET",  "/healthz", "cookie", None),
+    ("D04 GET 根 仍正常",                "GET",  "/", "cookie", None),
+]
+
+#: 静态资源的 Content-Type 期望值。`.js/.css/.html` 来自 `MIME_OVERRIDE`（钉死的），
+#: `.png` 走 `mimetypes.guess_type`。`big.bin` 不写期望值（各机 mimetypes 库可能不同），
+#: 只比新旧两侧是否一致 —— 写死反而会变成一条**环境**断言而不是等价断言。
+K8B_CTYPE = [
+    ("/group.html", "text/html; charset=utf-8"),
+    ("/a.css",      "text/css; charset=utf-8"),
+    ("/a.js",       "application/javascript; charset=utf-8"),
+    ("/a.png",      "image/png"),
+    ("/big.bin",    None),
+    ("/", "text/html; charset=utf-8"),          # 根页 = group.html，同一个 MIME
+    ("/nope", "text/html; charset=utf-8"),      # SPA 兜底也是整页 HTML
+]
+
+
+def check_k8b_static_content_type(p_old, p_new):
+    """静态资源的 Content-Type：新旧一致，且钉死的那几个就是 MIME_OVERRIDE 里的值。
+
+    刀8b 只把 `_send_file()`「接进」L1 分发，MIME 判定一个字没动 —— 这条是它的正面证据。
+    """
+    print("\n== 刀8b · 静态资源 Content-Type（新旧一致 + 钉死值）==")
+    bad = 0
+    for path, want in K8B_CTYPE:
+        _s_o, h_o, _b_o = call_raw(p_old, "GET", path, "cookie", None)
+        st_n, h_n, _b_n = call_raw(p_new, "GET", path, "cookie", None)
+        ct_o, ct_n = dict(h_o).get("content-type"), dict(h_n).get("content-type")
+        ok = (ct_o == ct_n) and (want is None or ct_n == want)
+        bad += 0 if ok else 1
+        print("  %s GET %-14s -> %s  Content-Type=%r（旧=%r，期望=%r）"
+              % ("✓" if ok else "✗", path, st_n, ct_n, ct_o, want))
+    return bad
+
+
+def check_k8b_spa_fallback(p_old, p_new):
+    """硬约束 4：未知 GET 路径回的是**整页 200**，不是 404。
+
+    比「新旧一致」更强一层 —— 万一两边被一起改成 404，逐字节对照照样全绿，
+    所以这里把「200 + 正文等于 group.html 的字节」单独钉死，两侧各钉一遍。
+    """
+    print("\n== 刀8b · 硬约束 4 · SPA 兜底仍是整页 200（不是 404）==")
+    bad = 0
+    st_i, _h, page = call_raw(p_new, "GET", "/group.html", "cookie", None)
+    for label, port in (("旧实现(8b基线)", p_old), ("新实现", p_new)):
+        for path in ("/nope", "/g/abc/def", "/nope/"):
+            st, _hd, body = call_raw(port, "GET", path, "cookie", None)
+            ok = (st == 200 and body == page and st_i == 200 and len(page) > 0)
+            bad += 0 if ok else 1
+            print("  %s %s GET %-14s -> %s  正文==group.html? %s"
+                  % ("✓" if ok else "✗", label, path, st, body == page))
+    return bad
+
+
+def check_k8b_no_streaming():
+    """硬约束 3 的第三份证据：**8b 的基线快照**同样没有流式 / 长连接写法。
+
+    既有的两例（旧 8a 快照 + 工作树）由 `check_no_streaming()` 保着，一个字没动；
+    这里只是把本刀的基线也扫一遍 —— 否则「新旧都无流式」这句话里的「旧」指的是
+    上一刀的旧，不是本刀的旧。
+    """
+    print("\n== 刀8b · 硬约束 3 · 基线快照 %s 无流式面 ==" % os.path.basename(OLD_FILE_8B))
+    raw = _code_only(io.open(OLD_FILE_8B, "rb").read())
+    hits = [m.decode("utf-8") for m in STREAM_MARKERS if m in raw]
+    if hits:
+        print("  ✗ 命中流式标记：%s —— 那一支必须原样直写 socket" % hits)
+        return 1
+    print("  ✓ 无 text/event-stream / chunked / Transfer-Encoding / flush / yield")
+    return 0
+
+
+#: 刀8b 追加的用例总数（4 组矩阵 + 7 例 Content-Type + 6 例 SPA 兜底 + 1 例流式断言）
+K8B_TOTAL = (len(CASES_K8B_GET) + len(CASES_K8B_STATIC) + len(CASES_K8B_TAILNET)
+             + len(CASES_K8B_CALC_DOWN) + len(K8B_CTYPE) + 6 + 1)
+
+
 # ---- B 相：tailnet 免登录（= 「有 token」的另一种口径），能到 2xx 的都在这里 ----
 CASES_TAILNET = [
     ("B01 POST sessions tailnet",  "POST", "/api/sessions", "none", J({"kind": "meet"})),
@@ -806,8 +1098,26 @@ def main():
     s_old = start(chat_svc_old.ChatHandler, p_old)
     s_new = start(chat_svc.ChatHandler, p_new)
 
+    # --- 刀8b：本刀的基线快照（= 刀8a 入库的 9841382 那版）单独起一份 ---
+    #
+    # **不复用 `chat_svc_old`**：那份是刀8a 之前的实现，上面 155 例的旧侧就是它，
+    # 一个字不能动。本刀的「改前」是 9841382，所以另取一份、另起一个端口，
+    # 追加的用例全部拿它当旧侧 —— 旧证据与新证据互不覆盖（既有 `_old/*` 全没碰）。
+    if not os.path.isfile(OLD_FILE_8B):
+        print("缺少刀8b 基线快照 %s —— 用\n"
+              "    git show 9841382:agent-team/chat_svc.py > %s\n生成"
+              % (OLD_FILE_8B, OLD_FILE_8B))
+        return 2
+    import chat_svc_old_8b                                     # noqa: E402
+    setup_runtime(chat_svc_old_8b, ui)
+    chat_svc_old_8b.ChatHandler.CHAT_CALC_UPSTREAM = up_live
+    chat_svc_old_8b.ChatHandler.CHAT_ADMIN_UI_DIR = os.path.join(ui, "admin-ui-absent")
+    p_8b = free_port()
+    s_8b = start(chat_svc_old_8b.ChatHandler, p_8b)
+
     print("旧实现 %s   :%d" % (OLD_FILE, p_old))
     print("新实现 %s   :%d" % (os.path.join(AG, "chat_svc.py"), p_new))
+    print("刀8b基线 %s   :%d" % (OLD_FILE_8B, p_8b))
     print("假计算器上游 :%d    ui/ = %s    cookie 名 = %s" % (calc_port, ui, COOKIE_NAME))
 
     bad = 0
@@ -822,9 +1132,19 @@ def main():
     bad += check_content_length_always(p_new)
     bad += run_keepalive(p_old, p_new)
 
+    # --- 刀8b 追加：旧侧 = p_8b（本刀基线），仍在「非 tailnet」这一相 ---
+    bad += check_k8b_no_streaming()
+    bad += run("刀8b · 新登记的 GET/HEAD 路由 · 非 tailnet（无 token / 有 cookie · "
+               "带查询 / 不带 · 带尾斜杠 / 不带）", CASES_K8B_GET, p_8b, p_new)
+    bad += run("刀8b · 前端页服务（/ · group.html · 静态资源 · SPA 兜底）",
+               CASES_K8B_STATIC, p_8b, p_new)
+    bad += check_k8b_static_content_type(p_8b, p_new)
+    bad += check_k8b_spa_fallback(p_8b, p_new)
+
     # --- B 相：tailnet 免登录 ---
     view_auth.in_tailnet = lambda ip: True
     bad += run("B 相 · tailnet 免登录（能到 2xx 的都在这里）", CASES_TAILNET, p_old, p_new)
+    bad += run("刀8b · tailnet 免登录下的 GET 面", CASES_K8B_TAILNET, p_8b, p_new)
 
     # --- C 相：计算器后台不可用 ---
     #
@@ -833,20 +1153,26 @@ def main():
     up_dead = "http://127.0.0.1:%d" % dead_port
     for mod in (chat_svc_old, chat_svc):
         mod.ChatHandler.CHAT_CALC_UPSTREAM = up_dead
+    chat_svc_old_8b.ChatHandler.CHAT_CALC_UPSTREAM = up_dead    # 刀8b 基线也指死端口
     bad += run("C 相 · 计算器后台不可用 → 502", CASES_CALC_DOWN, p_old, p_new)
+    bad += run("刀8b · 计算器后台不可用时 GET 面不受影响", CASES_K8B_CALC_DOWN, p_8b, p_new)
 
     total = (len(CASES_NOAUTH) + len(CASES_GET_8B) + len(CASES_TAILNET)
              + len(CASES_CALC_DOWN) + len(KEEPALIVE) + 6 + 2)
-    for srv in (s_old, s_new, calc_srv):
+    total_8b, total = K8B_TOTAL, total + K8B_TOTAL
+    for srv in (s_old, s_new, s_8b, calc_srv):
         srv.shutdown()
         srv.server_close()
     dead_srv.close()
 
     print("\n" + "=" * 130)
     if bad:
-        print("✗ 有 %d 处不一致（共 %d 例）" % (bad, total))
+        print("✗ 有 %d 处不一致（共 %d 例：刀8a 及以前 %d + 刀8b 追加 %d）"
+              % (bad, total, total - total_8b, total_8b))
         return 1
-    print("✓ 全部 %d 例逐字节一致（状态码 + 状态原因 + 有序响应头 + 归一后正文）" % total)
+    print("✓ 全部 %d 例逐字节一致（刀8a 及以前 %d 例 + 刀8b 追加 %d 例；"
+          "状态码 + 状态原因 + 有序响应头 + 归一后正文）"
+          % (total, total - total_8b, total_8b))
     return 0
 
 

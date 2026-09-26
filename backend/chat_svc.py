@@ -2410,17 +2410,16 @@ class Visitor(object):
 # 一次性报 `Content-Length` → 一次写完」，所以整条应答路径都能安全走 L1 的缓冲封装，
 # 不需要任何「原样直写 socket」的豁免分支。
 #
-# **路由分派**这一刀只收**非 GET**（刀8a）：POST / PUT / PATCH / DELETE 的 11 条写
-# 路径，加上它们同样够得着的三条共享前缀（`/healthz`、`/calc/api/*`、`/calc/admin/*`）
-# 与兜底，全部登记进下面的 @GW.route 表。
+# **路由分派**刀8a 收的是**非 GET**：POST / PUT / PATCH / DELETE 的 11 条写路径，
+# 加上它们同样够得着的三条共享前缀（`/healthz`、`/calc/api/*`、`/calc/admin/*`）
+# 与兜底；**刀8b 接着把 GET / HEAD 的整张表收了进来**，于是本件再没有「自己那串
+# if 选处理函数」的代码 —— 迁移前的 `_dispatch()` / `_handle()` 两个方法随之删掉
+# （它们唯一的调用方就是 do_GET 与 `_gw_not_found()` 里那条 HEAD 转发）。
 #
-# **GET 与 HEAD 的路由表整张留给刀8b**。理由要写清楚：本件的 `_handle()` 是一张
-# **方法无关的共享表**（同一串 if 同时服务 GET / HEAD / 写），不像 blackboard_svc
-# 那样每个 do_<METHOD> 各有各的表。HEAD 的可达集合**就是 GET 的表**，把 HEAD 拆成
-# 一条条 @GW.route 等于顺手把 GET 表也搬了 —— 那是 8b 的活。所以 HEAD 在本刀只把
-# **方法分派**接进 L1：不登记任何 HEAD 路由，由 `_gw_not_found()` 把它原样转回
-# 未动过的 `_handle("HEAD", ...)`。等 8b 把 GET 表搬进 L1，HEAD 自然跟着落到
-# 各自的 @GW.route 上。
+# GET 与 HEAD **一起**登记：迁移前的 `_handle()` 是一张**方法无关的共享表**（同一串
+# if 同时服务 GET / HEAD / 写），HEAD 的可达集合**就是 GET 的表**。刀8a 为此只把
+# HEAD 的方法分派接进 L1、表原样转回 `_handle("HEAD", ...)`；本刀把表搬进来之后，
+# HEAD 就落到各自的 @GW.route 上 —— **口径一个字没改**，只是转发那一跳没了。
 
 GW = web_gateway.Gateway("chat_svc", version=VERSION, quiet=True)
 
@@ -2459,22 +2458,40 @@ def _gw_pre(req: "web_gateway.Request") -> Any:
     return None
 
 
+def _gw_unauthorized() -> Tuple[int, Dict[str, Any]]:
+    """GET / HEAD 在 `/api/` 面上的那道 401。
+
+    迁移前它是 `_handle()` 里**一处** `visitor is None` 判定，位置在「非 /api 一律
+    走静态」之后、全部只读路由之前。刀8b 把 GET 表拆成一条条 @GW.route 之后，这一
+    处判定变成了几条路由各调一次 —— 所以文案收在这里**只写一遍**，逐字与迁移前同；
+    每次新造一份字典，不共享可变对象（同一进程里两个请求会同时拿到它）。
+    """
+    return 401, {"ok": False, "error": {
+        "code": "unauthorized", "message": "需要登录"}}
+
+
 @GW.not_found
 def _gw_not_found(req: "web_gateway.Request") -> Any:
     """没登记的路径。三支，**顺序就是迁移前 `_handle()` 里的顺序**：
 
-    1. HEAD —— 路由表就是 GET 的表（留给刀8b），原样转回未动过的 `_handle()`。
-    2. 非 `/api/` 开头 —— 迁移前这一判在写端点判定**之前**，一律走同源静态托管
-       （写方法在 `_serve_static()` 里落 405「静态资源只支持 GET/HEAD」）。
+    1. 非 `/api/` 开头 —— 迁移前这一判在写端点判定**之前**，一律走同源静态托管。
+       写方法在 `_serve_static()` 里落 405「静态资源只支持 GET/HEAD」；GET / HEAD
+       则走静态与 **SPA 兜底** —— 未知路径回的是**整页 200**，不是 404（硬约束 4）。
        `/login`、`/logout`、`/calc`、`/calc/admin`、`/` 这些写请求都落在这里。
+    2. `/api/` 下的 GET / HEAD —— 先过那道 401。迁移前 `GET /api/zzz` 未登录时是
+       **401**（门槛在前、501 兜底在后），不是 501；这一步漏了就是行为变更。
     3. `/api/` 下没对上形状的 —— 照旧 501 `not_implemented`（**不是 404**，
        前端据这个码开关按钮），文案含方法与路径，一字不改。
+
+    第 2 支**故意不做成 `@GW.auth` 全局钩子**（硬约束 1）：钩子在路由之前跑，会把
+    `/healthz`、静态资源与 SPA 兜底一起拦成 401 —— 而它们迁移前根本不鉴权，未知
+    路径该落的是 404（带扩展名）或 200 整页（兜底），不是 401。
     """
     svc = req.svc
-    if req.method == "HEAD":
-        return _gw_done(req, svc._handle("HEAD", req.path, req.query_dict))
     if not req.path.startswith("/api/"):
         return _gw_done(req, svc._serve_static(req.path, req.method))
+    if req.method in ("GET", "HEAD") and svc._resolve_visitor() is None:
+        return _gw_done(req, _gw_unauthorized())
     return _gw_done(req, svc._not_implemented(req.method, req.path))
 
 
@@ -2605,10 +2622,197 @@ def _gw_patch_todo(req: "web_gateway.Request") -> Any:
     return _gw_not_found(req)
 
 
+# --- GET / HEAD 登记表（阶段2 刀8b）：迁移前 `_handle()` 里那串顺序敏感的 if -----
+#
+# 逐条对齐，**一条不合并、一条不重排**。迁移前的顺序（括号里是本刀对应的登记）：
+#   1  path == "/healthz"                      → 精确 /healthz
+#   2  path in ("/login", "/logout")           → 精确 /login + 精确 /logout
+#   3  path == "/calc"                         → 精确 /calc
+#   4  path.startswith("/calc/api/")           → 前缀 /calc/api（补判尾斜杠）
+#   5  path == "/calc/admin"                   → 精确 /calc/admin
+#   6  path.startswith("/calc/admin/")         → 前缀 /calc/admin（补判尾斜杠）
+#   7  not path.startswith("/api/")            → 精确 /（根页）+ `_gw_not_found()` 兜底
+#   8  visitor is None → 401                   → 各 /api 路由各判一次（见 _gw_unauthorized）
+#   9  /api/whoami|agents|sessions 与六条带 <sid> 的正则 → 三条精确 + 一条 /api/sessions 前缀
+#  10  _not_implemented → 501                  → `_gw_not_found()` 第 3 支
+#
+# 第 3~6 条的相对顺序靠 L1「**精确表先查、前缀表后查**」自然成立（`/calc/admin` 命中
+# 第 5 条、`/calc/admin/x` 才轮到第 6 条），与迁移前「第 5 行在第 6 行之前」同一结果。
+#
+# **仍然不挂 `@GW.auth` 全局鉴权钩子**（硬约束 1）：本表里鉴权位置各不相同 ——
+# `/healthz`、`/login`、`/logout`、`/calc`、`/calc/admin`、`/calc/api/*`、静态与 SPA
+# 兜底**都不鉴权**，只有 `/api/*` 有 401 门槛。钩子跑在路由之前，挂上去等于让未知
+# 路径先落 401，而它该落的是 404（带扩展名的静态）或 **200 整页**（SPA 兜底）。
+
+
+@GW.route("/healthz", methods=("GET", "HEAD"))
+def _gw_get_healthz(req: "web_gateway.Request") -> Any:
+    """表里第 1 条：公开健康口，不鉴权。
+
+    与 `_gw_write_healthz()` **分开登记**而不是往那条上加 methods：那条的来历是
+    「迁移前这一判没有方法门槛」的副作用（`POST /healthz` 照样 200），这条才是正经
+    只读端点。合起来写，下一个人会以为写方法的 200 是有意设计的。行为完全一致。
+    """
+    return _gw_done(req, (200, req.svc._healthz()))
+
+
+@GW.route("/login", methods=("GET", "HEAD"))
+@GW.route("/logout", methods=("GET", "HEAD"))
+def _gw_get_login_redirect(req: "web_gateway.Request") -> Any:
+    """表里第 2 条：`path in ("/login", "/logout")` → 转交门户登录页（302）。
+
+    两条路径**共用一个处理函数**（叠两层装饰器），与迁移前那个 `in (...)` 一一对上。
+    `_login_redirect()` 自己写出 302 并返回 None（= 响应已自行发出），所以照旧交给
+    `_gw_done()` 把占位信封丢掉；它收到的 path 仍是归一后的那个（`/login/` 已被
+    `_dispatch_gw()` rstrip 成 `/login`），入参与迁移前逐字相同。
+    """
+    svc = req.svc
+    return _gw_done(req, svc._login_redirect(req.path, req.query_dict))
+
+
+@GW.route("/calc", methods=("GET", "HEAD"))
+def _gw_get_calc(req: "web_gateway.Request") -> Any:
+    """表里第 3 条：计算器前台页 = 同源托管 ui/calc.html。
+
+    传给 `_serve_static()` 的是写死的 `"/calc.html"`，**不是 req.path** —— 这是
+    迁移前就有的「路径改写」，照抄，别顺手换成 req.path。
+    """
+    svc = req.svc
+    return _gw_done(req, svc._serve_static("/calc.html", req.method))
+
+
+@GW.route("/calc/api", methods=("GET", "HEAD"), prefix=True)
+def _gw_get_calc_api(req: "web_gateway.Request") -> Any:
+    """表里第 4 条：`/calc/api/*` → 反代计算器后台。
+
+    与 `_gw_write_calc_api()` 同一条护栏，理由也同：迁移前写的是**带尾斜杠的前缀**，
+    `/calc/api` 本身落不进这一支、要走第 7 条静态；而 L1 的前缀匹配把「路径等于前缀」
+    也算命中，不补这一判就会把静态 404 悄悄变成反代。
+    """
+    if not req.path.startswith("/calc/api/"):
+        return _gw_not_found(req)
+    svc = req.svc
+    return _gw_done(req, svc._calc_proxy(req.method, req.path[len("/calc"):],
+                                         req.query_dict))
+
+
+@GW.route("/calc/admin", methods=("GET", "HEAD"))
+def _gw_get_calc_admin(req: "web_gateway.Request") -> Any:
+    """表里第 5 条：后台侧 SPA 首页（admin-ui/index.html）。
+
+    `/calc/admin` 与 `/calc/admin/` 归一后是同一条（`_dispatch_gw()` 已 rstrip），
+    与迁移前那行注释所述一致。
+    """
+    svc = req.svc
+    return _gw_done(req, svc._serve_admin("/" + svc.ADMIN_DOC, req.method))
+
+
+@GW.route("/calc/admin", methods=("GET", "HEAD"), prefix=True)
+def _gw_get_calc_admin_sub(req: "web_gateway.Request") -> Any:
+    """表里第 6 条：`/calc/admin/*` 静态（目录穿越 / SPA 兜底全在 `_serve_admin()` 里）。
+
+    那句 `startswith` 在**当前**登记下够不到反例（`/calc/admin` 本身已被上面的精确
+    登记截走，前缀表只在精确表落空时才轮到）—— 留着是为了让「第 6 条只管带尾斜杠的」
+    这条不变量写在代码里：哪天上面那条精确登记被挪走，这里不会静静地改了语义。
+    """
+    if not req.path.startswith("/calc/admin/"):
+        return _gw_not_found(req)
+    svc = req.svc
+    return _gw_done(req, svc._serve_admin(req.path[len("/calc/admin"):], req.method))
+
+
+@GW.route("/", methods=("GET", "HEAD"))
+def _gw_get_root(req: "web_gateway.Request") -> Any:
+    """表里第 7 条的**头一例**：群页面（前端页服务的入口）。
+
+    迁移前 `/` 走的是「非 /api 一律静态」那条兜底：`_serve_static("/", method)`
+    → 命中 ui/ 目录 → `DEFAULT_DOC`（group.html）→ `_send_file()`。这里把根路径
+    **显式登记**，其余静态资源与 SPA 兜底仍留在 `_gw_not_found()` 里 —— L1 只有
+    「精确 / 前缀」两种匹配，而静态兜底是**任意路径**的兜底：登记成 `/` 前缀会把
+    `/api/*` 一起吃掉（会议 §H 清单第 2 条：静态绝不允许覆盖 /api/ 前缀），那才是
+    真正的行为变更。`_send_file()` 本体（MIME 判定、缓存头、302、字节流写法）
+    一个字没动，本刀只是把它「接进」L1 分发。
+    """
+    svc = req.svc
+    return _gw_done(req, svc._serve_static(req.path, req.method))
+
+
+@GW.route("/api/whoami", methods=("GET", "HEAD"))
+def _gw_get_whoami(req: "web_gateway.Request") -> Any:
+    """表里第 9 条之一。401 门槛（第 8 条）写在每条 /api 路由里，见 `_gw_unauthorized()`。"""
+    svc = req.svc
+    visitor = svc._resolve_visitor()
+    if visitor is None:
+        return _gw_done(req, _gw_unauthorized())
+    return _gw_done(req, (200, svc._whoami(visitor)))
+
+
+@GW.route("/api/agents", methods=("GET", "HEAD"))
+def _gw_get_agents(req: "web_gateway.Request") -> Any:
+    svc = req.svc
+    visitor = svc._resolve_visitor()
+    if visitor is None:
+        return _gw_done(req, _gw_unauthorized())
+    return _gw_done(req, (200, svc._agents(visitor)))
+
+
+@GW.route("/api/sessions", methods=("GET", "HEAD"))
+def _gw_get_sessions(req: "web_gateway.Request") -> Any:
+    """`GET /api/sessions` —— 群列表。精确登记管这一条、下面的前缀登记管带 <sid> 的，
+    与迁移前 `path == "/api/sessions"` / 正则带 id 的分工一一对上。"""
+    svc = req.svc
+    visitor = svc._resolve_visitor()
+    if visitor is None:
+        return _gw_done(req, _gw_unauthorized())
+    return _gw_done(req, (200, svc._sessions(visitor, req.query_dict)))
+
+
+@GW.route("/api/sessions", methods=("GET", "HEAD"), prefix=True)
+def _gw_get_sessions_sub(req: "web_gateway.Request") -> Any:
+    """`/api/sessions/<sid>/...` 下的六条只读端点，**正则与顺序原样搬过来**。
+
+    形状对不上的落 `_not_implemented()` → 501（**不是 404**）。这里**直接调**而不是
+    转 `_gw_not_found()`：转过去会再跑一遍 `_resolve_visitor()`（多一次 cookie 校验），
+    而到这一行 401 门槛已经过了，兜底那支只剩 501 一种结果 —— 结果相同、少一次校验。
+    """
+    svc, path = req.svc, req.path
+    visitor = svc._resolve_visitor()
+    if visitor is None:
+        return _gw_done(req, _gw_unauthorized())
+
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})$", path)
+    if m:
+        return _gw_done(req, svc._session_detail(visitor, m.group(1)))
+
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/messages$", path)
+    if m:
+        return _gw_done(req, svc._messages(visitor, m.group(1), req.query_dict))
+
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/memo$", path)
+    if m:
+        return _gw_done(req, svc._memo_get(visitor, m.group(1)))
+
+    # #478：意图分类台账（只读）—— 「为什么这条没入队」可回查
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/intents$", path)
+    if m:
+        return _gw_done(req, svc._todos_intents(visitor, m.group(1), req.query_dict))
+
+    # 待办清单（群 #108~#114 冻结）：GET ?owner=&status=&sort=
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos$", path)
+    if m:
+        return _gw_done(req, svc._todos(visitor, m.group(1), req.query_dict))
+
+    m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/members$", path)
+    if m:
+        return _gw_done(req, svc._members(visitor, m.group(1), req.query_dict))
+
+    return _gw_done(req, svc._not_implemented(req.method, path))
+
+
 # 必须在全部 @GW.route 之后取：`handler_class()` 会按「已登记的方法」删掉多余的
-# do_<METHOD>。本件登记的只有 POST/PUT/PATCH/DELETE，于是 L1 那份 do_GET/do_HEAD/
-# do_OPTIONS 会被删掉 —— GET/HEAD 由下面的 ChatHandler 自己定义，OPTIONS 则照旧
-# 落基类的 501，与迁移前逐字一致。
+# do_<METHOD>。刀8b 之后本件 GET/POST/PUT/PATCH/DELETE/HEAD 六个方法都有登记，
+# 于是 L1 只会删掉 do_OPTIONS —— OPTIONS 照旧落基类的 501，与迁移前逐字一致。
+# （do_GET / do_HEAD 虽然留着，仍被下面的 ChatHandler 覆盖成本件自己的入口。）
 _GatewayHandler = GW.handler_class()
 
 
@@ -2630,12 +2834,12 @@ class ChatHandler(_GatewayHandler):
     #: keep-alive 上一个实例要服务多个请求，所以每次进 `_dispatch_gw()` 都重置。
     _sent = False
 
+    # **六个方法的路由分派全在 L1**（模块顶部的 @GW.route 登记表）：非 GET 是阶段2
+    # 刀8a 收的，GET / HEAD 的整张表是刀8b 收的。下面六个方法只把入口接上去，本件
+    # 再没有「自己那串 if 选处理函数」的代码。
     def do_GET(self) -> None:  # noqa: N802
-        self._dispatch("GET")
+        self._dispatch_gw()
 
-    # 非 GET 的**方法分派**全在 L1（模块顶部的 @GW.route 登记表，阶段2 刀8a）：
-    # 下面五个方法只把入口接上去。HEAD 的路由**表**仍在 `_handle()` 里（它就是
-    # GET 的表，整张留给刀8b），由 `_gw_not_found()` 原样转回去。
     def do_HEAD(self) -> None:  # noqa: N802
         self._dispatch_gw()
 
@@ -2652,11 +2856,13 @@ class ChatHandler(_GatewayHandler):
         self._dispatch_gw()
 
     def _dispatch_gw(self) -> None:
-        """非 GET 方法的统一入口：**路由分派交给 L1**（模块顶部的 @GW.route 登记表）。
+        """**全部六个方法的统一入口**：路由分派交给 L1（模块顶部的 @GW.route 登记表）。
 
-        与 `_dispatch()` 逐行同构，只把「一串 if 选处理函数」换成 `GW.dispatch()`；
-        计时、三层兜底 except、`_request_ms` 全照旧。`_drain_body()` 挪进了
-        `@GW.pre`，那里同样在本 try 之内，抛错照旧落这里的 500。
+        与迁移前的 `_dispatch()` 逐行同构，只把「一串 if 选处理函数」换成
+        `GW.dispatch()`；计时、三层兜底 except、`_request_ms` 全照旧。`_drain_body()`
+        挪进了 `@GW.pre`，那里同样在本 try 之内，抛错照旧落这里的 500。
+        兜底 except 里的日志用 `self.command` 取方法名 —— 与迁移前 `_dispatch()`
+        用形参 `method` 取到的是同一个值（形参本来就来自 do_<METHOD>）。
         """
         started = time.time()
         self._sent = False
@@ -2687,122 +2893,12 @@ class ChatHandler(_GatewayHandler):
         finally:
             self._request_ms = int((time.time() - started) * 1000)
 
-    def _dispatch(self, method: str) -> None:
-        """GET 的入口。路由表（`_handle()`）整张留给刀8b，这里一个字没动。"""
-        started = time.time()
-        try:
-            self._drain_body()
-            parsed = urllib.parse.urlsplit(self.path)
-            path = parsed.path.rstrip("/") or "/"
-            query = urllib.parse.parse_qs(parsed.query)
-            body = self._handle(method, path, query)
-            if body is not None:              # None = 响应已自行发出（静态文件走这条）
-                self._send_json(body[0], body[1])
-        except RequestError as exc:
-            self._send_json(exc.status, {
-                "ok": False,
-                "error": dict({"code": exc.code, "message": exc.message}, **exc.extra),
-            })
-        except DBUnavailable as exc:
-            LOG.warning("DB 不可用：%s", scrubbed(exc))
-            self._send_json(503, {"ok": False, "error": {
-                "code": "upstream_unavailable", "message": "数据库暂不可用"}})
-        except Exception as exc:                    # 兜底：绝不把栈吐给前端
-            LOG.exception("未处理异常 %s %s", method, self.path)
-            self._send_json(500, {"ok": False, "error": {
-                "code": "internal", "message": "服务端异常：%s" % scrubbed(exc)}})
-        finally:
-            self._request_ms = int((time.time() - started) * 1000)
-
     # --- 路由 ------------------------------------------------------
-    def _handle(self, method: str, path: str, query: Dict[str, List[str]]
-                ) -> Optional[Tuple[int, Dict[str, Any]]]:
-        # 公开端点：不需要登录
-        if path == "/healthz":
-            return 200, self._healthz()
-
-        # ---- 登录 / 退出：转交门户登录页 ---------------------------------
-        # 从 chat.<域> 进来的未登录访客，此前只会看到「启动失败：unauthorized」
-        # —— /login 落到下面的静态兜底、把群页面当登录页发了回去，页面上
-        # 又没有任何登录入口。这里把人送到门户登录页，并带「登录后回本页」。
-        if path in ("/login", "/logout") and method in ("GET", "HEAD"):
-            return self._login_redirect(path, query)
-
-        # ---- 计算器（<MEMBER_ID> 落地 · 2026-09-23 · 前后台配合实验）--------------
-        # 只加两条路由，全部在 /calc 前缀下，不碰任何既有路由，也不破坏
-        # 「静态绝不允许覆盖 /api/ 前缀」的不变量（这里是 /calc/api，不是 /api）：
-        #   GET|HEAD /calc            -> 同源托管 ui/calc.html
-        #                                （前台产物；归 <MEMBER_ID>，覆盖同名文件即可换前台）
-        #   *        /calc/api/<...>  -> 反代到后台计算服务 127.0.0.1:9985/api/<...>
-        #                                （后台归 <MEMBER_ID>：<RUNTIME_DIR>/calc/calc_svc.py）
-        # 后台没起时返 502 JSON，绝不影响本服务其它任何功能。
-        if path == "/calc" and method in ("GET", "HEAD"):
-            return self._serve_static("/calc.html", method)
-        if path.startswith("/calc/api/"):
-            return self._calc_proxy(method, path[len("/calc"):], query)
-
-        # ---- 计算器「后台侧」Vue 管理后台（<MEMBER_ID> 落地 · 2026-09-24）----------
-        # 只为后台侧 SPA 加两条路由（前台 /calc 归 <MEMBER_ID>，ui/ 一个字都不动）：
-        #   GET|HEAD /calc/admin          -> admin-ui/index.html（SPA fallback）
-        #   GET|HEAD /calc/admin/assets/* -> admin-ui/assets/* 静态文件
-        # _dispatch 已对 path 做过 rstrip("/")，所以 /calc/admin 与 /calc/admin/ 命中同一条。
-        # 这两条在 /calc/api 判定之后、通用静态兜底之前，前缀互不重叠，
-        # 既不影响 /calc（前台），也不影响 /（群页面）。
-        if path == "/calc/admin" and method in ("GET", "HEAD"):
-            return self._serve_admin("/" + self.ADMIN_DOC, method)
-        if path.startswith("/calc/admin/"):
-            return self._serve_admin(path[len("/calc/admin"):], method)
-
-        if not path.startswith("/api/"):
-            # 非 API 一律走同源静态托管。
-            # ⚠️ 这一行必须留在 /api 判断**之后**：会议 §H 清单第 2 条
-            #    —— 静态绝不允许覆盖 /api/ 前缀。
-            return self._serve_static(path, method)
-
-        # 写端点（契约 §I：临时群）那串判定已搬进 L1（模块顶部的 @GW.route 登记表，
-        # 阶段2 刀8a）：未实现的仍一律 501（**不是 404**，前端据此开关按钮），
-        # 文案与兜底都在 `_gw_not_found()` 里逐字保着。
-        # 到这里的只剩 GET 与 HEAD —— 这张表整张留给刀8b。
-
-        visitor = self._resolve_visitor()
-        if visitor is None:
-            return 401, {"ok": False, "error": {
-                "code": "unauthorized", "message": "需要登录"}}
-
-        if path == "/api/whoami":
-            return 200, self._whoami(visitor)
-        if path == "/api/agents":
-            return 200, self._agents(visitor)
-        if path == "/api/sessions":
-            return 200, self._sessions(visitor, query)
-
-        m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})$", path)
-        if m:
-            return self._session_detail(visitor, m.group(1))
-
-        m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/messages$", path)
-        if m:
-            return self._messages(visitor, m.group(1), query)
-
-        m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/memo$", path)
-        if m:
-            return self._memo_get(visitor, m.group(1))
-
-        # #478：意图分类台账（只读）—— 「为什么这条没入队」可回查
-        m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos/intents$", path)
-        if m:
-            return self._todos_intents(visitor, m.group(1), query)
-
-        # 待办清单（群 #108~#114 冻结）：GET ?owner=&status=&sort=
-        m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/todos$", path)
-        if m:
-            return self._todos(visitor, m.group(1), query)
-
-        m = re.match(r"^/api/sessions/([A-Za-z0-9_\-]{1,64})/members$", path)
-        if m:
-            return self._members(visitor, m.group(1), query)
-
-        return self._not_implemented(method, path)
+    #
+    # 迁移前这里有 `_dispatch()`（GET 入口）与 `_handle()`（方法无关的共享路由表）。
+    # 刀8b 把整张表拆成模块顶部的 @GW.route 登记后，两个方法都没有调用方了，随之删掉。
+    # 表里每一条的去向、顺序怎么保的、鉴权为什么不做成钩子，都写在那份登记表的注释里。
+    # 以下留下的全是**叶子方法**（真正干活的那些），一个字没动。
 
     # --- 临时群（契约 §I）------------------------------------------
 
