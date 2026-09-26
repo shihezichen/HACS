@@ -104,6 +104,7 @@ def envelope(status, obj, headers=None):
     """把处理函数的返回值化成 (status, body_bytes, headers)。
 
     本件为 L1 契约面，跨件只许用 `envelope()`（下划线名是旧调用点的兼容别名）。
+    公共面契约（承诺什么 / 谁在用 / 变动的兼容规则）见 `docs/l1-contract.md`。
     """
     headers = dict(headers or {})
     if isinstance(obj, bytes):
