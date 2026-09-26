@@ -25,9 +25,13 @@
 lobster（Linux）把本机的 `/root/.local/.../claude_exec.py` 当成 ssh 目标 thinkbook（Windows）
 的路径发过去，远端报 `can't open file`，模型通道整条静默失效。
 
-所以本文件另设一组 `target_*` 函数（阶段 4 节点档案的**雏形**）：按「目标主机名」查档案，
+刀 4 曾在本文件落一组 `target_*` 函数（阶段 4 节点档案的**雏形**）：按「目标主机名」查档案，
 返回那台机的 flavour / 家目录 / 执行器路径。查不到的主机**不编造** —— 按 posix 兜底，
 同时 `target_known()` 返回 False，调用方据此记警告。
+
+**刀 21（阶段 4）：那组函数的实现整段搬到同层 L0 `node_profile.py`（节点档案）正式化。**
+本文件末尾只剩委托与别名（同一个对象，不是拷贝），调用面与属性面一字未改；真值只剩一份，
+不存在第二处档案表。本文件继续做「**本机**宿主默认值的唯一出处」（`host_path_owner`）。
 
 设计约束
 --------
@@ -35,8 +39,9 @@ lobster（Linux）把本机的 `/root/.local/.../claude_exec.py` 当成 ssh 目�
 便于单测在两种平台语义下断言，不必真换机器。
 """
 
-import json
 import os
+
+import node_profile  # L0 同层：节点档案（目标主机档案的唯一真值；本文件只做委托）
 
 __all__ = ["runtime_dir", "etc_dirs", "etc_dir", "log_dir", "node_exe",
            "pi_cli_js", "pi_workdir", "claude_exec", "claude_workdir",
@@ -186,92 +191,43 @@ def nats_dir(value=None):
     return os.path.join(runtime_dir(value), "nats") if flavour(value) == "nt" else "/etc/nats"
 
 
-# ============================================================ 目标主机档案（雏形）
-# 阶段 4 会把这张表正式化成「节点档案」（与部署表、名册同源）；本刀只落最小可用的一版，
-# 让「跨主机取路径」有唯一出处，不再靠调用方拿本机真值去猜远端。
+# ============================================================ 目标主机档案（已并入节点档案）
+# 刀 4 在本文件落的雏形，**刀 21 整段搬到同层 L0 node_profile.py 正式化**（规划原话：
+# 「阶段 4 时正式化，届时并入节点档案，不另立第二处真值」）。
+#
+# 本段现在只剩委托与别名：每个名字都**指向 node_profile 里的同一个对象**（不是拷贝），
+# 所以 `node_paths.<名字>` 的调用面、属性面、文档串与改前逐一对得上，而档案表只有一份。
+# 私有原名（`_TARGET_*` / `_target_*`）一并保留 —— 它们在本文件里是**本文件自己的**私有名，
+# 指向的是对方的公开面，不构成跨件私有面访问。
 
-ENV_TARGET_PROFILE_JSON = "AGENT_TEAM_TARGET_PROFILE_JSON"
+ENV_TARGET_PROFILE_JSON = node_profile.ENV_TARGET_PROFILE_JSON
 
-#: 目标主机的家目录（跨主机真值，字面量只许出现在本文件内）
-NT_TARGET_HOME = "<home>"
-POSIX_TARGET_HOME = "/root"
+#: 目标主机的家目录（跨主机真值，字面量现由 node_profile 持有）
+NT_TARGET_HOME = node_profile.NT_TARGET_HOME
+POSIX_TARGET_HOME = node_profile.POSIX_TARGET_HOME
 
 #: 家目录 → claude 执行器的相对位置（与本机 `claude_exec()` 同一套惯例）
-_TARGET_CLAUDE_SUB = {"nt": "AppData/Local/hermes/scripts/claude_exec.py",
-                      "posix": ".local/share/hermes/scripts/claude_exec.py"}
+_TARGET_CLAUDE_SUB = node_profile.TARGET_CLAUDE_SUB
 
 #: 未登记主机的兜底 flavour：**不按本机推**（本机是谁与目标是谁无关），一律 posix，
 #: 且 `target_known()` 会返回 False —— 拿到的是兜底值而非真值，调用方该记警告。
-TARGET_FALLBACK_FLAVOUR = "posix"
+TARGET_FALLBACK_FLAVOUR = node_profile.TARGET_FALLBACK_FLAVOUR
 
 #: 内置档案表。键 = 主机名（小写）；值 = {flavour, home, claude_exec}。
-_TARGET_PROFILES = {
-    "thinkbook": {"flavour": "nt",
-                  "home": NT_TARGET_HOME,
-                  "claude_exec": NT_TARGET_HOME + "/AppData/Local/hermes/scripts/claude_exec.py"},
-    "lobster": {"flavour": "posix",
-                "home": POSIX_TARGET_HOME,
-                "claude_exec": POSIX_TARGET_HOME + "/.local/share/hermes/scripts/claude_exec.py"},
-    "quantum": {"flavour": "posix",
-                "home": POSIX_TARGET_HOME,
-                "claude_exec": POSIX_TARGET_HOME + "/.local/share/hermes/scripts/claude_exec.py"},
-    "top001": {"flavour": "posix",
-               "home": POSIX_TARGET_HOME,
-               "claude_exec": POSIX_TARGET_HOME + "/.local/share/hermes/scripts/claude_exec.py"},
-}
+_TARGET_PROFILES = node_profile.TARGET_PROFILES
 
+#: `user@host` / `host` → 主机名（小写）
+_target_host = node_profile.target_host
+#: 档案表（`AGENT_TEAM_TARGET_PROFILE_JSON` 整表覆盖；解析不了就用内置表）
+_target_table = node_profile.target_table
+#: → (档案 dict, 是否登记在案)
+_target_profile = node_profile.target_profile
 
-def _target_host(host_value):
-    """`user@host` / `host` → 主机名（小写）。只取 host 部分，用户名不参与查表。"""
-    text = str(host_value or "").strip()
-    if "@" in text:
-        text = text.rsplit("@", 1)[1]
-    return text.strip().lower()
-
-
-def _target_table():
-    """档案表（`AGENT_TEAM_TARGET_PROFILE_JSON` **整表覆盖**；解析不了就用内置表）。"""
-    env = (os.environ.get(ENV_TARGET_PROFILE_JSON) or "").strip()
-    if env:
-        try:
-            data = json.loads(env)
-        except Exception:
-            return dict(_TARGET_PROFILES)   # 覆盖值坏了就退回内置表，绝不抛给调用方
-        if isinstance(data, dict):
-            return {_target_host(k): v for k, v in data.items() if isinstance(v, dict)}
-    return dict(_TARGET_PROFILES)
-
-
-def _target_profile(host_value):
-    """→ (档案 dict, 是否登记在案)。档案里缺的键按该 flavour 的惯例补齐。"""
-    entry = _target_table().get(_target_host(host_value))
-    known = isinstance(entry, dict)
-    entry = entry if known else {}
-    fl = str(entry.get("flavour") or "").strip().lower()
-    if fl not in ("nt", "posix"):
-        fl = TARGET_FALLBACK_FLAVOUR
-    home = str(entry.get("home") or "").strip() or (
-        NT_TARGET_HOME if fl == "nt" else POSIX_TARGET_HOME)
-    exe = str(entry.get("claude_exec") or "").strip() or (
-        home.rstrip("/\\") + "/" + _TARGET_CLAUDE_SUB[fl])
-    return {"flavour": fl, "home": home, "claude_exec": exe}, known
-
-
-def target_known(host_value):
-    """目标主机是否登记在档案表里。False = 下面几个函数给的是**兜底值不是真值**。"""
-    return _target_profile(host_value)[1]
-
-
-def target_flavour(host_value):
-    """目标主机的平台语义：`"nt"` / `"posix"`（未登记按 posix 兜底）。"""
-    return _target_profile(host_value)[0]["flavour"]
-
-
-def target_home(host_value):
-    """目标主机上的家目录。"""
-    return _target_profile(host_value)[0]["home"]
-
-
-def target_claude_exec(host_value):
-    """**目标主机上**的 Claude Code 封装脚本路径（跨主机调用取这个，别取 `claude_exec()`）。"""
-    return _target_profile(host_value)[0]["claude_exec"]
+#: 目标主机是否登记在档案表里。False = 下面几个函数给的是**兜底值不是真值**。
+target_known = node_profile.target_known
+#: 目标主机的平台语义：`"nt"` / `"posix"`（未登记按 posix 兜底）
+target_flavour = node_profile.target_flavour
+#: 目标主机上的家目录
+target_home = node_profile.target_home
+#: **目标主机上**的 Claude Code 封装脚本路径（跨主机调用取这个，别取 `claude_exec()`）
+target_claude_exec = node_profile.target_claude_exec

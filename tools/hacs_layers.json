@@ -91,7 +91,7 @@
     "agent-team/agent_usage.py": {
       "layer": "L2",
       "port": null,
-      "note": "上下文水位真源（读取/窗口分母/后端判定/会话头，单一权威口径）——a2a_svc 与 ctx_watermark 共同依赖"
+      "note": "上下文水位真源（读取/窗口分母/后端判定/会话头，单一权威口径）——a2a_svc 与 ctx_watermark 共同依赖。刀21（阶段4）：**宿主会话真源的句柄与文件格式已下沉 L0 node_profile.py** —— 本件不再 import sqlite3、不再 import os、不再拼宿主路径；sessions_json_path / hermes_state_db / hermes_home / a2a_remote_base / a2a_remote_token 全改薄委托，口径A（state.db sessions 表）与口径B（active=1 messages 估算）改调 L0 只读探针（hermes_session_usage_row / hermes_active_messages），OpenClaw 档案改调 openclaw_session_entry。降级口径与 debug 文案留在本层一字未改（L0 只抛不吞，异常对象原样传到本层的 except）。本件是 storage_handle_exceptions 里唯一一条例外的当事件，该例外随本刀**撤销**"
     },
     "agent-team/agent_model.py": {
       "layer": "L2",
@@ -323,8 +323,14 @@
     "agent-team/node_paths.py": {
       "layer": "L0",
       "port": null,
-      "duty": "平台层：宿主默认值唯一出处 —— ①**本机**真值（运行/配置/日志目录、node、claude/codex/pi 可执行路径）；②**目标主机**真值（target_flavour / target_home / target_claude_exec / target_known，阶段4 节点档案的雏形）。两套真值分开，跨主机调用取 target_*；env 优先 > 平台惯例，只读纯函数",
-      "note": "L0 平台层：宿主默认值唯一出处（刀 3 新增）；env 优先 > 平台惯例。刀 4 增「目标主机档案」雏形：thinkbook=nt / lobster·quantum·top001=posix，AGENT_TEAM_TARGET_PROFILE_JSON 可整表覆盖；未登记主机按 posix 兜底且 target_known()=False（不编造真值）"
+      "duty": "平台层：**本机**宿主默认值唯一出处（运行/配置/日志目录、node、claude/codex/pi 可执行路径）。env 优先 > 平台惯例，只读纯函数。host_path_owner 仍是本件",
+      "note": "L0 平台层：宿主默认值唯一出处（刀 3 新增）；env 优先 > 平台惯例。刀 4 曾在本件加「目标主机档案」雏形；**刀21（阶段4）把那一整段搬到同层 L0 node_profile.py 正式化**（规划原话：阶段4 正式化、并入节点档案、不另立第二处真值）。本件末尾只剩委托与别名 —— ENV_TARGET_PROFILE_JSON / NT_TARGET_HOME / POSIX_TARGET_HOME / TARGET_FALLBACK_FLAVOUR / _TARGET_CLAUDE_SUB / _TARGET_PROFILES / _target_host / _target_table / _target_profile / target_known / target_flavour / target_home / target_claude_exec 逐名保留，且**指向 node_profile 里的同一个对象**（不是拷贝），调用面与属性面一字未改。唯一属性面差异：`import json` 随实现搬走后成为死 import，已删（stdlib 泄漏名，全仓零 node_paths.json 引用；先例＝刀15）"
+    },
+    "agent-team/node_profile.py": {
+      "layer": "L0",
+      "port": null,
+      "duty": "平台层：**节点档案**（nodelet 的静态那一半）。一句话职责＝让上层对操作系统零感知 —— ①节点身份（flavour/home）②运行与配置目录（薄委托 node_paths）③执行器路径 claude/codex/pi/node（薄委托）④**目标主机档案**（target_known/target_flavour/target_home/target_claude_exec，刀4 雏形在此正式化）⑤宿主真源路径（Hermes state.db / config.yaml / agent 包目录、OpenClaw sessions.json 的候选来源）⑥**只读探针**（open_hermes_state_ro / hermes_session_usage_row / hermes_active_messages / openclaw_session_entry / hermes_config_model_window）⑦日志与探针口（log_dir / a2a_probe_base / a2a_probe_token）",
+      "note": "L0 平台层：节点档案（刀21 阶段4 新增）。两条铁律：**只读**（SQLite 一律 mode=ro URI 打开、用完即 close，不建目录不写状态）；**不编造**（没配置/文件不在/记录不在 → None 或空；真出错 → **原样抛**，由调用方按自己口径降级记日志 —— 不把「打不开」偷偷变成「没有数据」）。未登记目标主机沿用 posix 兜底 + target_known()=False。①②③ 是对同层 node_paths 的薄委托，且**惰性 import**（函数体内 import node_paths），所以 node_paths → node_profile 的模块级 import 不成环。本件承接 storage_handle_exceptions 里那条例外的下沉终点：sqlite3 句柄从 L2 搬到这里。等价证据 tools/equivalence/node_profile_equiv.py（26 格冻结矩阵 + agent_usage 行为面 13 例样本）"
     },
     "agent-team/tests/test_agent_model.py": {
       "layer": "T",
@@ -392,12 +398,22 @@
       "IP 字面量（内网/尾网）",
       "绝对路径常量（/etc|/opt|/home|/root|/var 开头，或盘符开头）"
     ],
-    "storage_handle_exceptions": [
+    "storage_handle_exceptions": [],
+    "storage_handle_exceptions_revoked": [
       {
         "file": "agent-team/agent_usage.py",
         "reason": "只读打开「别的 Agent 自己的会话真源」（Hermes state.db / OpenClaw sessions.json）与宿主 Hermes 配置；L2 是适配 Agent 差异的唯一落脚点，读真源是适配固有动作，且此件是唯一读取处（消除原先 a2a_svc/ctx_watermark 两份实现）。",
         "expires_when": "阶段1 刀3 / 阶段4 L0 nodelet：宿主路径与文件格式下沉后，本件不再直接持句柄",
-        "recorded": "2026-09-25 阶段1 刀1+2"
+        "recorded": "2026-09-25 阶段1 刀1+2",
+        "revoked": "2026-09-27 阶段4 刀21",
+        "revoked_reason": "到期条件已兑现 —— 不是改判据，是真把句柄与文件格式下沉：agent-team/node_profile.py（L0 节点档案）接手 sqlite3 只读句柄、SQL、state.db/sessions.json/config.yaml 的路径与行格式；agent_usage.py 现在既不 import sqlite3 也不 import os，全部改调 L0 只读探针。",
+        "evidence": [
+          "git grep -n 'import sqlite3' agent-team/agent_usage.py → 0 命中（改前 1 命中，第 40 行）",
+          "python tools/check_layers.py 检查4：agent-team/agent_usage.py 整行消失（不再是持句柄的件）；「已声明的例外」段由 1 条降为 0 条",
+          "tools/equivalence/node_profile_equiv.py：agent_usage 行为面 13 例样本（正常 db / 空库 / 缺表 / 坏文件 / 不存在 / 无权限 / 坏 JSON …）改前 × 改后逐值一致，含全部降级路径",
+          "tools/equivalence/target_profile_equiv.py：刀4 立的 21 格冻结矩阵 + 2 条 ssh_argv 平台断言，一格未放宽、全绿"
+        ],
+        "follow_up": "承接件 agent-team/node_profile.py 的层标是 L0，而 L0 仍在 storage_handle_forbidden_layers 里 —— 检查4 因此对它打 ⚠ 且无例外可循。本刀**不动判据**（契约明令不许放宽），把口子如实留在这里：要么认「L0 nodelet 的探针职责本就包含只读宿主真源」而把 L0 移出禁止层，要么给 node_profile.py 登记一条新例外。二选一由主控定，另开一刀。"
       }
     ],
     "host_path_owner": "agent-team/node_paths.py"

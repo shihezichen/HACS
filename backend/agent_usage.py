@@ -26,73 +26,51 @@
 水位就差 5 倍 —— 自愈行为取决于你在哪台机器、走哪条路径，这是"口径分裂"而非"重复代码"。
 现在只有这里一份；两份调用方都改成薄委托，调用面不变。
 
-零硬编码
---------
-路径/凭据一律**调用时**从环境变量解析（不在 import 期定死），便于后续节点注入。
+零硬编码 · 零存储句柄
+--------------------
+路径/凭据一律**调用时**向 L0 节点档案要（不在 import 期定死，也不在本层拼）。
+
+2026-09-27 阶段 4 刀 21：本件原先自己 `import sqlite3` 打开宿主 Hermes `state.db`、
+自己拼 Hermes 主目录、自己解析 `sessions.json` 的行格式 —— 那是分层台账里**唯一一条
+已声明的存储句柄例外**。现在「宿主上长什么样」（路径 / 句柄 / 文件格式）整套下沉到
+L0 `node_profile.py`（节点档案），本件只留**适配口径**：后端怎么分派、token 怎么估、
+分母走哪条链、读不到怎么降级。本件因此不再 import sqlite3、不再 import os。
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import sqlite3
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional, Tuple
-import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
+import node_profile as _npf  # L0 平台层：节点档案（宿主路径 / 凭据 / 真源只读探针）
 
 LOG = logging.getLogger("agent_usage")
 
 
 # ---------------------------------------------------------------- 路径与凭据
-
-def _first_env(*names: str) -> str:
-    """按序取第一个非空环境变量。"""
-    for n in names:
-        v = os.environ.get(n)
-        if v:
-            return v
-    return ""
-
+# 全是**薄委托**：真值与探测规则在 L0 节点档案里，本层只保留对外的名字与口径说明。
 
 def sessions_json_path() -> str:
     """OpenClaw 会话档案路径（未配置 → 该后端降级为不自愈）。"""
-    return _first_env("A2A_SESSIONS_JSON", "CTX_SESSIONS_JSON")
+    return _npf.openclaw_sessions_json()
 
 
 def hermes_state_db() -> str:
     """Hermes state.db 路径（未配置 → Hermes 后端降级为不自愈）。"""
-    return _first_env("A2A_HERMES_STATE_DB", "CTX_HERMES_STATE_DB")
+    return _npf.hermes_state_db()
 
 
 def a2a_remote_base() -> str:
     """本节点 a2a 服务基址（远端水位回退用）。"""
-    return _first_env("CTX_A2A_BASE", "A2A_BASE")
+    return _npf.a2a_probe_base()
 
 
 def a2a_remote_token() -> str:
-    """a2a 服务令牌：先 env，再令牌文件。
-
-    候选目录由 L0 node_paths.etc_dirs() 集中提供（env > 平台惯例，Windows=运行目录 / posix=<deploy-dir>）。
-    """
-    tok = _first_env("CTX_A2A_TOKEN", "A2A_TOKEN")
-    if tok:
-        return tok
-    candidates = [_first_env("CTX_A2A_TOKEN_FILE"), _first_env("A2A_TOKEN_FILE"),
-                  _first_env("AGENT_TEAM_TOKEN_FILE")]
-    candidates += [os.path.join(d, "client-token") for d in _np.etc_dirs()]
-    for path in candidates:
-        if path and os.path.isfile(path):
-            try:
-                with open(path, "r", encoding="utf-8") as fh:
-                    value = fh.read().strip()
-                if value:
-                    return value
-            except Exception:  # noqa: BLE001 —— 令牌文件读不到就当没配
-                continue
-    return ""
+    """a2a 服务令牌：先 env，再令牌文件（候选与读取都由 L0 节点档案给）。"""
+    return _npf.a2a_probe_token()
 
 
 # ---------------------------------------------------------------- 窗口分母
@@ -113,15 +91,7 @@ CTX_WINDOW_FALLBACK = {
 
 def hermes_home() -> str:
     """Hermes 主目录：先 env，再按平台惯例探测（读不到返回空串）。"""
-    explicit = _first_env("A2A_HERMES_HOME", "HERMES_HOME")
-    if explicit:
-        return explicit
-    home = os.path.expanduser("~")
-    for candidate in (os.path.join(home, "AppData", "Local", "hermes"),
-                      os.path.join(home, ".hermes")):
-        if os.path.isdir(candidate):
-            return candidate
-    return ""
+    return _npf.hermes_home()
 
 
 def effective_window_from_config() -> Tuple[str, int]:
@@ -129,39 +99,15 @@ def effective_window_from_config() -> Tuple[str, int]:
 
     `model.context_length` **只对 `model.default` 那一个模型生效**，不是全局分母，
     所以这里连模型名一起返回，由 window_for 判命中后才采用。读不到返回 ("", 0)，不猜。
+
+    路径与文件格式在 L0 节点档案里；**降级口径留在本层** —— 读/解析出错一律吞成
+    ("", 0) 并记 debug，绝不让「宿主配置读不出来」把水位主流程带崩。
     """
-    home = hermes_home()
-    if not home:
-        return "", 0
-    path = os.path.join(home, "config.yaml")
-    if not os.path.isfile(path):
-        return "", 0
-    name, ctx_len, in_model = "", 0, False
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            for raw in fh:
-                line = raw.rstrip("\n")
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                if not line[:1].isspace():            # 顶层键：判断是否仍在 model: 段内
-                    in_model = (stripped.split(":", 1)[0] == "model")
-                    continue
-                if not in_model:
-                    continue
-                key, _, val = stripped.partition(":")
-                val = val.strip().strip("\"'")
-                if key == "default":
-                    name = val
-                elif key == "context_length":
-                    try:
-                        ctx_len = int(val)
-                    except (TypeError, ValueError):
-                        ctx_len = 0
+        return _npf.hermes_config_model_window()
     except Exception as exc:  # noqa: BLE001
         LOG.debug("agent_usage: 读 Hermes config 失败(%s)，跳过生效窗口覆盖", exc)
         return "", 0
-    return name, ctx_len
 
 
 def window_for(model: str, backend: str = "") -> int:
@@ -191,7 +137,7 @@ def window_for(model: str, backend: str = "") -> int:
             return int(cfg_window)
     try:
         import sys as _sys
-        hm = _first_env("A2A_HERMES_AGENT_DIR")
+        hm = _npf.hermes_agent_dir()
         if hm and hm not in _sys.path:
             _sys.path.insert(0, hm)
         from agent import model_metadata as _mm  # type: ignore
@@ -251,10 +197,18 @@ def backend_kind(agent_cfg: Optional[Dict[str, Any]]) -> str:
         return "hermes"
     if "18789" in base or "openclaw" in base or "openclaw" in model:
         return "openclaw"
-    sessions = sessions_json_path()
-    if sessions and os.path.isfile(sessions):
+    if _npf.openclaw_sessions_present():      # 会话档案兜底（存在性探针在 L0）
         return "openclaw"
     return "other"
+
+
+#: A2A 会话在 Hermes 侧的稳定会话键格式。**改格式 = 换会话身份 = 记忆域断裂**，别动。
+HERMES_SESSION_KEY_FMT = "a2a:%s:%s"
+
+
+def session_key(caller: str, session_id: Optional[str]) -> str:
+    """会话键 = `a2a:<caller>:<session_id>`（会话头与 state.db 查询用的是同一个键）。"""
+    return HERMES_SESSION_KEY_FMT % (caller or "unknown", session_id)
 
 
 def hermes_session_headers(agent_cfg: Optional[Dict[str, Any]], caller: str,
@@ -268,7 +222,7 @@ def hermes_session_headers(agent_cfg: Optional[Dict[str, Any]], caller: str,
     """
     if not session_id:
         return {}
-    key = "a2a:%s:%s" % (caller or "unknown", session_id)
+    key = session_key(caller, session_id)
     return {"X-Hermes-Session-Key": key, "X-Hermes-Session-Id": key}
 
 
@@ -282,37 +236,26 @@ def _read_hermes_ctx_b(caller: str, session_id: str,
     Hermes 的 messages.token_count 字段全库不填充（NULL），只能按其自身公式重算。
     取 active=1（当前生效上下文，随压缩轮转会变，**切勿缓存**）。
     读不到返回 None。
+
+    句柄与 SQL 在 L0 `node_profile.hermes_active_messages()`（只读打开）；本层只做
+    「怎么把行折算成 token、分母取哪条链、读不到怎么降级」。
     """
-    db = hermes_state_db()
-    if not session_id or not db or not os.path.isfile(db):
+    if not session_id:
         return None
     try:
-        uri = "file:%s?mode=ro" % db.replace("\\", "/")
-        conn = sqlite3.connect(uri, uri=True, timeout=3.0)
-        try:
-            sid_row = conn.execute(
-                "SELECT id, model FROM sessions WHERE session_key = ? "
-                "ORDER BY COALESCE(last_activity_at, started_at) DESC LIMIT 1",
-                ("a2a:%s:%s" % (caller or "unknown", session_id),)).fetchone()
-            if sid_row is None:
-                return None
-            sid, row_model = sid_row[0], (sid_row[1] or "")
-            rows = conn.execute(
-                "SELECT content, tool_calls, reasoning_content FROM messages "
-                "WHERE session_id = ? AND active = 1", (sid,)).fetchall()
-            if not rows:
-                return None
-            used = 0
-            for content, tool_calls, reasoning in rows:
-                used += estimate_tokens_rough(content or "")
-                used += estimate_tokens_rough(tool_calls or "")
-                used += estimate_tokens_rough(reasoning or "")
-            win = window_for(model or row_model, "hermes")
-            if win <= 0 or used <= 0:
-                return None
-            return int(used), int(win)
-        finally:
-            conn.close()
+        got = _npf.hermes_active_messages(session_key(caller, session_id))
+        if got is None:
+            return None
+        rows, row_model = got
+        used = 0
+        for content, tool_calls, reasoning in rows:
+            used += estimate_tokens_rough(content or "")
+            used += estimate_tokens_rough(tool_calls or "")
+            used += estimate_tokens_rough(reasoning or "")
+        win = window_for(model or row_model, "hermes")
+        if win <= 0 or used <= 0:
+            return None
+        return int(used), int(win)
     except Exception as exc:  # noqa: BLE001
         LOG.debug("口径B 读 Hermes messages 失败(%s)，降级", exc)
         return None
@@ -320,34 +263,26 @@ def _read_hermes_ctx_b(caller: str, session_id: str,
 
 def _read_hermes_usage_a(caller: str, session_id: str,
                          model: str = "") -> Optional[Tuple[int, int]]:
-    """口径 A：sessions 表累计 token / 调用次数 = 单轮典型占用 → (占用, 窗口)。读不到 None。"""
-    db = hermes_state_db()
-    if not session_id or not db or not os.path.isfile(db):
+    """口径 A：sessions 表累计 token / 调用次数 = 单轮典型占用 → (占用, 窗口)。读不到 None。
+
+    句柄与 SQL 在 L0 `node_profile.hermes_session_usage_row()`（只读 URI 打开，
+    杜绝意外写入）；本层只做折算、取分母与降级。
+    """
+    if not session_id:
         return None
     try:
-        # 只读 URI 打开，杜绝意外写入（sqlite 只读模式下写操作会直接报错）。
-        uri = "file:%s?mode=ro" % db.replace("\\", "/")
-        conn = sqlite3.connect(uri, uri=True, timeout=3.0)
-        try:
-            want_key = "a2a:%s:%s" % (caller or "unknown", session_id)
-            row = conn.execute(
-                "SELECT input_tokens, cache_read_tokens, api_call_count, model "
-                "FROM sessions WHERE session_key = ? "
-                "ORDER BY COALESCE(last_activity_at, started_at) DESC LIMIT 1",
-                (want_key,)).fetchone()
-            if row is None:
-                return None
-            inp, cache_read, calls, row_model = (int(row[0] or 0), int(row[1] or 0),
-                                                 int(row[2] or 0), (row[3] or ""))
-            if calls <= 0:
-                return None
-            typical = (inp + cache_read) / float(calls)
-            win = window_for(model or row_model, "hermes")
-            if win <= 0:
-                return None
-            return int(typical), int(win)
-        finally:
-            conn.close()
+        row = _npf.hermes_session_usage_row(session_key(caller, session_id))
+        if row is None:
+            return None
+        inp, cache_read, calls, row_model = (int(row[0] or 0), int(row[1] or 0),
+                                             int(row[2] or 0), (row[3] or ""))
+        if calls <= 0:
+            return None
+        typical = (inp + cache_read) / float(calls)
+        win = window_for(model or row_model, "hermes")
+        if win <= 0:
+            return None
+        return int(typical), int(win)
     except Exception as exc:  # noqa: BLE001
         LOG.debug("口径A 读 Hermes state.db 失败(%s)，降级为不自愈", exc)
         return None
@@ -368,16 +303,15 @@ def read_openclaw(caller: str, session_id: str) -> Optional[Tuple[int, int]]:
     """读 OpenClaw 会话档案，key = agent:main:openai-user:a2a:<caller>:<session_id>。
 
     映射规则（07-23 实测）：A2A 的 `user` = `a2a:<caller>:<session_id>` 落到该 key。
+    路径、键格式与档案读取在 L0 `node_profile.openclaw_session_entry()`；本层只认
+    `totalTokens` / `contextTokens` 这两个**用量字段**的口径与降级。
     """
-    path = sessions_json_path()
-    if not session_id or not path or not os.path.isfile(path):
+    if not session_id:
         return None
     try:
-        key = "agent:main:openai-user:a2a:%s:%s" % (caller or "unknown", session_id)
-        with open(path, "r", encoding="utf-8") as fh:
-            store = json.load(fh)
-        entry = store.get(key)
-        if not isinstance(entry, dict):
+        entry = _npf.openclaw_session_entry(
+            _npf.openclaw_session_key(caller, session_id))
+        if entry is None:
             return None
         total = entry.get("totalTokens")
         window = entry.get("contextTokens")
