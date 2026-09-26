@@ -1,13 +1,29 @@
 # -*- coding: utf-8 -*-
-"""刀11/刀12 · 群聊前端「拆三件套」等价装置（无头浏览器 + CDP，纯 stdlib）。
+"""刀11/刀12/刀13 · 群聊前端「拆三件套」等价装置（无头浏览器 + CDP，纯 stdlib）。
 
 比什么
 ------
-旧侧 OLD = ``--old <path>``（当刀开工前快照），默认 ``_old/group_old_k12.html``
+旧侧 OLD = ``--old <path>``（当刀开工前快照），默认 ``_old/group_old_k13.html``
 新侧 NEW = ``agent-team/ui/group.html`` + 它引用的同目录兄弟件
-           （``group_transport.js`` 刀11 抽出、``group.css`` 刀12 抽出）
+           （``group_transport.js`` 刀11 抽出、``group.css`` 刀12 抽出、
+            ``group_view.js`` 刀13 抽出）
 
 两侧**来自两个不同的物理文件**，装置开头打印各自 md5 自证不是自比。
+
+刀13 追加（只加不减；原有各类判据一条没删、期望值一个没下调）：
+
+* **第 0b 类 · JS 文本级（业务视图）**：与下面第 0 类 CSS 文本级**同构** ——
+  旧快照里那个**唯一的内联 ``<script>`` 块**的内容（``<script>\\n`` 之后 至
+  ``</script>`` 之前）**==** ``agent-team/ui/group_view.js`` 的全部字节；外加新
+  ``group.html`` 的字节账（内联 ``<script>`` 计 0 / 外链行计 1 / 总字节）与
+  **重组互补证据**（把新件那 39 B 外链行换回原 74877 B 整块 → 与旧快照逐字节相等）。
+  注意 ``</script>`` 计数**不减**（6 → 6）：外链 script **不是空元素**，
+  ``<script src=...></script>`` 自带闭标签 —— 与刀12 的 ``<link>``（``</style>`` 1 → 0）不同。
+* **反向证据**加一条：NEW 侧必须真的 ``GET /group_view.js``、OLD 侧一次都不许请求。
+* **旧侧自比防护**：``--old`` 落在 k13 快照时硬校验它的 md5 == ``K13_MD5``。
+* 第 0 类 CSS 文本级**换锚**（见 ``css_text_level()`` 的 docstring）：从「``--old`` vs 活件」
+  改成钉死的 ``k12 快照 ↔ k13 快照``（两端都是冻结字节，期望数字一个没变），
+  并**追加一条全链重组** —— 从**活的** ``group.html`` 两步走回 k12 快照，活件不脱钩。
 
 刀12 追加了三类判据（只加不减，原有各类一条没动）：
 
@@ -32,8 +48,8 @@
 * ``/old/<f>`` → `_old/` 目录（只有那一个 html）；``/new/<f>`` → `agent-team/ui/`
 * 两个页面里的 ``<script src="/md.js">`` 之类走的是**绝对路径**，所以根路径
   ``/md.js`` ``/tex.js`` ``/hl.js`` ``/codeblock.js`` ``/group_transport.js``
-  一律从 `agent-team/ui/` 发（两侧同一份；旧页面不引用 group_transport.js，
-  所以它在旧侧根本不会被请求 —— 这一点与线上形态一致）
+  ``/group.css`` ``/group_view.js`` 一律从 `agent-team/ui/` 发（两侧同一份；
+  旧页面不引用 group_view.js，所以它在旧侧根本不会被请求 —— 这一点与线上形态一致）
 * ``/api/*`` 全部返回冻结 JSON；``/login`` 返 **204**（见下「已知偏差」）
 
 TSVC（``http://<host>:9981``）是**硬编码常量**，改端口就等于改被测代码。
@@ -51,16 +67,17 @@ TSVC（``http://<host>:9981``）是**硬编码常量**，改端口就等于改�
 ----
 文本级一致 ∧ 标识符探针一致 ∧ 启动轨迹一致 ∧ 轮询轨迹一致 ∧ 动作序轨迹一致
 ∧ 函数级线级（请求行 + 请求头 + 请求体 + Error.message）逐字节一致
-∧ 两侧 JS 错误列表一致 ∧ CSS 文本级一致 ∧ 计算样式逐元素一致 ∧ 外链确已加载
+∧ 两侧 JS 错误列表一致 ∧ CSS 文本级一致 ∧ 业务视图文本级一致
+∧ 计算样式逐元素一致 ∧ 外链确已加载
 → 打印 EQUIV_SENTINEL_OK，退出 0；否则逐条打 diff，退出 1。
 
 用法
 ----
-``python tools/equivalence/group_frontend_equiv.py``            刀12 默认旧侧（k12 快照）
-``python tools/equivalence/group_frontend_equiv.py --old tools/equivalence/_old/group_old_k11.html``
+``python tools/equivalence/group_frontend_equiv.py``            刀13 默认旧侧（k13 快照）
+``python tools/equivalence/group_frontend_equiv.py --old tools/equivalence/_old/group_old_k12.html``
 ``... -v``        打全量轨迹
 ``... --runs 3``  连跑 3 次自证确定性
-``... --old-md5 e5c46769``  可选：额外硬校验旧侧 md5 前缀
+``... --old-md5 58497402``  可选：额外硬校验旧侧 md5 前缀
 """
 
 import argparse
@@ -84,15 +101,20 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 UI_DIR = os.path.join(ROOT, "agent-team", "ui")
 OLD_DIR = os.path.join(ROOT, "tools", "equivalence", "_old")
 K11_HTML = os.path.join(OLD_DIR, "group_old_k11.html")   # 刀11 基线（JS 文本级判据的固定锚）
-K12_HTML = os.path.join(OLD_DIR, "group_old_k12.html")   # 刀12 基线（--old 默认值）
+K12_HTML = os.path.join(OLD_DIR, "group_old_k12.html")   # 刀12 基线（CSS 文本级判据的固定锚；供跨刀对照）
+K13_HTML = os.path.join(OLD_DIR, "group_old_k13.html")   # 刀13 基线（--old 默认值）
 NEW_HTML = os.path.join(UI_DIR, "group.html")
 NEW_JS = os.path.join(UI_DIR, "group_transport.js")
 NEW_CSS = os.path.join(UI_DIR, "group.css")
+NEW_VIEW = os.path.join(UI_DIR, "group_view.js")
 
-# 刀12 基线快照的 md5：**只**用来判定「本刀的增量互补证据（重组回填）适不适用」。
+# 刀12 基线快照的 md5：**只**用来判定「刀12 的增量互补证据（重组回填）适不适用」。
 # --old 传别的快照（例如 k11）时，旧侧与新侧的差异不止 style 段这一处，重组自然不等，
 # 那条子判据据此显式声明「不适用」而不是悄悄放过 —— 见 css_text_level()。
 K12_MD5 = "e5c4676943d70073fd881d936226a2ad"
+# 刀13 基线快照的 md5（= 刀12 收口后、刀13 开工前的 group.html）。同样只用来判定
+# 「刀13 的增量互补证据（把 39 B 外链行换回 74877 B 内联块）适不适用」—— 见 js_view_text_level()。
+K13_MD5 = "58497402129900f8dfa0e7b513bd3afe"
 
 TSVC_HOST = "<host>"
 TSVC_ORIGIN = "http://" + TSVC_HOST + ":9981"
@@ -278,7 +300,7 @@ def wire_slice(a, b):
 
 STATIC_ROOTS = {"old": OLD_DIR, "new": UI_DIR}
 ROOT_STATIC = {"/md.js", "/tex.js", "/hl.js", "/codeblock.js", "/group_transport.js",
-               "/group.css"}
+               "/group.css", "/group_view.js"}
 MIME = {".js": "text/javascript; charset=utf-8", ".html": "text/html; charset=utf-8",
         ".css": "text/css; charset=utf-8"}
 
@@ -949,14 +971,132 @@ BLOCKS = [("B1", 555, 555), ("B2", 560, 586), ("B3", 1468, 1468),
 STYLE_OPEN = b"<style>\n"
 STYLE_CLOSE = b"</style>\n"
 LINK_LINE = b'<link rel="stylesheet" href="/group.css">\n'
+SCRIPT_OPEN = b"<script>\n"
+SCRIPT_CLOSE = b"</script>\n"
+VIEW_LINE = b'<script src="/group_view.js"></script>\n'
 
 
-def css_text_level(old_html):
-    """刀12 第 0 类判据：CSS 字节同源 + 新 group.html 的字节账 + 重组互补证据。"""
-    print("---- 3.0 CSS 文本级（刀12）：外链件 == 旧快照内联 style 段，逐字节 ----")
+def js_view_text_level(old_html):
+    """刀13 第 0b 类判据：业务视图字节同源 + 新 group.html 的字节账 + 重组互补证据。
+
+    与刀12 的第 0 类 CSS 文本级**同构**，只是把「内联 ``<style>`` → 外链 css」
+    换成「内联 ``<script>`` → 外链 js」。三件事：
+
+    1. 旧快照里那个**唯一的内联 script 块**的内容（``<script>\\n`` 之后 至
+       ``</script>`` 之前）**==** ``agent-team/ui/group_view.js`` 的全部字节；
+    2. 新 ``group.html`` 的字节账：总字节 = 旧 − 整块 + 39、内联 ``<script>`` 计 0、
+       ``VIEW_LINE`` 计 1 且落在**原内联块同一 offset**（文档序不变 = 执行序不变）；
+    3. **重组互补证据**：把新件那 39 B 的外链行换回原整块 → 与旧快照逐字节相等，
+       证明「只换了这一处」。
+    """
+    print("---- 3.0b JS 文本级·业务视图（刀13）：外链件 == 旧快照内联 script 块，逐字节 ----")
     old = open(old_html, "rb").read()
     new = open(NEW_HTML, "rb").read()
+    view = open(NEW_VIEW, "rb").read()
+
+    a = old.rfind(SCRIPT_OPEN)          # 裸 <script>（不带 src）—— 文档里只该有这一个
+    if a < 0:
+        print("  ✗ 旧快照里找不到内联 <script>\\n 块")
+        return False
+    b = old.find(b"</script>", a)
+    if b < 0:
+        print("  ✗ 旧快照里 <script>@%d 之后找不到 </script>" % a)
+        return False
+    ia, ib = a + len(SCRIPT_OPEN), b
+    inner = old[ia:ib]
+    block = old[a:b + len(SCRIPT_CLOSE)]
+    ok = True
+
+    print("  旧快照 %s" % old_html)
+    print("    内联 <script> 块数 %d（应 1）｜整块 offset [%d, %d)  共 %d B"
+          % (old.count(SCRIPT_OPEN), a, a + len(block), len(block)))
+    print("    脚本内容       offset [%d, %d)  %6d B  md5 %s  换行 %d 个"
+          % (ia, ib, len(inner), hashlib.md5(inner).hexdigest(), inner.count(b"\n")))
+    ok &= old.count(SCRIPT_OPEN) == 1
+    ok &= old[b:b + len(SCRIPT_CLOSE)] == SCRIPT_CLOSE
+    print("  新件   %s" % NEW_VIEW)
+    print("    文件内容                        %6d B  md5 %s  换行 %d 个"
+          % (len(view), hashlib.md5(view).hexdigest(), view.count(b"\n")))
+    eq = inner == view
+    ok &= eq
+    print("    ✓ 两侧字节相等: %s（长度 %d == %d ｜ md5 %s == %s）" % (
+        eq, len(inner), len(view),
+        hashlib.md5(inner).hexdigest()[:8], hashlib.md5(view).hexdigest()[:8]))
+    # 忠实性守则（刀11 立、刀12/13 沿用）：原样搬运、不包 IIFE、不加 "use strict"、不加 BOM
+    bom = view[:3] == b"\xef\xbb\xbf"
+    head_ok = view[:1] == b"\n"
+    print("    首 40 B: %r" % view[:40])
+    print("    末 40 B: %r" % view[-40:])
+    print("    忠实性：无 BOM %s ｜ 首字节仍是换行 %s ｜ 末字节仍是换行 %s"
+          % (not bom, head_ok, view[-1:] == b"\n"))
+    ok &= (not bom) and head_ok and view[-1:] == b"\n"
+
+    # --- 新 group.html 的字节账 ---
+    n_inline = new.count(SCRIPT_OPEN)
+    n_view = new.count(VIEW_LINE)
+    n_close = new.count(b"</script>")
+    n_src = new.count(b"<script src=")
+    at = new.find(VIEW_LINE)
+    print("  新件   %s" % NEW_HTML)
+    print("    字节数 %d  md5 %s" % (len(new), hashlib.md5(new).hexdigest()))
+    print("    内联 <script> 计数 %d（应 0）｜ 外链行 %d B @ offset %d（旧内联块也在 %d）｜ 该行计数 %d（应 1）"
+          % (n_inline, len(VIEW_LINE), at, a, n_view))
+    # 注：</script> 计数**不减**（6 → 6）。外链 script 不是空元素，`<script src=...></script>`
+    # 自带一个闭标签 —— 这点与刀12 的 <link>（空元素，</style> 1 → 0）不同，不要照搬那个算法。
+    print("    </script> 计数 %d（应 6：5 个原外链 + 1 个新外链，外链 script 非空元素，闭标签不减）"
+          % n_close)
+    print("    <script src= 计数 %d（应 6）" % n_src)
+    ok &= (n_inline == 0 and n_view == 1 and at == a and n_close == 6 and n_src == 6)
+    # 位置不变 = 执行序不变：仍紧跟 /group_transport.js、仍在 </body> 之前
+    prev = b'<script src="/group_transport.js"></script>\n'
+    prev_ok = new[at - len(prev):at] == prev
+    body_at = new.find(b"</body>")
+    tail_ok = at < body_at            # 外链行整体落在 </body> 之前（行尾恰好紧贴它）
+    print("    外链行紧接 /group_transport.js 之后: %s ｜ 落在 </body>(@%d) 之前: %s（行尾 @%d）"
+          % (prev_ok, body_at, tail_ok, at + len(VIEW_LINE)))
+    ok &= prev_ok and tail_ok
+    print("    字节账 %d − %d + %d = %d ｜ 与实测 %d 相符: %s"
+          % (len(old), len(block), len(VIEW_LINE),
+             len(old) - len(block) + len(VIEW_LINE), len(new),
+             len(old) - len(block) + len(VIEW_LINE) == len(new)))
+
+    # --- 重组互补证据：把那 39 B 换回 74877 B 的整块 → 应与旧快照逐字节相等 ---
+    old_md5 = hashlib.md5(old).hexdigest()
+    recon = new[:at] + block + new[at + len(VIEW_LINE):]
+    same = recon == old
+    print("    重组回填（新件的外链行 ← 原内联块）→ %d B  md5 %s ｜ 与旧快照逐字节相等: %s"
+          % (len(recon), hashlib.md5(recon).hexdigest(), same))
+    if old_md5 == K13_MD5:
+        ok &= same and len(old) - len(block) + len(VIEW_LINE) == len(new)
+        print("      （旧侧是刀13 基线快照 md5 %s → 这条是**硬判据**：两侧唯一差异就是这一处）"
+              % K13_MD5[:8])
+    else:
+        print("      （旧侧 md5 %s 不是刀13 基线 %s → 两侧差的不止内联脚本这一处，"
+              % (old_md5[:8], K13_MD5[:8]))
+        print("        重组互补证据**对该旧侧不适用**，不计入判定；JS 字节同源那条照样是硬判据）")
+    print("  JS 文本级·业务视图结论: %s" % ("一致" if ok else "不一致"))
+    return ok
+
+
+def css_text_level():
+    """刀12 第 0 类判据：CSS 字节同源 + 字节账 + 重组互补证据（刀13 起改成**常驻回归**）。
+
+    为什么换锚：这条判据问的是「``group.css`` 至今仍逐字节等于刀12 抽走的那段内联
+    ``<style>``，且当时那一换**只**换了这一处」。刀12 当时 ``--old`` 就是 k12 快照、
+    新侧就是刚改完的活件，两者相邻，所以直接拿 ``--old`` 和活件比。刀13 又动了
+    ``group.html``（抽内联脚本），活件与 k12 之间隔了**两步**，再拿 ``--old``
+    （现在默认 k13 快照）去找 ``<style>`` 段只会找不到 —— 那不是判据失效，是锚错位。
+    所以把它钉死成 **K12_HTML ↔ K13_HTML** 这对冻结快照（与 text_level() 钉 K11_HTML
+    同一套路），**期望数字一个没下调**：31078 B / 31095 B / 42 B / offset 173 /
+    ``</style>``=0 / ``<link>``=1 / 110833 B，全部照旧。
+    活件也不脱钩：末尾多加一条**全链重组** —— 从活的 ``group.html`` 两步走回 k12 快照。
+    """
+    print("---- 3.0 CSS 文本级（刀12 常驻回归，锚定 %s ↔ %s）：外链件 == 内联 style 段，逐字节 ----"
+          % (os.path.basename(K12_HTML), os.path.basename(K13_HTML)))
+    old = open(K12_HTML, "rb").read()
+    new = open(K13_HTML, "rb").read()
     css = open(NEW_CSS, "rb").read()
+    old_html = K12_HTML
 
     a = old.find(STYLE_OPEN)
     b = old.find(b"</style>")
@@ -983,11 +1123,11 @@ def css_text_level(old_html):
     print("    首 40 B: %r" % css[:40])
     print("    末 40 B: %r" % css[-40:])
 
-    # --- 新 group.html 的字节账 ---
+    # --- 刀12 收口后那一版 group.html（= k13 快照）的字节账 ---
     n_close = new.count(b"</style>")
     n_link = new.count(b"<link")
     at = new.find(LINK_LINE)
-    print("  新件   %s" % NEW_HTML)
+    print("  刀12 收口件 %s（= 刀13 开工前的活件）" % K13_HTML)
     print("    字节数 %d  md5 %s" % (len(new), hashlib.md5(new).hexdigest()))
     print("    </style> 计数 %d（应 0）｜ <link 计数 %d（应 1）｜ <link> 行 %d B @ offset %d（旧 <style> 也在 %d）"
           % (n_close, n_link, len(LINK_LINE), at, a))
@@ -1016,6 +1156,29 @@ def css_text_level(old_html):
         print("      （旧侧 md5 %s 不是刀12 基线 %s → 两侧差的不止 style 段这一处，"
               % (old_md5[:8], K12_MD5[:8]))
         print("        重组互补证据**对该旧侧不适用**，不计入判定；CSS 字节同源那条照样是硬判据）")
+
+    # --- 全链重组（刀13 追加）：活件不因为换锚而脱钩 ---
+    # 活 group.html --[39 B 外链行 ← 74877 B 内联块]--> k13 快照 --[42 B <link> 行 ← 31095 B style 段]--> k12 快照
+    live = open(NEW_HTML, "rb").read()
+    k13 = new
+    j = k13.rfind(SCRIPT_OPEN)
+    k = k13.find(b"</script>", j)
+    vat = live.find(VIEW_LINE)
+    chain_ok = False
+    if j >= 0 and k >= 0 and vat >= 0:
+        step1 = live[:vat] + k13[j:k + len(SCRIPT_CLOSE)] + live[vat + len(VIEW_LINE):]
+        step2 = step1[:at] + block + step1[at + len(LINK_LINE):]
+        chain_ok = step1 == k13 and step2 == old
+        print("  全链重组：活件 %d B --[脚本块回填]--> %d B（== k13 快照: %s）--[style 段回填]--> %d B（== k12 快照: %s）"
+              % (len(live), len(step1), step1 == k13, len(step2), step2 == old))
+        print("            md5 链 %s → %s → %s"
+              % (hashlib.md5(live).hexdigest()[:8], hashlib.md5(step1).hexdigest()[:8],
+                 hashlib.md5(step2).hexdigest()[:8]))
+    else:
+        print("  ✗ 全链重组取不到锚点（脚本块 @%d/%d ｜ 外链行 @%d）" % (j, k, vat))
+    print("    → 从**活件**两步走回刀12 基线，逐字节相等: %s（证明这两刀合起来只换了这两处）"
+          % chain_ok)
+    ok &= chain_ok
     print("  CSS 文本级结论: %s" % ("一致" if ok else "不一致"))
     return ok
 
@@ -1079,10 +1242,10 @@ def run_once(args):
     old_html = os.path.abspath(args.old)
 
     print("=" * 78)
-    print("刀11/刀12 · 群聊前端拆三件套 —— 等价装置")
+    print("刀11/刀12/刀13 · 群聊前端拆三件套 —— 等价装置")
     print("=" * 78)
 
-    for p in (old_html, NEW_HTML, NEW_JS, NEW_CSS, K11_HTML):
+    for p in (old_html, NEW_HTML, NEW_JS, NEW_CSS, NEW_VIEW, K11_HTML, K12_HTML, K13_HTML):
         if not os.path.isfile(p):
             print("缺件: " + p)
             return 1
@@ -1091,14 +1254,16 @@ def run_once(args):
         return hashlib.md5(open(p, "rb").read()).hexdigest()
 
     old_md5, new_md5 = md5(old_html), md5(NEW_HTML)
-    js_md5, css_md5 = md5(NEW_JS), md5(NEW_CSS)
+    js_md5, css_md5, view_md5 = md5(NEW_JS), md5(NEW_CSS), md5(NEW_VIEW)
     old_stat = (os.path.getsize(old_html), old_md5, os.path.getmtime(old_html))
     print("---- 装置自证：两侧来自两个不同的物理文件 ----")
     print("  OLD html  %s  %8d B  md5 %s" % (old_html, os.path.getsize(old_html), old_md5))
     print("  NEW html  %s  %8d B  md5 %s" % (NEW_HTML, os.path.getsize(NEW_HTML), new_md5))
     print("  NEW js    %s  %8d B  md5 %s" % (NEW_JS, os.path.getsize(NEW_JS), js_md5))
     print("  NEW css   %s  %8d B  md5 %s" % (NEW_CSS, os.path.getsize(NEW_CSS), css_md5))
+    print("  NEW view  %s  %8d B  md5 %s" % (NEW_VIEW, os.path.getsize(NEW_VIEW), view_md5))
     print("  刀11 锚   %s  %8d B  md5 %s" % (K11_HTML, os.path.getsize(K11_HTML), md5(K11_HTML)))
+    print("  刀12 锚   %s  %8d B  md5 %s" % (K12_HTML, os.path.getsize(K12_HTML), md5(K12_HTML)))
     pin_ok = (not args.old_md5) or old_md5.startswith(args.old_md5)
     self_ok = (new_md5 != old_md5) and pin_ok
     print("  新侧 md5 != 旧侧: %s ｜ --old-md5 前缀校验: %s ｜ 不是自比: %s"
@@ -1109,7 +1274,21 @@ def run_once(args):
         print("装置自证不过（旧侧不是开工前快照，或两侧同一个文件）→ 停")
         return 1
 
-    css_ok = css_text_level(old_html)
+    # 旧侧走的是 k13 快照这条默认路 → 额外硬校验它就是那份冻结字节（防有人拿改过的件当旧侧）。
+    # 传 k12/k11 快照时这条不适用、不报错（与 css/js 文本级里 K12_MD5/K13_MD5 分支同构）。
+    is_k13 = (os.path.abspath(old_html) == os.path.abspath(K13_HTML))
+    if is_k13 or old_md5 == K13_MD5:
+        k13_pin = old_md5 == K13_MD5
+        print("  旧侧是刀13 基线快照 → 硬校验 md5 == %s: %s" % (K13_MD5, k13_pin))
+        if not k13_pin:
+            print("    ✗ 旧侧字节被动过（实测 %s）→ 停" % old_md5)
+            return 1
+    else:
+        print("  旧侧不是刀13 基线快照（md5 %s ≠ %s）→ 该项硬校验不适用，不报错"
+              % (old_md5[:8], K13_MD5[:8]))
+
+    view_ok = js_view_text_level(old_html)
+    css_ok = css_text_level()
     txt_ok = text_level()
 
     browser = find_browser()
@@ -1201,7 +1380,7 @@ def run_once(args):
     bad += cdiff
 
     # ---------- 刀12 · 反向证据：外链确已加载 ----------
-    print("  —— 反向证据：外链 /group.css 真的加载了（防「两个空页面也算一致」）——")
+    print("  —— 反向证据：外链 /group.css 与 /group_view.js 真的加载了（防「两个空页面也算一致」）——")
     for side, r in (("OLD", o), ("NEW", n)):
         for s in r["sheets"]["sheets"]:
             print("    %s| 样式表 href=%s owner=<%s> media=%r disabled=%s 规则数=%d err=%s"
@@ -1218,10 +1397,20 @@ def run_once(args):
           % (ext_ok, len(ext), ext[0]["rules"] if ext else "-"))
     if not ext_ok:
         bad += 1
-    inl = [s for s in o["sheets"]["sheets"] if s["href"] is None and s["owner"] == "style"]
-    inl_ok = len(inl) == 1 and inl[0]["rules"] > 0
-    print("    OLD 侧存在内联 <style> 样式表且 cssRules.length>0: %s（命中 %d 张，规则 %s）"
-          % (inl_ok, len(inl), inl[0]["rules"] if inl else "-"))
+    # OLD 侧那条按快照形态分派（刀13 起）：k11/k12 快照样式是**内联 <style>**，
+    # k13 快照已是刀12 收口后的形态、样式**也是外链 /group.css** —— 两种形态各有一条
+    # **同强度**的正面断言（都要求「有且仅有一张、规则数 > 0」），没有一侧被放过。
+    if is_k13:
+        oext = [s for s in o["sheets"]["sheets"]
+                if s["href"] and s["href"].endswith("/group.css")]
+        inl_ok = len(oext) == 1 and oext[0]["rules"] > 0 and not oext[0]["err"]
+        print("    OLD 侧（k13 快照，样式已外链）存在 href 以 /group.css 结尾且 cssRules.length>0 的样式表: %s"
+              "（命中 %d 张，规则 %s）" % (inl_ok, len(oext), oext[0]["rules"] if oext else "-"))
+    else:
+        inl = [s for s in o["sheets"]["sheets"] if s["href"] is None and s["owner"] == "style"]
+        inl_ok = len(inl) == 1 and inl[0]["rules"] > 0
+        print("    OLD 侧存在内联 <style> 样式表且 cssRules.length>0: %s（命中 %d 张，规则 %s）"
+              % (inl_ok, len(inl), inl[0]["rules"] if inl else "-"))
     if not inl_ok:
         bad += 1
     len_ok = o["sheets"]["total"] == n["sheets"]["total"]
@@ -1232,15 +1421,30 @@ def run_once(args):
         bad += 1
     if not md5_ok:
         bad += 1
-    print("  —— 线级：静态件请求（两侧天然不同，只断言这两条事实，不逐行 diff）——")
+    print("  —— 线级：静态件请求（两侧天然不同，只断言下列正面事实，不逐行 diff）——")
     for side, r in (("OLD", o), ("NEW", n)):
         for line in r["doc_reqs"]:
             print("    %s| %s" % (side, line))
     new_got = [x for x in n["doc_reqs"] if x.startswith("GET /group.css ")]
     old_got = [x for x in o["doc_reqs"] if x.startswith("GET /group.css ")]
-    print("    NEW 侧确实请求过 /group.css: %s ｜ OLD 侧一次都没请求（样式是内联的）: %s"
-          % (bool(new_got), not old_got))
-    if not new_got or old_got:
+    if is_k13:
+        # k13 快照已是刀12 收口后的形态 → 样式两侧都外链，正面断言改成「两侧都必须取过」。
+        print("    NEW 侧确实请求过 /group.css: %s ｜ OLD 侧（k13 快照，样式已外链）也必须取过: %s"
+              % (bool(new_got), bool(old_got)))
+        if not new_got or not old_got:
+            bad += 1
+    else:
+        print("    NEW 侧确实请求过 /group.css: %s ｜ OLD 侧一次都没请求（样式是内联的）: %s"
+              % (bool(new_got), not old_got))
+        if not new_got or old_got:
+            bad += 1
+    # 刀13 反向证据：业务视图外链真的被取了（防「外链根本没加载，两个空页面也算一致」）。
+    # 三份旧快照（k11/k12/k13）里脚本都还是内联的 → OLD 侧一次都不该请求它，无条件成立。
+    new_v = [x for x in n["doc_reqs"] if x.startswith("GET /group_view.js ")]
+    old_v = [x for x in o["doc_reqs"] if x.startswith("GET /group_view.js ")]
+    print("    NEW 侧确实请求过 /group_view.js: %s（%s）｜ OLD 侧一次都没请求（脚本是内联的）: %s"
+          % (bool(new_v), new_v[0] if new_v else "-", not old_v))
+    if not new_v or old_v:
         bad += 1
 
     print("  —— 函数级冻结输入（请求行 + 请求头 + 请求体 + Error.message 逐字节）——")
@@ -1301,10 +1505,10 @@ def run_once(args):
     if not old_intact:
         print("    ✗ 开工时 %d B / md5 %s / mtime %.6f" % old_stat)
         bad += 1
-    print("  CSS 文本级一致: %s ｜ JS 文本级一致: %s ｜ 逐条 diff 行数合计: %d"
-          % (css_ok, txt_ok, bad))
+    print("  CSS 文本级一致: %s ｜ JS 文本级一致: %s ｜ 业务视图文本级一致: %s ｜ 逐条 diff 行数合计: %d"
+          % (css_ok, txt_ok, view_ok, bad))
 
-    if css_ok and txt_ok and bad == 0:
+    if css_ok and txt_ok and view_ok and bad == 0:
         print("EQUIV_SENTINEL_OK")
         return 0
     print("EQUIV_SENTINEL_FAIL")
@@ -1334,7 +1538,7 @@ def repeat(args):
         t0 = time.time()
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
         txt = p.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
-        path = os.path.join(tempfile.gettempdir(), "k12_run%d.txt" % i)
+        path = os.path.join(tempfile.gettempdir(), "k13_run%d.txt" % i)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(txt)
         outs.append(txt)
@@ -1382,8 +1586,8 @@ def main():
     ap.add_argument("--runs", type=int, default=1,
                     help="连跑 N 次自证确定性（默认 1；>1 时每次起一个干净子进程，"
                          "要求次次 OK 且归一随机端口后 N 份输出逐字节相同）")
-    ap.add_argument("--old", default=K12_HTML,
-                    help="旧侧 HTML 路径（默认 _old/group_old_k12.html；传 k11 快照也能跑）")
+    ap.add_argument("--old", default=K13_HTML,
+                    help="旧侧 HTML 路径（默认 _old/group_old_k13.html；传 k12 / k11 快照也能跑）")
     ap.add_argument("--old-md5", default="",
                     help="可选：额外硬校验旧侧 md5 前缀。不给就只校验「新旧 md5 不同」")
     args = ap.parse_args()
@@ -1400,9 +1604,13 @@ def main():
 #    动作本身，掐掉定时器是为了不让调度抖动伪造出 diff。两侧同一套代码、同一时机。
 # 3) 根路径 /group_transport.js 对两侧都发得出来，但旧页面压根不引用它 ——
 #    它只会出现在新侧的文档子资源请求里，而子资源请求不进 window.__tr（探针只包 fetch）。
-# 4) /group.css 同理：桩对两侧都发得出来，只有新侧会去取。这不是「偏差」而是本刀要证的事，
+# 4) /group.css 同理：桩对两侧都发得出来，刀12 时只有新侧会去取。这不是「偏差」而是刀12 要证的事，
 #    所以它被抬成**正面断言**（doc_reqs：NEW 必须取过、OLD 必须一次没取过），
-#    而不是靠「两侧都没差」蒙混过去。
+#    而不是靠「两侧都没差」蒙混过去。刀13 起默认旧侧换成 k13 快照（已是刀12 收口后的形态、
+#    样式也外链），这条断言按快照形态**分派**成「两侧都必须取过」—— 同为正面断言、同等强度；
+#    传 k12/k11 快照时仍走原来那条「OLD 一次都没取过」，一字未改。
+# 6) /group_view.js 是刀13 的同款正面断言：三份旧快照（k11/k12/k13）里脚本都还是内联的，
+#    所以「NEW 必须取过、OLD 必须一次没取过」是**无条件**成立的强断言，不需要分派。
 # 5) 计算样式只在启动 settle 之后、动作序之前取一次。动作序会改 DOM（开对话框、加消息），
 #    那之后的样式属于「动作后的状态」，已由动作序轨迹与 JS 错误列表覆盖；
 #    这里刻意不取第二次，免得把 headless 的布局抖动当成被测差异。

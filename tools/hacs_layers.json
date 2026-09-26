@@ -167,7 +167,12 @@
     "agent-team/ui/group.html": {
       "layer": "L4",
       "port": null,
-      "note": "群聊前端 —— 传输客户端已抽出（见 group_transport.js）；样式表已抽出（见 group.css）；剩「业务视图」待抽"
+      "note": "群聊前端·渲染壳 —— 拆三件套已收官，本件只剩壳（4942 B）：HTML 骨架 + 1 个样式外链（group.css）+ 6 个脚本外链（md.js / tex.js / hl.js / codeblock.js / group_transport.js / group_view.js），零内联 <style>、零内联 <script>"
+    },
+    "agent-team/ui/group_view.js": {
+      "layer": "L4",
+      "port": null,
+      "note": "群聊前端·业务视图（渲染 / 状态 / 事件）—— 刀13 从 group.html 的唯一内联 <script> 块逐字节原样搬出，零行为改变"
     },
     "agent-team/ui/group.css": {
       "layer": "L4",
