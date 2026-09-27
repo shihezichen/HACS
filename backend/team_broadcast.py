@@ -13,7 +13,7 @@
 
 用法：
   python team_broadcast.py --all --text "全体注意：今晚 23:00 停机窗口" \
-      --nats-host <host> --user hermes --password-file <home>/agent-team/nats-hermes.pass
+      --nats-host <host> --user hermes --password-file <deploy-dir>/nats-hermes.pass
   python team_broadcast.py --members lobster,top001 --text-file msg.md ... --timeout 180
 
 选项：

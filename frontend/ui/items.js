@@ -1,5 +1,5 @@
 /* ============================================================
-   items.js —— 条目三段式视图（并入自 <home>\agent-team\hacs_ui 骨架）
+   items.js —— 条目三段式视图（并入自 <deploy-dir>\hacs_ui 骨架）
    契约：顶 #hx-top 固定 / 底 #hx-bottom 固定 / 中 #hx-mid 为唯一滚动容器
          + #seq 跳转高亮 + 点击条目浮窗显示原文（再点同一条 / Esc / 浮窗 × 关闭）
    数据源：优先本前台既有通道 /api/items（同源，经 serve.py 反代 chat 服务）

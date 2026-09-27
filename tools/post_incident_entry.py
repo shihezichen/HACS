@@ -5,7 +5,7 @@ import pathlib
 import urllib.request
 
 BASE = "http://<host>:9940"
-TOK = pathlib.Path(r"<home>\agent-team\client-token").read_text(encoding="utf-8").strip()
+TOK = pathlib.Path(r"<deploy-dir>\client-token").read_text(encoding="utf-8").strip()
 
 CONTENT = (
     "【事故与修复记录】2026-09-19 P4 验证阶段，Hermes 总控在真表上跑了一条破坏性 DDL 当"

@@ -28,7 +28,7 @@ REFACTORED = ["cli_backend.py", "teamd.py", "team.py", "group_watch.py",
               "shared_content.py", "task_svc.py", "snap_portal.py",
               "verify_portal_public.py", "agent_usage.py"]
 
-LITERALS = [r"<home>\agent-team", "<home>/agent-team", "<deploy-dir>", "<deploy-dir>",
+LITERALS = [r"<deploy-dir>", "<deploy-dir>", "<deploy-dir>", "<deploy-dir>",
             r"<home>"]
 
 
@@ -47,9 +47,9 @@ def t_platform_semantics():
     """两个平台各拿自己的惯例位置，互不串台。"""
     s = _clear_env()
     try:
-        assert np.runtime_dir("nt") == r"<home>\agent-team", np.runtime_dir("nt")
+        assert np.runtime_dir("nt") == r"<deploy-dir>", np.runtime_dir("nt")
         assert np.runtime_dir("posix") == "<deploy-dir>", np.runtime_dir("posix")
-        assert np.etc_dirs("nt") == [r"<home>\agent-team"], np.etc_dirs("nt")
+        assert np.etc_dirs("nt") == [r"<deploy-dir>"], np.etc_dirs("nt")
         assert np.etc_dirs("posix") == ["<deploy-dir>"], np.etc_dirs("posix")
         assert np.node_exe("nt").endswith("node.exe"), np.node_exe("nt")
         assert np.node_exe("posix") == "node", np.node_exe("posix")
@@ -83,8 +83,8 @@ def t_local_equivalence():
     s = _clear_env()
     try:
         if os.name == "nt":
-            assert np.runtime_dir() == r"<home>\agent-team", np.runtime_dir()
-            assert np.etc_dirs("nt") == [r"<home>\agent-team"], np.etc_dirs()
+            assert np.runtime_dir() == r"<deploy-dir>", np.runtime_dir()
+            assert np.etc_dirs("nt") == [r"<deploy-dir>"], np.etc_dirs()
             assert np.node_exe().endswith(r"node-v22.23.2-win-x64\node.exe"), np.node_exe()
             # 下面四条是「每用户工具」的改造锚点：默认值必须与改造前字面量逐字相同
             assert np.claude_exec() == os.path.join(os.path.expanduser("~"), "AppData", "Local",

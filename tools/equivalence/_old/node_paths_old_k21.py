@@ -5,7 +5,7 @@
 为什么需要它
 ------------
 分层前每个模块各自写自己的宿主默认值，结果同一份代码里默认值互斥：20 处兜底
-`<deploy-dir>`（Linux 惯例）、8 处兜底 `<home>\agent-team`（Windows 惯例）。在 Windows 上
+`<deploy-dir>`（Linux 惯例）、8 处兜底 `<deploy-dir>`（Windows 惯例）。在 Windows 上
 有一半兜底指向不存在的路径 —— 这正是「不同 OS 与通用机制解耦」要消掉的东西。
 
 规则（唯一一条）
@@ -15,7 +15,7 @@
 - env 覆盖：`AGENT_TEAM_RUNTIME_DIR` / `AGENT_TEAM_ETC_DIR` / `AGENT_TEAM_NODE_EXE` /
   `AGENT_TEAM_LOG_DIR`（阶段 4 的 L0 nodelet 接管注入后，本文件的默认值退居兜底）。
 - 平台默认值 = **该平台的惯例位置**，不引另一平台的惯例：
-  Windows 运行目录 `<home>\agent-team`；posix 运行目录 `<deploy-dir>`、配置目录 `<deploy-dir>`。
+  Windows 运行目录 `<deploy-dir>`；posix 运行目录 `<deploy-dir>`、配置目录 `<deploy-dir>`。
   于是「在 Linux 上跑」与「在 Windows 上跑」各自拿到正确值，同一份代码两边都不用改。
 
 「本机真值」与「目标主机真值」是两回事
@@ -49,7 +49,7 @@ ENV_NODE_EXE = "AGENT_TEAM_NODE_EXE"
 ENV_LOG_DIR = "AGENT_TEAM_LOG_DIR"
 
 # 各平台的惯例位置（字面量只许出现在本文件内）
-WIN_RUNTIME_DIR = r"<home>\agent-team"
+WIN_RUNTIME_DIR = r"<deploy-dir>"
 POSIX_RUNTIME_DIR = "<deploy-dir>"
 POSIX_ETC_DIR = "<deploy-dir>"
 # PI/Codex 用的 node：刻意钉住 node22 那份（自动更新已关 + 哨兵），不走 PATH 里的 node。

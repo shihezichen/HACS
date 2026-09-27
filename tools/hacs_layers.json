@@ -348,6 +348,11 @@
       "port": null,
       "note": "T 工具面：节点守护单元的生成与核对（刀23）。--gen 由「部署表 + L0 档案」推导出各机单元内容并**只打印不落盘**（systemd 单元文件 / schtasks 命令行）；--check 经各机通道跑只读查询（systemctl list-unit-files / schtasks /Query），核对规范单元在不在、有没有异名同类单元。单元模板**全仓只此一份**，规范名只从 nodelet.UNIT_NAME_POSIX / UNIT_NAME_NT 取、本件不另抄。不 import deploy.py（契约 §4）；ssh 参数与 probe_model_channel.py 同一套"
     },
+    "tools/gen_arch_doc.py": {
+      "layer": "T",
+      "port": null,
+      "note": "终态架构文档生成器（模板 + 实时取数 → agent-team/docs/architecture-final.md）"
+    },
     "agent-team/tests/test_agent_model.py": {
       "layer": "T",
       "port": null,

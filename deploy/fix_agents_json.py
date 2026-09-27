@@ -14,7 +14,7 @@ import time
 # PHASE2_TODO: 待节点注入 env 后删除
 AGENT_TEAM_SECRETS = os.environ.get("AGENT_TEAM_SECRETS") or r"<home>\AppData\Local\hermes\secrets\agent-team"
 # PHASE2_TODO: 待节点注入 env 后删除
-AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or r"<home>\agent-team"
+AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or r"<deploy-dir>"
 # PHASE2_TODO: 待节点注入 env 后删除
 AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
 SECRETS = pathlib.Path(AGENT_TEAM_SECRETS)

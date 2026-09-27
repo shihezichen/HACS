@@ -114,8 +114,8 @@ def node_facts(target):
     services = node_services(target)
     unit = nodelet.UNIT_NAME_NT if flavour == "nt" else nodelet.UNIT_NAME_POSIX
     runtime = _expand(target.get("runtime_dir") or "").rstrip("/\\")
-    # 部署表里的 Windows 运行目录写成 `<home>/agent-team`（正斜杠），单元里要写成本平台惯例写法，
-    # 否则会拼出 `<home>/agent-team\nodelet.py` 这种两种分隔符混用的路径。
+    # 部署表里的 Windows 运行目录写成 `<deploy-dir>`（正斜杠），单元里要写成本平台惯例写法，
+    # 否则会拼出 `<deploy-dir>\nodelet.py` 这种两种分隔符混用的路径。
     if flavour == "nt":
         runtime = runtime.replace("/", "\\")
     return {

@@ -19,7 +19,7 @@ SECRETS = pathlib.Path(os.environ.get("AGENT_TEAM_SECRETS") or r"<home>\AppData\
 # PHASE2_TODO: 待节点注入 env 后删除
 AGENT_DIR = pathlib.Path(os.environ.get("AGENT_TEAM_REPO_DIR") or r"<repo>\agent-team")
 # PHASE2_TODO: 待节点注入 env 后删除
-LOCAL_CFG = pathlib.Path(os.environ.get("AGENT_TEAM_LOCAL_DIR") or r"<home>\agent-team")
+LOCAL_CFG = pathlib.Path(os.environ.get("AGENT_TEAM_LOCAL_DIR") or r"<deploy-dir>")
 # PHASE2_TODO: 待节点注入 env 后删除
 PY = os.environ.get("AGENT_TEAM_PY") or r"<home>/AppData/Roaming/uv/python/cpython-3.11-windows-x86_64-none/python.exe"
 # PHASE2_TODO: 待节点注入 env 后删除
