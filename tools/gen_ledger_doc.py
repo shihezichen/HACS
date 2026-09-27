@@ -80,7 +80,10 @@ BASELINE = {
     # 动结构后必须同步这两个数；下面其余各项是**刀 3 时点**的实测，不是随生成重算。
     # 刀27（阶段5 第三刀）：73 → 77（新增 L0 member_roster.py + T 推导器/装置/旧侧 3 件）、
     # 边 84 → 91。**含一条继承订正**：刀26 登记 gen_nats_conf_equiv.py 时件数已 72 → 73 而本常量漏同步。
-    'files': 77, 'edges': 91, 'direction': 0, 'bizwords': 48,
+    # 刀28（阶段5 第四刀）：77 → 78（新增 _old/membership_audit_old_k28.py——刀28 前正件的逐字节快照，
+    # 当装置 D 段的「改前」锚）、边 91 → 94（新件 import L0 node_profile + 懒 import L1 gen_nats_conf
+    # + 装置 import 该快照）。
+    'files': 78, 'edges': 94, 'direction': 0, 'bizwords': 48,
     'hardcode_files': 25, 'storage': 11, 'storage_over': 2,
     # 刀 3 后：宿主字面量拆成「真硬编码（路径）」与「提示级（IP/端口默认值）」两个口径。
     'host_path_files': 42, 'host_path_sites_before': 111, 'host_path_sites_after': 80,
@@ -596,8 +599,9 @@ HTML_HEAD = """<!DOCTYPE html>
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v12</b> · 2026-09-25 首版 / 2026-09-27 阶段 2–4 全闭 · 阶段 5 刀25（只读对账）→ 刀26（退场/收敛）→ 刀27（名册档案化 + 逐字节自证）· 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更（v12）：阶段 5 <b>第三刀 · 名册档案化 + 「档案 + 凭据探针 ⇒ 用户区」逐字节自证</b>（刀27）—— 阶段5 的收口刀要让生成器<b>按档案自动写 NATS 配置</b>；在那之前必须先证明一件事：<b>L0 名册档案 + 各机凭据文件，够不够唯一决定现网中枢的用户区</b>。本刀<b>不动 NATS、不改任何运行期件、不部署</b>，只做这个证明。<br>
+      版本 <b>v13</b> · 2026-09-25 首版 / 2026-09-27 阶段 2–4 全闭 · 阶段 5 刀25（只读对账）→ 刀26（退场/收敛）→ 刀27（名册档案化 + 逐字节自证）→ 刀28（对账器身份口径）· 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v13）：阶段 5 <b>第四刀 · 对账器的「身份 / 观测量」分离</b>（刀28）—— 刀25 那台只读对账器要当收口刀的<b>验收门禁</b>用，可它先把我们坑了一次：<code>--check</code> 的「发现项身份」里混进了<b>随钟漂移的观测量</b>（<code>stale_routes</code> 由墙钟决定：NATS 每次重启后路由 idle 归零、约 1 小时必由 0 变正），于是同一裁决每轮都报成「新增 + 消失」成对出现 → 基线<b>假红</b>（实测 rc=1）。本刀把身份定义为<b>判据的裁决</b>（哪项检查 / 哪类违规 / 落在哪个对象上），观测数字递归摘出（<code>VOLATILE_KEYS</code>，只登记 <code>stale_routes</code>）；<b>判据一条未放宽</b> —— 裁决消失/新增、非观测字段（<code>num_routes</code> 4→8）漂移照旧报漂移，装置新增的 D 段 6 格把这三点硬钉住。证据：① 门禁 <code>rc=0</code> · 件 <b>77 → 78</b> / 边 <b>91 → 94</b>（新增「刀28 前的正件逐字节快照」当装置锚）/ 例外 0 · 检查 5 = 0 处 ② 装置 <b>112 格 0 不一致</b>（106 → 112）· 两轮同 md5 <code>14c1fca8…</code> · <code>EQUIV_SENTINEL_OK</code>；负控注毒 3 处双侧全红、还原转绿 ③ 红点 <b>40 == 40</b>（改前树 <code>git archive HEAD agent-team</code> 独立解包；集合 diff 0 行）· 扫密 <b>40 == 40</b>（本刀新增文件 0 命中）④ 基线重冻结<b>过账</b>：只有 <code>findings.M6[0].hubs[*].stale_routes</code> 0→2 变，全部 <code>COMPARE_KEYS</code> 的判据身份逐字节不变；<code>--check</code> 由假红 <b>rc=1 → rc=0</b>，M6 那条<b>仍在</b> ⑤ 本刀<b>不改任何运行期件、不部署</b>（只读巡检件，<code>tools/</code> 不进部署表）→ <code>deploy.py --status / --health-only</code> <b>没跑</b>（无部署面可比对）。<br>
+      上一轮（v12）：阶段 5 <b>第三刀 · 名册档案化 + 「档案 + 凭据探针 ⇒ 用户区」逐字节自证</b>（刀27）—— 阶段5 的收口刀要让生成器<b>按档案自动写 NATS 配置</b>；在那之前必须先证明一件事：<b>L0 名册档案 + 各机凭据文件，够不够唯一决定现网中枢的用户区</b>。本刀<b>不动 NATS、不改任何运行期件、不部署</b>，只做这个证明。<br>
       ① <b>新增 L0 名册档案</b> <code>agent-team/member_roster.py</code> —— 从本刀起它是<b>名册的唯一真源</b>，<code>nats.conf</code> 的用户区降级为它的<b>产物</b>（刀25 把名册真源定义为「中枢 conf 的规范形」并写明「提升为独立档案件是后续刀的事」，本件就是那个落点）。<b>有序</b>表，顺序 <b>==</b> conf 里 users 的规范序（字典序）—— 这是逐字节对照成立的前提；条目形态冻结为 <code>(member, role, cred_node, cred_kind)</code> 四元组。<b>三条铁律</b>：口令绝不进档案（只记「真值在哪台机的哪个文件」）· 不写路径 / 不写 IP（<code>cred_kind</code> 是位置的<b>种类</b>不是路径）· 不存权限串（角色模板唯一出处仍是 L1 <code>gen_nats_conf.perm_list</code>，故本件<b>不许 import 它</b> —— L0 → L1 是方向硬违规）。纯数据 + 纯查询：<b>零 import、零 IO、零环境依赖</b>。<br>
       ② <b>新增自证器</b> <code>tools/roster_derive_conf.py</code>（T 工具面）。判据：「档案有序表 + 各成员凭据文件内容 → 按 <code>gen_nats_conf</code> 行格式渲染的用户区」<b>==</b>「两中枢 <code>nats.conf</code> 里原样抽出的用户区」，<b>归一化后逐字节相等</b>。<b>用户区定义冻结</b>：从含 <code>users = [</code> 的那个 <code>authorization {</code> 行起到配对的 <code>}</code> 行止（含首尾、不重排不 strip）—— <code>cluster</code> 块里那条单行 <code>authorization</code> 没有 <code>users</code>，<b>集群路由凭据天然落在区外</b>。<b>归一化只许两处</b>：口令换 <code>sha256:</code>前 12、生成时间戳行换固定形态（后者在用户区上<b>永不命中</b>，写进契约是为将来扩面 —— 如实记账）。退出码 <b>0</b> 逐字节一致 / <b>1</b> 有差异（逐行打印）/ <b>2</b> 采集失败（<b>绝不退化成 0 或 1</b>）。只读：远端<b>只发 <code>cat</code> 一条形态</b>。<br>
       ③ <b>真机实测（两中枢 lobster / top001）</b>：档案 <b>8</b> 人；<code>lobster</code> 用户区 <b>✓ 一致</b>、<code>top001</code> 用户区 <b>✓ 一致</b>，两侧归一化 md5 均 <b><code>970bcf1c</code></b>、各 <b>13 行</b>、差异 <b>0 行</b>，<code>collect_errors</code> 空、<code>ok = true</code>、<b>退出码 0</b>。<b>「档案 + 探针 ⇒ 用户区」现在是被机械证明的事实，不是设计意图。</b><code>--json</code> 全文里 <code>password</code> 字样 <b>0</b> 次（零差异 ⇒ 无 <code>diffs</code> 行，出口面连摘要都不需要出现）。<br>

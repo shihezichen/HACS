@@ -24,7 +24,10 @@
     B 段  时长解析交叉核对（正则一路 vs 手写扫描器一路）              14 格
     C 段  10 例冻结夹具 × 8 格 = 80 格
           （规范 JSON 逐字节一致 1 + 六项条数命中冻结期望 6 + CLI 退出码 1）
-    合计 106 格
+    D 段  `--check` 的**身份口径**（刀28 加；新侧 vs 刀28 前快照）      6 格
+          （观测量漂移必须判一致 · 改前必须判漂移 · 裁决消失/新增必须判漂移 ·
+            非观测字段漂移必须判漂移 · 两条报告的判据身份必须逐字节相等）
+    合计 112 格
 
 用法
 ----
@@ -40,6 +43,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import io
 import json
@@ -62,6 +66,7 @@ for p in (TOOLS, OLD_DIR, AGENT_TEAM):
 
 import nats_membership_audit as NEW                      # noqa: E402 —— 新侧（正件）
 import membership_audit_old_k25 as OLD                   # noqa: E402 —— 旧侧（独立第二实现）
+import membership_audit_old_k28 as OLDK28                 # noqa: E402 —— 刀28 前的正件（D 段「改前」锚）
 import gen_nats_conf                                     # noqa: E402 —— L1 角色模板唯一出处
 
 #: 夹具里的合成主机名（`.invalid` 是 RFC2606 保留后缀，永远不可能解析到真机）
@@ -350,6 +355,87 @@ DURATIONS = ("0s", "5s", "8s", "22s", "322µs", "1.278863724s", "17.72075ms",
              "", "not-a-duration")
 
 
+# ============================================================ D 段：身份 vs 观测量（刀28）
+
+def _dup_route_report(prefix, stale, num_routes=(4, 4)):
+    """造一份**真来的**报告（冻结夹具 `dup_route` → `analyze()`），再把该条裁决的**观测数字**改成给定值。
+
+    只在观测字段上动手 —— 这正是真机上发生的事：NATS 重启后路由 idle 归零，
+    约 1 小时后计数自己由 0 变正（刀28 实测）。
+    """
+    root = materialize(_case_dup_route(), os.path.join(prefix, "dup"))
+    rep = new_report(root)
+    hits = [it for it in rep["findings"]["M6"] if it.get("kind") == "duplicate_route"]
+    if len(hits) != 1:
+        raise AssertionError("夹具 dup_route 应恰好产出 1 条 duplicate_route，实测 %d" % len(hits))
+    for item in hits:
+        for j, hub in enumerate(item.get("hubs") or []):
+            hub["stale_routes"] = stale[j]
+            hub["num_routes"] = num_routes[j]
+    return rep
+
+
+def run_identity_cases():
+    """D 段：`--check` 的**身份口径**。
+
+    判据不是「两侧算法一致」，而是两件事：① **同一裁决**在观测数字漂移时还敢不敢假红
+    （刀28 要修的就是它）② **裁决本身**变了时还报不报红（**不许被修坏**）。
+    改前一侧由 `_old/membership_audit_old_k28.py`（正件在刀28 前逐字节快照）扮演。
+    """
+    cells, bad = [], 0
+    tmp = tempfile.mkdtemp(prefix="k28id-")
+
+    def cell(name, ok, note):
+        nonlocal bad
+        bad += 0 if ok else 1
+        cells.append(("D", name, ok, note))
+
+    try:
+        base = _dup_route_report(tmp, stale=(0, 0))            # 基线：路由刚重启过 → 陈旧计数 0
+        clock = _dup_route_report(tmp, stale=(2, 2))           # 本班实测：同一裁决，计数 2
+
+        _, same = NEW.diff_baseline(clock, base)
+        cell("obs_drift_green", same,
+             "同一裁决、仅 stale_routes 0→2 → 判**一致**（刀28 修的时间脆性）"
+             if same else "**仍判漂移** —— 时间脆性没修掉")
+
+        _, same_old = OLDK28.diff_baseline(clock, base)
+        cell("obs_drift_red_before", not same_old,
+             "刀28 前（快照）同一输入 → 判**漂移**（证明本刀真改了行为，不是空转）"
+             if not same_old else "**改前也判一致** —— 那本刀无从谈起")
+
+        gone = copy.deepcopy(clock)
+        gone["findings"]["M6"] = [x for x in gone["findings"]["M6"]
+                                  if x.get("kind") != "duplicate_route"]
+        gone["counts"]["M6"] = len(gone["findings"]["M6"])
+        _, same_gone = NEW.diff_baseline(gone, base)
+        cell("verdict_gone_red", not same_gone,
+             "裁决**消失**（不再有重复路由）→ 仍判漂移（「消失也算漂移」没被削）"
+             if not same_gone else "**消失了也不报** —— 口径被放宽了")
+
+        extra = copy.deepcopy(base)
+        extra["findings"]["M6"].append({"kind": "legacy_hub", "node": "zz-n", "bad_ports": [4222],
+                                        "has_permissions": False, "user_count": 1, "why": "合成"})
+        extra["counts"]["M6"] = len(extra["findings"]["M6"])
+        _, same_extra = NEW.diff_baseline(extra, base)
+        cell("verdict_new_red", not same_extra,
+             "冒出一条**新裁决** → 判漂移" if not same_extra else "**新裁决不报** —— 漏判")
+
+        grown = _dup_route_report(tmp, stale=(0, 0), num_routes=(8, 4))
+        _, same_grown = NEW.diff_baseline(grown, base)
+        cell("nonobs_field_red", not same_grown,
+             "**非观测字段**漂移（num_routes 4→8）→ 判漂移（只摘了钟那一项）"
+             if not same_grown else "**非观测字段也不报** —— 摘过头了")
+
+        same_id = (NEW.canonical(NEW._identity(clock)) == NEW.canonical(NEW._identity(base)))
+        cell("identity_equal", same_id,
+             "两条报告的**判据身份**逐字节相等（基线重冻结只动了观测量，没动裁决）"
+             if same_id else "**身份不等** —— 基线重冻结可能掩盖了真漂移")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return cells, bad
+
+
 def run_matrix():
     """跑一遍完整矩阵 → `(格列表, 不一致数)`。格 = `(段, 名字, 是否一致, 说明)`。"""
     cells, bad = [], 0
@@ -393,6 +479,11 @@ def run_matrix():
             cells.append(("C", "%s/rc" % name, hit, "退出码 %d（期望 %d）" % (rc, want_rc)))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- D 段：`--check` 的身份口径（刀28）
+    d_cells, d_bad = run_identity_cases()
+    cells.extend(d_cells)
+    bad += d_bad
     return cells, bad
 
 
@@ -484,10 +575,11 @@ def main(argv=None):
         digests.append(digest_of(cells)[0])
 
     print("=" * 78)
-    print("刀25 · 成员入网只读对账 · 等价/冻结矩阵（%d 格 × %d 轮）"
+    print("刀25 起 · 刀28 扩 D 段 · 成员入网只读对账 · 等价/冻结矩阵（%d 格 × %d 轮）"
           % (len(cells), max(1, args.runs)))
     print("新侧 = tools/nats_membership_audit.py（正则 + 括号配平；模板 import L1 perm_list）")
     print("旧侧 = _old/membership_audit_old_k25.py（逐行状态机 + 顶层逗号切词；模板自拼）")
+    print("D 段 = 身份 vs 观测量：新侧 vs _old/membership_audit_old_k28.py（刀28 前逐字节快照）")
     print("=" * 78)
     seg = None
     for segment, name, ok, note in cells:

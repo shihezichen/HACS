@@ -52,6 +52,17 @@ stdout / `--out` / 基线文件 / 报告里**不可能**出现任何口令明文
 **采集面的退出码只表达采集成败，不表达 findings 是否为空** —— 判定请用 `--check`。
 本刀冻结的基线**本来就非零**（僵尸凭据 / 遗留中枢 / 重复路由），那是**如实记账的已知项**，
 由阶段5 后续刀去消。**绝不许为了把基线变绿而放宽口径或删检查项。**
+
+发现项的「身份」与「观测量」（刀28 修订）
+----------------------------------------
+`--check` 比的是**发现项的判据身份** —— 「哪一项检查 / 哪一类违规 / 落在哪个对象上」，
+不是整条 JSON。**判据的输入量**（例：`num_routes > 2` 才成判据）必须留在身份里；
+只有「同一裁决下自己会随时间漂移的输出数字」才登记进 `VOLATILE_KEYS`，比对时摘出。
+
+为什么必须分开：M6 的 `duplicate_route` 条目里带 `stale_routes` 计数，而该计数由**墙钟**决定
+（NATS 每次重启后路由 idle 归零、约 1 小时后计数必由 0 变正）→ 基线的「瞬时值」每次必假红。
+**修的是「身份里混进了钟」，不是放宽判据**：裁决消失（例：重复路由不再存在）照旧报「消失」，
+双向严格一点没削（`docs/l5-membership-audit.md`《身份与观测量》节 + 装置 D 段有机械证据）。
 """
 from __future__ import annotations
 
@@ -107,6 +118,17 @@ CHECK_KEYS = tuple(k for k, _ in CHECKS)
 #: `--check` 参与比对的字段（其余是说明性的，不进判定）
 COMPARE_KEYS = ("node_list", "hub_list", "roster", "live_sources", "findings")
 
+#: **观测量**（键名 → 为什么它不是判据身份的一部分）。比对时递归摘出，见 `_identity()`。
+#: 登记口径：**判据的输入量**（如 `num_routes`：> 2 才成判据）**不许登记**，它必须留在身份里；
+#: 只有「同一裁决下自己会随时间漂移的输出数字」才准登记。登记 = 声明它不进身份，**必须留痕**
+#: （契约文档《身份与观测量》节 + 台账版本行），且**只准摘观测量，判据一条都不许放宽**。
+VOLATILE_KEYS = {
+    "stale_routes": "该计数由**墙钟**决定（idle 是否越过 STALE_IDLE_SECONDS）：NATS 每次重启后"
+                    "路由 idle 归零、约 1 小时后计数必由 0 变正，同一裁决的身份被钟推着漂移"
+                    "→ 基线每次假红（刀28 实测）。判据本身是布尔的「是否存在陈旧路由」，"
+                    "计数只是给人看的观测值。",
+}
+
 #: 凭据文件的两种形态：posix 中枢落在配置目录下的 `<member>.pass`；
 #: nt 节点落在运行目录下的 `nats-<member>.pass`。成员名从**文件名**推，两种都认。
 CRED_PATTERNS = (("nats-*.pass", re.compile(r"^nats-(.+)\.pass$")),
@@ -145,6 +167,20 @@ def canonical(obj):
 def _sort_findings(items):
     """findings 列表的确定性排序（按规范化后的条目文本）。"""
     return sorted(items, key=lambda it: json.dumps(it, sort_keys=True, ensure_ascii=False))
+
+
+def _identity(item):
+    """发现项的**判据身份**：递归摘掉登记在 `VOLATILE_KEYS` 里的观测数字。
+
+    `--check` 拿身份跟冻结基线比 —— 否则「随时间自己会变」的观测数字会让**同一裁决**反复报
+    「新增 + 消失」（刀28 修的就是这个时间脆性）。摘掉的只是观测值：裁决若**消失**（例：重复
+    路由不再存在），照旧报「消失」；非观测字段（例：`num_routes` 4 → 8）照旧报漂移。
+    """
+    if isinstance(item, dict):
+        return {k: _identity(v) for k, v in item.items() if k not in VOLATILE_KEYS}
+    if isinstance(item, list):
+        return [_identity(v) for v in item]
+    return item
 
 
 # ============================================================ conf 解析（正件这一路：括号配平 + 正则取字段）
@@ -796,14 +832,19 @@ def _one_line(item):
 
 
 def diff_baseline(report, baseline):
-    """本次 vs 冻结基线 → 逐条「新增 / 消失」。返回 `(行列表, 是否一致)`。"""
+    """本次 vs 冻结基线 → 逐条「新增 / 消失」。返回 `(行列表, 是否一致)`。
+
+    比的是**判据身份**（`_identity()`：摘掉 `VOLATILE_KEYS` 里的观测数字），打印的也是身份 ——
+    于是「同一裁决、观测数字随钟变」不再被误报成「新增 + 消失」（刀28）。
+    「差异消失也算漂移」的双向严格**原样保留**：裁决不见了照样 `same=False`。
+    """
     lines, same = [], True
     for key in COMPARE_KEYS:
         cur, old = report.get(key), baseline.get(key)
         if key == "findings":
             for ck in CHECK_KEYS:
-                a = {json.dumps(x, sort_keys=True, ensure_ascii=False) for x in (cur or {}).get(ck, [])}
-                b = {json.dumps(x, sort_keys=True, ensure_ascii=False) for x in (old or {}).get(ck, [])}
+                a = {json.dumps(_identity(x), sort_keys=True, ensure_ascii=False) for x in (cur or {}).get(ck, [])}
+                b = {json.dumps(_identity(x), sort_keys=True, ensure_ascii=False) for x in (old or {}).get(ck, [])}
                 for text in sorted(a - b):
                     same = False
                     lines.append("  ✗ %s 新增  %s" % (ck, _one_line(json.loads(text))))
@@ -887,6 +928,9 @@ def main(argv=None):
         lines, same = diff_baseline(report, baseline)
         if not args.json:
             print("\n[与冻结基线比对] %s" % os.path.basename(args.baseline))
+            if VOLATILE_KEYS:
+                print("  身份口径：已摘出观测量 %s —— 判据一条未放宽（裁决消失/非观测字段变化照旧报漂移）"
+                      % "、".join(sorted(VOLATILE_KEYS)))
             print("\n".join(lines) if lines else "  ✓ 逐项一致")
         return EXIT_OK if same else EXIT_DRIFT
 

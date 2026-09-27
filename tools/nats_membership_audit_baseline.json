@@ -29,12 +29,12 @@
           {
             "hub": "lobster",
             "num_routes": 4,
-            "stale_routes": 0
+            "stale_routes": 2
           },
           {
             "hub": "top001",
             "num_routes": 4,
-            "stale_routes": 0
+            "stale_routes": 2
           }
         ],
         "kind": "duplicate_route",
