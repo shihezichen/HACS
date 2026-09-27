@@ -332,6 +332,11 @@
       "duty": "平台层：**节点档案**（nodelet 的静态那一半）。一句话职责＝让上层对操作系统零感知 —— ①节点身份（flavour/home）②运行与配置目录（薄委托 node_paths）③执行器路径 claude/codex/pi/node（薄委托）④**目标主机档案**（target_known/target_flavour/target_home/target_claude_exec，刀4 雏形在此正式化）⑤宿主真源路径（Hermes state.db / config.yaml / agent 包目录、OpenClaw sessions.json 的候选来源）⑥**只读探针**（open_hermes_state_ro / hermes_session_usage_row / hermes_active_messages / openclaw_session_entry / hermes_config_model_window）⑦日志与探针口（log_dir / a2a_probe_base / a2a_probe_token）",
       "note": "L0 平台层：节点档案（刀21 阶段4 新增）。两条铁律：**只读**（SQLite 一律 mode=ro URI 打开、用完即 close，不建目录不写状态）；**不编造**（没配置/文件不在/记录不在 → None 或空；真出错 → **原样抛**，由调用方按自己口径降级记日志 —— 不把「打不开」偷偷变成「没有数据」）。未登记目标主机沿用 posix 兜底 + target_known()=False。①②③ 是对同层 node_paths 的薄委托，且**惰性 import**（函数体内 import node_paths），所以 node_paths → node_profile 的模块级 import 不成环。本件承接 storage_handle_exceptions 里那条例外的下沉终点：sqlite3 句柄从 L2 搬到这里。等价证据 tools/equivalence/node_profile_equiv.py（26 格冻结矩阵 + agent_usage 行为面 13 例样本）"
     },
+    "agent-team/member_roster.py": {
+      "layer": "L0",
+      "port": null,
+      "note": "L0 平台层：**成员名册档案**（刀27 阶段5 第三刀新增）。一句话职责＝回答「这个协作域有哪些成员、各自什么角色、它的口令真值落在哪台机的哪个文件」，仅此三样 —— 从本刀起它是名册的**唯一真源**，`nats.conf` 的用户区降级为它的产物（刀25 把名册真源定义为「中枢 conf 的规范形」并写明「提升为独立档案件是后续刀的事」，本件就是那个落点）。有序表，**顺序 == conf 里 users 的规范序（字典序）**，这是逐字节对照成立的前提；条目形态冻结为 (member, role, cred_node, cred_kind) 四元组，cred_kind ∈ {runtime → <runtime_dir>/nats-<m>.pass, conf → <conf_dir>/<m>.pass}。**三条铁律**：① 口令绝不进档案（只记「真值在哪台机的哪个文件」，读它是探针的事）② 不写路径 / 不写 IP（cred_kind 是位置的**种类**不是路径；拼路径由 L0 node_profile + 部署表负责）③ 不存权限串（角色模板唯一出处仍是 L1 gen_nats_conf.perm_list，档案只记角色名）—— 故本件**不许 import gen_nats_conf**（L0 → L1 是方向硬违规）。纯数据 + 纯查询：零 import、零 IO、零环境依赖。等价证据 tools/equivalence/roster_derive_equiv.py；契约 agent-team/docs/l5-roster-archive.md"
+    },
     "agent-team/nodelet.py": {
       "layer": "L0",
       "port": 9971,
@@ -373,6 +378,11 @@
       "port": null,
       "note": "T 工具面：成员入网「只读对账」（刀25 · 阶段5 第一刀）。六项检查 M1 两中枢用户/口令矩阵一致 · M2 权限串 == gen_nats_conf.perm_list(user) 逐字符 · M3 各机 *.pass 内容 == 名册口令 · M4 名册成员落地覆盖（无凭据文件且无活连接 = 僵尸凭据）· M5 活连接 ⊆ 名册 · M6 遗留中枢（无 permissions 块 / 非 v2 端口）与集群路由重复。**三个铁律**：① 只读（远端只发 cat / ls -1 / curl -s GET，无任何写操作、不重启单元、不改 nats.conf）② 口令一个字节都不出门（采集器当场换 sha256，明文连 artifacts 都进不去，出口只许 {member,location,sha256_8}）③ analyze() 是纯函数（无 IO/无 time），角色模板由参数注入 —— 正件在 main() 传 L1 gen_nats_conf.perm_list，装置传它自己那份独立实现，两路互证。默认中枢 ('lobster','top001') 按节点名（非 IP）声明、ssh 目标经 tools/deploy_targets.json 解析；--live / --fixtures / --check / --write-baseline；退出码 0 与冻结基线逐项一致 / 1 有漂移 / 2 采集失败。基线冻结在 tools/nats_membership_audit_baseline.json（本刀实测非零项 3 条＝如实记账的已知项，阶段5 后续刀去消，**不许改口径消红**）"
     },
+    "tools/roster_derive_conf.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：**「档案 + 凭据探针 ⇒ 中枢用户区」的逐字节自证**（刀27 · 阶段5 第三刀）。判据＝「L0 名册档案的有序成员表 + 各成员凭据文件内容 → 按 gen_nats_conf 行格式渲染出的用户区」与「两台中枢 nats.conf 里原样抽出的用户区」**归一化后逐字节相等**。用户区定义冻结：从含 `users = [` 的那个 `authorization {` 行起到配对的 `}` 行止（含首尾、不重排不 strip）—— cluster 块里那条单行 authorization 没有 users，故**集群路由凭据天然落在区外**。归一化**只许两处**：口令换 sha256 前 12、生成时间戳行换固定形态（后者在用户区上永不命中，写进契约是为将来扩面）。**三个铁律**：① 只读（远端只发 cat 一条形态，K27RC= 回传内层退出码；不写远端文件、不重启单元、不改 nats.conf）② 口令只在内存里走一趟 —— analyze() 把两侧文本先过归一化器再放进报告，出口只可能是 sha256:<前12>③ analyze()/derive 是纯函数，角色模板由参数注入（正件 main() 传 L1 perm_list，装置传自己那份独立实现，两路互证）。中枢按节点名 ('lobster','top001') 声明、ssh 目标读内部 deploy_targets.json → 本件零宿主字面量。--live / --fixtures；退出码 0 逐字节一致 / 1 有差异（逐行打印）/ 2 采集失败（**绝不退化成 0 或 1**）。契约见 agent-team/docs/l5-roster-archive.md"
+    },
     "tools/equivalence/membership_audit_equiv.py": {
       "layer": "T",
       "port": null,
@@ -387,6 +397,16 @@
       "layer": "T",
       "port": null,
       "note": "刀26 等价装置（56 格 × N 轮）：同一份输入分别喂**旧侧/新侧子进程**，只比「渲染出的 conf 文本 + 退出码 + 是否写盘」；B 段退场用例的期望由装置**独立第二算法**（按行删条目 + 逗号归位）算出，不照抄被测件；含 `--runs` 确定性自证与 `--neg` 注毒负控（红 4 处）"
+    },
+    "tools/equivalence/roster_derive_equiv.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：刀27 的等价/冻结矩阵装置（**50 格 × N 轮**）。A 段 12 格＝角色模板互证（正件走 L1 perm_list vs 旧侧自拼，逐字符）；B 段 14 格＝**抽块器互证 7 格 + 归一化器互证 7 格**（正件「定位 users 行再向上回溯 + 逐字符配平」 vs 旧侧「先切顶层区块再挑体内含 users 的 authorization 块」，含空文本 / 无 users / users 在非 authorization 块里 / 花括号未配平 4 例畸形，块文本与说明文案都要一致）；C 段 24 格＝6 例冻结夹具（clean / order_swap / cred_mismatch / missing_cred / extra_in_conf / perm_drift）× 4（规范 JSON 逐字节一致 1 + 每 hub 差异行数命中冻结期望 2 + CLI 退出码与采集错误 1）。含 --runs 自证确定性（EQUIV_SENTINEL_OK / EQUIV_DETERMINISM_OK）与 --negative 强制负控（注毒 3 处：改一个凭据内容 / 换档案顺序 / 删 conf 里一个用户，两侧都必须报红、还原转绿）。**全程离线**：夹具内嵌在源码里、跑时落临时目录跑完即删；主机名一律 *.example.invalid，口令一律 2 字符合成串"
+    },
+    "tools/equivalence/_old/roster_derive_old_k27.py": {
+      "layer": "T",
+      "port": null,
+      "note": "刀27 的「旧侧」独立第二实现（**另一条算法路径**：抽块＝自顶向下切顶层区块再挑体内含 users 的 authorization 块；归一化＝**零正则**手写扫描器逐字符找 password: 后那对引号；渲染＝先全渲染成无尾形态最后统一给前 n-1 条补逗号；角色模板自己按契约文档口径拼，**不 import gen_nats_conf**）—— 不 import 正件、不 import 任何运行期件，只用标准库 + L0 数据档案 member_roster（那是**被判定的输入数据**，不是被判定的实现）。输出形状/键名/排序/why 文案与正件逐字节相同，那是冻结契约不是实现 —— 装置逐格比的就是这两份规范 JSON"
     }
   },
   "rules": {
