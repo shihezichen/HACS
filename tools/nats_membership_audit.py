@@ -1,0 +1,897 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""T 工具面：**成员入网只读对账**（阶段5 第一刀）——「现网权限矩阵 vs 期望矩阵」的机械答案。
+
+为什么要它
+----------
+阶段5 的目标是把「成员入网」从**人工改 NATS 配置**变成**按档案 + 探针自动生成**。
+但在动 NATS 之前必须先有一把尺子：**现在到底是什么样**。没有这把尺子，任何自动化
+都只是把「不知道对不对」换成「不知道对不对，而且是自动的」。
+
+本件就是那把尺子 —— **只读**地把六件事量出来，冻结成基线，之后每次跑都与基线比。
+它**不改任何配置、不重启任何单元、不写远端任何文件**；远端只发 `cat` 与 `curl -s` 两种命令。
+
+名册真源（契约，别翻案）
+------------------------
+  · **名册 = 两台 v2 中枢 `nats.conf` 里 `authorization.users` 的「规范形」**。
+    本刀不引入新的名册文件 —— 名册提升为独立档案件是阶段5 后续刀的事。
+  · **角色模板的唯一出处 = `gen_nats_conf.perm_list(user)`**（L1）。期望权限串一律**调它算**，
+    本件源码里**没有**第二份模板字符串。它由 `main()` 注入进 `analyze()`，所以
+    `analyze()` 本身是**纯函数**（无 IO / 无 time / 无随机），装置可以塞自己那份独立实现进来互证。
+  · **中枢清单**是节点名 `("lobster", "top001")`（节点名不是宿主地址，可入仓）；
+    ssh 目标与运行目录**一律经 `tools/deploy_targets.json` 解析**，本件零宿主字面量。
+
+六项检查（键名与顺序冻结）
+--------------------------
+  M1 `hub_user_matrix`   两中枢的 `(user → password)` 集合完全相同
+  M2 `perm_template`     每个 user 的 `permissions` 逐字符 == `perm_list(user)`
+  M3 `cred_landing`      各机 `*.pass` 内容 == 名册中同名成员的口令
+  M4 `roster_coverage`   名册每个成员至少有一处落地（pass 文件 ∪ 活连接）
+  M5 `live_subset`       活连接的成员身份必须 ⊆ 名册（**硬违规**）
+  M6 `legacy_and_routes` 非 v2 形状的中枢；集群路由条目 >2 或存在陈旧路由
+
+口令一个字节都不出门
+--------------------
+采集器**当场把 `*.pass` 的内容换成 sha256**，明文连 `artifacts` 都进不去；名册口令只在
+`analyze()` 内部用来算 sha256 做比对，输出里只出现 `sha256_8`（前 8 位十六进制）。
+stdout / `--out` / 基线文件 / 报告里**不可能**出现任何口令明文。
+
+用法
+----
+    python tools/nats_membership_audit.py --live [--json] [--out FILE]
+    python tools/nats_membership_audit.py --live --write-baseline tools/nats_membership_audit_baseline.json
+    python tools/nats_membership_audit.py --fixtures <DIR> [--json]   # 装置用，离线可跑
+    python tools/nats_membership_audit.py --check [--json]            # 采一次 + 比冻结基线
+
+退出码
+------
+    0  `--check` 与冻结基线逐项一致；或 `--live` / `--fixtures` 采集成功
+    1  `--check` 发现漂移（逐条打印「新增 / 消失」，**不因漂移而静默**）
+    2  采集失败（ssh / 网络 / 夹具缺失 / 中枢配置空或解析不出用户 / 监控口回的不是 JSON）
+
+**采集面的退出码只表达采集成败，不表达 findings 是否为空** —— 判定请用 `--check`。
+本刀冻结的基线**本来就非零**（僵尸凭据 / 遗留中枢 / 重复路由），那是**如实记账的已知项**，
+由阶段5 后续刀去消。**绝不许为了把基线变绿而放宽口径或删检查项。**
+"""
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import hashlib
+import io
+import json
+import os
+import re
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(HERE)
+AGENT_TEAM = os.path.join(PROJECT_ROOT, "agent-team")
+TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
+BASELINE_PATH = os.path.join(HERE, "nats_membership_audit_baseline.json")
+
+if AGENT_TEAM not in sys.path:
+    sys.path.insert(0, AGENT_TEAM)
+
+import node_profile                                     # noqa: E402 —— L0 节点档案（宿主事实唯一真源）
+
+EXIT_OK, EXIT_DRIFT, EXIT_COLLECT = 0, 1, 2
+
+#: 输出契约版本（键名冻结；改形状必须进版本号）
+SCHEMA = "l5-membership-audit/1"
+
+#: 默认中枢（节点名，不是地址）。`--hub` 只为测试保留，真机跑时别传。
+HUBS_DEFAULT = ("lobster", "top001")
+
+#: v2 中枢的端口体系：9930 客户端 / 9931 集群路由 / 9932 监控（仅环回）。
+#: 监听端口落在集合外 = 不是 v2 形状（与 `agent-team/gen_nats_conf.py` 生成的那份对齐）。
+V2_PORTS = (9930, 9931, 9932)
+#: 监控口只绑 127.0.0.1 —— 所以 connz/routez 一律**经 ssh 在该机上打环回**，本件不需要任何地址字面量。
+MONITOR_PORT = 9932
+
+#: 陈旧路由阈值：`idle` 超过它就是「早该被回收却还挂着的重复路由」。
+STALE_IDLE_SECONDS = 3600
+
+#: 六项检查（**顺序与键名冻结**）
+CHECKS = (
+    ("M1", "hub_user_matrix"),
+    ("M2", "perm_template"),
+    ("M3", "cred_landing"),
+    ("M4", "roster_coverage"),
+    ("M5", "live_subset"),
+    ("M6", "legacy_and_routes"),
+)
+CHECK_KEYS = tuple(k for k, _ in CHECKS)
+
+#: `--check` 参与比对的字段（其余是说明性的，不进判定）
+COMPARE_KEYS = ("node_list", "hub_list", "roster", "live_sources", "findings")
+
+#: 凭据文件的两种形态：posix 中枢落在配置目录下的 `<member>.pass`；
+#: nt 节点落在运行目录下的 `nats-<member>.pass`。成员名从**文件名**推，两种都认。
+CRED_PATTERNS = (("nats-*.pass", re.compile(r"^nats-(.+)\.pass$")),
+                 ("*.pass", re.compile(r"^(.+)\.pass$")))
+
+#: 远端命令的 PATH —— 自己钉死（刀23 实测：MSYS ssh 起的远端 shell 未必含 /usr/bin）
+REMOTE_PATH = "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; "
+#: 远端命令的退出码回传标记（ssh 自己的 rc 只反映最后一条命令，区分不了「文件不在」与「连不上」）
+RC_MARK = "K25RC="
+
+_ENV_RX = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}")
+
+
+# ============================================================ 小工具
+
+def _expand(value):
+    """展开 `${VAR:默认值}`（与 deploy.py / nodelet_gen.py 同一口径）。"""
+    if not isinstance(value, str):
+        return value
+
+    def sub(m):
+        return os.environ.get(m.group(1)) or (m.group(2) or "")
+    return _ENV_RX.sub(sub, value)
+
+
+def sha256_hex(text):
+    """字符串的 sha256（十六进制）。口令只以它的形态离开本进程。"""
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def canonical(obj):
+    """规范 JSON：键名排序、缩进固定、不转义非 ASCII —— 供逐字节比对。"""
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False, indent=2) + "\n"
+
+
+def _sort_findings(items):
+    """findings 列表的确定性排序（按规范化后的条目文本）。"""
+    return sorted(items, key=lambda it: json.dumps(it, sort_keys=True, ensure_ascii=False))
+
+
+# ============================================================ conf 解析（正件这一路：括号配平 + 正则取字段）
+
+_DUR_RX = re.compile(r"(\d+(?:\.\d+)?)\s*(ns|µs|us|ms|s|m|h|d)")
+_DUR_UNITS = {"ns": 1e-9, "µs": 1e-6, "us": 1e-6, "ms": 1e-3,
+              "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
+
+
+def parse_duration(text):
+    """NATS 的人读时长串 → **秒**（`"6d18h7m50s"` / `"5s"` / `"322µs"`）。
+
+    解析不出来返回 `None` —— **不猜 0**（把「读不懂」说成「刚活动过」会把陈旧路由洗白）。
+    """
+    s = str(text or "").strip()
+    if not s:
+        return None
+    total, pos, seen = 0.0, 0, False
+    for m in _DUR_RX.finditer(s):
+        if m.start() != pos:
+            return None
+        total += float(m.group(1)) * _DUR_UNITS[m.group(2)]
+        pos, seen = m.end(), True
+    if not seen or pos != len(s):
+        return None
+    return total
+
+
+def _skip_string(text, i):
+    """`text[i]` 是引号时，跳到该字符串字面量之后。"""
+    quote, i = text[i], i + 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == quote:
+            return i + 1
+        i += 1
+    return i
+
+
+def _balanced_slice(text, start, opener, closer):
+    """从 `text[start]`（必须是 `opener`）起取配平的一段 → (内部文本, 结束下标+1)。
+
+    引号内的括号不计（口令与主题串里理论上可以出现括号）。配不平返回 `(None, len)`。
+    """
+    depth, i = 0, start
+    while i < len(text):
+        ch = text[i]
+        if ch in "\"'":
+            i = _skip_string(text, i)
+            continue
+        if ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:i], i + 1
+        i += 1
+    return None, len(text)
+
+
+_USERS_RX = re.compile(r"\busers\s*=\s*\[")
+_USER_RX = re.compile(r'\buser\s*:\s*"([^"]*)"')
+_PASS_RX = re.compile(r'\bpassword\s*:\s*"([^"]*)"')
+_PERM_RX = re.compile(r"\bpermissions\s*:\s*\{")
+_LISTEN_RX = re.compile(r"^\s*(listen|port|https?)\s*:\s*(.+?)\s*,?\s*$")
+_CLUSTER_RX = re.compile(r"\bcluster\s*\{")
+_NAME_RX = re.compile(r'\bname\s*:\s*"([^"]*)"')
+
+
+def parse_conf(text):
+    """`nats.conf` → 结构化事实（**只取本刀要判的那几样**，不做通用 conf 解析器）。
+
+    返回 `{"users": [(user, password, perm_body|None)], "listen_ports": [int],
+           "cluster_name": str, "has_permissions": bool, "has_users_block": bool}`。
+
+    为什么不取 `cluster { authorization { user: "route" … } }` 里那条：它是**路由凭据**不是成员，
+    定位靠 `users = [ … ]` 这个数组本身（集群授权块里没有它），天然把路由那条挡在外面。
+    """
+    src = text or ""
+    users, perm_seen = [], False
+    m = _USERS_RX.search(src)
+    if m:
+        inner, _end = _balanced_slice(src, m.end() - 1, "[", "]")
+        i, inner = 0, inner or ""
+        while i < len(inner):
+            ch = inner[i]
+            if ch in "\"'":
+                i = _skip_string(inner, i)
+                continue
+            if ch != "{":
+                i += 1
+                continue
+            entry, i = _balanced_slice(inner, i, "{", "}")
+            if entry is None:
+                break
+            um, pm = _USER_RX.search(entry), _PASS_RX.search(entry)
+            if not um:
+                continue
+            pm2 = _PERM_RX.search(entry)
+            perm = None
+            if pm2:
+                body, _e = _balanced_slice(entry, pm2.end() - 1, "{", "}")
+                perm = (body or "").strip()
+                perm_seen = True
+            users.append((um.group(1), pm.group(1) if pm else "", perm))
+
+    ports = []
+    for line in src.splitlines():
+        lm = _LISTEN_RX.match(line)
+        if not lm:
+            continue
+        raw = lm.group(2).strip().strip('"').strip("'")
+        tail = raw.rsplit(":", 1)[-1].strip()
+        if tail.isdigit():
+            ports.append(int(tail))
+
+    cluster_name = ""
+    cm = _CLUSTER_RX.search(src)
+    if cm:
+        body, _e = _balanced_slice(src, cm.end() - 1, "{", "}")
+        nm = _NAME_RX.search(body or "")
+        if nm:
+            cluster_name = nm.group(1)
+
+    return {"users": users,
+            "listen_ports": sorted(set(ports)),
+            "cluster_name": cluster_name,
+            "has_permissions": perm_seen or bool(re.search(r"\bpermissions\s*:", src)),
+            "has_users_block": bool(m)}
+
+
+_TEAMD_RX = re.compile(r"^teamd-(.+)$")
+
+
+def live_members(connz):
+    """活连接 → `{"authorized_user": [...], "name_prefix": [...]}`（**两个来源都留**）。
+
+    NATS 给得出 `authorized_user` 就用它；给不出时回落到客户端 `name` 的 `teamd-<member>` 前缀。
+    **两个来源都要记进输出** —— 少留一个就等于给自己留了个「消红」的后门。
+    """
+    out = {"authorized_user": set(), "name_prefix": set()}
+    for conn in ((connz or {}).get("connections") or []):
+        if not isinstance(conn, dict):
+            continue
+        who = str(conn.get("authorized_user") or "").strip()
+        if who:
+            out["authorized_user"].add(who)
+        nm = _TEAMD_RX.match(str(conn.get("name") or "").strip())
+        if nm:
+            out["name_prefix"].add(nm.group(1))
+    return {k: sorted(v) for k, v in out.items()}
+
+
+# ============================================================ analyze —— 纯函数，六项检查
+
+def analyze(artifacts, perm_fn):
+    """`artifacts` + **注入的角色模板函数** → 报告（纯函数：无 IO、无 time、无随机）。
+
+    `perm_fn(user) -> str` 是期望权限串的唯一出处。正件在 `main()` 里传
+    `gen_nats_conf.perm_list`；等价装置传它自己那份独立实现 —— 这样两路才是互证而非自证。
+    """
+    hubs = list(artifacts.get("hubs") or [])
+    nodes = list(artifacts.get("nodes") or [])
+    conf_text = artifacts.get("conf") or {}
+    connz = artifacts.get("connz") or {}
+    routez = artifacts.get("routez") or {}
+    creds = artifacts.get("creds") or {}
+    errors = list(artifacts.get("errors") or [])
+
+    parsed = {n: parse_conf(conf_text.get(n)) for n in nodes if conf_text.get(n) is not None}
+
+    # ---- 名册：以第一台有 conf 的中枢为基准；成员名取所有中枢的并集
+    hub_users = {}
+    for h in hubs:
+        if h in parsed:
+            hub_users[h] = {u: p for u, p, _perm in parsed[h]["users"]}
+    ref_hub = next((h for h in hubs if h in hub_users), "")
+    roster_pw = dict(hub_users.get(ref_hub) or {})
+    roster = sorted(set().union(*[set(v) for v in hub_users.values()]) if hub_users else set())
+
+    findings = {k: [] for k in CHECK_KEYS}
+
+    # ---- M1 两中枢的 (user → password) 集合完全相同
+    if ref_hub:
+        ref_pairs = set(hub_users[ref_hub].items())
+        for h in hubs:
+            if h == ref_hub or h not in hub_users:
+                continue
+            other = hub_users[h]
+            other_pairs = set(other.items())
+            for u, _p in sorted(ref_pairs - other_pairs):
+                findings["M1"].append({
+                    "kind": "hub_matrix_missing", "member": u, "hub": h, "ref_hub": ref_hub,
+                    "why": "口令与基准中枢不同" if u in other else "该成员不在此中枢名册里"})
+            for u, _p in sorted(other_pairs - ref_pairs):
+                findings["M1"].append({
+                    "kind": "hub_matrix_extra", "member": u, "hub": h, "ref_hub": ref_hub,
+                    "why": "口令与基准中枢不同" if u in hub_users[ref_hub]
+                           else "该成员不在基准中枢名册里"})
+
+    # ---- M2 每个 user 的 permissions 逐字符 == perm_fn(user)
+    for h in hubs:
+        if h not in parsed:
+            continue
+        for user, _pw, perm in parsed[h]["users"]:
+            expected = perm_fn(user)
+            if perm == expected:
+                continue
+            findings["M2"].append({"kind": "perm_drift", "hub": h, "member": user,
+                                   "expected": expected, "actual": perm})
+
+    # ---- M3 pass 文件内容 == 名册中同名成员的口令
+    for node in nodes:
+        for filename, digest in sorted((creds.get(node) or {}).items()):
+            member = _member_of(filename)
+            if member is None:
+                continue
+            item = {"member": member, "node": node,
+                    "location": "%s:%s" % (node, filename), "sha256_8": digest[:8]}
+            if member not in roster_pw:
+                findings["M3"].append(dict(item, kind="cred_orphan",
+                                           why="该机上有凭据文件，名册里没有这个成员"))
+            elif sha256_hex(roster_pw[member]) != digest:
+                findings["M3"].append(dict(item, kind="cred_mismatch",
+                                           why="凭据文件内容与名册口令不一致"))
+
+    # ---- M4 名册每个成员至少有一处落地（pass 文件 ∪ 活连接）
+    landed_files = set()
+    for node in nodes:
+        for filename in (creds.get(node) or {}):
+            member = _member_of(filename)
+            if member is not None:
+                landed_files.add(member)
+    live_sources = {"authorized_user": set(), "name_prefix": set()}
+    for h in hubs:
+        got = live_members(connz.get(h))
+        for src_name, members in got.items():
+            live_sources[src_name].update(members)
+    landed_live = live_sources["authorized_user"] | live_sources["name_prefix"]
+    for member in roster:
+        if member in landed_files or member in landed_live:
+            continue
+        findings["M4"].append({"kind": "zombie_credential", "member": member,
+                               "why": "名册里有，但全网既无凭据文件也无活连接"})
+
+    # ---- M5 活连接的成员身份必须 ⊆ 名册（硬违规）
+    roster_set = set(roster)
+    for h in hubs:
+        got = live_members(connz.get(h))
+        for src_name in sorted(got):
+            for member in got[src_name]:
+                if member in roster_set:
+                    continue
+                findings["M5"].append({"kind": "live_outside_roster", "hub": h,
+                                       "member": member, "source": src_name})
+
+    # ---- M6a 非 v2 形状的中枢（按 conf 判：无 permissions 块，或监听端口出了 v2 端口体系）
+    for node in nodes:
+        info = parsed.get(node)
+        if info is None or not (info["users"] or info["listen_ports"]):
+            continue                              # 该机没有 nats 配置 —— 不是「遗留」，是「没有」
+        bad_ports = [p for p in info["listen_ports"] if p not in V2_PORTS]
+        if info["has_permissions"] and not bad_ports:
+            continue
+        why = []
+        if not info["has_permissions"]:
+            why.append("conf 里没有 permissions 块（= 全权）")
+        if bad_ports:
+            why.append("监听端口 %s 不属于 v2 端口体系 %s"
+                       % (",".join(str(p) for p in bad_ports),
+                          "/".join(str(p) for p in V2_PORTS)))
+        findings["M6"].append({"kind": "legacy_hub", "node": node,
+                               "bad_ports": bad_ports,
+                               "has_permissions": info["has_permissions"],
+                               "user_count": len(info["users"]),
+                               "why": "；".join(why)})
+
+    # ---- M6b 集群路由重复 / 陈旧（**按集群聚合成一条** —— 同一份重复路由从两端各看见一次，
+    #          它是一个缺陷不是两个；每端的数字仍逐条列在 `hubs` 里，不丢信息）
+    clusters = {}
+    for h in hubs:
+        rz = routez.get(h)
+        if not isinstance(rz, dict):
+            continue
+        routes = rz.get("routes") or []
+        stale = 0
+        for route in routes:
+            if not isinstance(route, dict):
+                continue
+            secs = parse_duration(route.get("idle"))
+            if secs is not None and secs > STALE_IDLE_SECONDS:
+                stale += 1
+        num = rz.get("num_routes")
+        num = int(num) if isinstance(num, int) else len(routes)
+        name = (parsed.get(h) or {}).get("cluster_name") or ""
+        clusters.setdefault(name, []).append(
+            {"hub": h, "num_routes": num, "stale_routes": stale})
+    for name in sorted(clusters):
+        rows = sorted(clusters[name], key=lambda r: r["hub"])
+        if not any(r["num_routes"] > 2 or r["stale_routes"] for r in rows):
+            continue
+        findings["M6"].append({
+            "kind": "duplicate_route", "cluster": name, "hubs": rows,
+            "stale_threshold_seconds": STALE_IDLE_SECONDS,
+            "why": "两台中枢之间应当只有 1 条活路由；条目数 >2 或存在 idle 超阈值的陈旧条目"})
+
+    findings = {k: _sort_findings(v) for k, v in findings.items()}
+    counts = {k: len(findings[k]) for k in CHECK_KEYS}
+    collect_errors = _sort_findings(errors)
+    return {
+        "schema": SCHEMA,
+        "node_list": sorted(nodes),
+        "hub_list": sorted(hubs),
+        "roster": roster,
+        "check_names": {k: name for k, name in CHECKS},
+        "live_sources": {k: sorted(v) for k, v in live_sources.items()},
+        "collect_errors": collect_errors,
+        "findings": findings,
+        "counts": counts,
+        "ok": (not collect_errors) and not any(counts.values()),
+    }
+
+
+def _member_of(filename):
+    """凭据文件名 → 成员名（`nats-<m>.pass` 优先于 `<m>.pass`）。都不匹配返回 `None`。"""
+    for _glob, rx in CRED_PATTERNS:
+        m = rx.match(filename)
+        if m:
+            return m.group(1)
+    return None
+
+
+# ============================================================ 采集面 A：真机（只读）
+
+def load_targets():
+    """内部站点真值表（节点名 → transport / ssh_target / runtime_dir）。"""
+    if not os.path.isfile(TARGETS_PATH):
+        return {}
+    with io.open(TARGETS_PATH, encoding="utf-8") as fh:
+        data = json.load(fh) or {}
+    return {t["name"]: t for t in (data.get("targets") or []) if t.get("name")}
+
+
+def _guarded(cmd):
+    """把远端命令包一层：**内层 rc 回传** + 末尾垫一个空行（防止无尾换行的文件把标记粘上去）。"""
+    return REMOTE_PATH + "RC=0; " + cmd + " 2>/dev/null || RC=$?; echo; echo " + RC_MARK + "$RC"
+
+
+def _split_rc(out):
+    """`(内层 rc, 内容)`；取不到标记说明命令根本没跑起来 → `(None, 原文)`。"""
+    lines = (out or "").split("\n")
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].startswith(RC_MARK):
+            try:
+                rc = int(lines[i][len(RC_MARK):].strip())
+            except ValueError:
+                return None, out
+            body = "\n".join(lines[:i])
+            return rc, body[:-1] if body.endswith("\n") else body
+    return None, out
+
+
+def run_remote(target, cmd, timeout=40.0):
+    """经 ssh 在该节点上跑一条**只读**命令 → `(内层 rc, 内容, 说明)`。
+
+    远端命令**原样传、不加引号**（刀23 实测：本机 ssh 是 MSYS 版，加的引号会一并留在命令串里
+    → 远端 bash 把整串当文件名去 execve）。用 argv 列表交给 ssh，由它拼命令行、远端 shell 解释。
+    """
+    wrapped = _guarded(cmd)
+    key = _expand(target.get("ssh_key") or "")
+    argv = ["ssh"]
+    if key:
+        argv += ["-i", key]
+    argv += ["-o", "ConnectTimeout=10", "-o", "BatchMode=yes",
+             "-o", "StrictHostKeyChecking=accept-new",
+             _expand(target["ssh_target"]), wrapped]
+    try:
+        proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, "", "超时 %ds" % int(timeout)
+    except OSError as exc:                              # noqa: BLE001 —— ssh 起不来也是采集失败
+        return None, "", "起不来：%s" % exc
+    out = (proc.stdout or b"").decode("utf-8", "replace")
+    err = (proc.stderr or b"").decode("utf-8", "replace")
+    rc, body = _split_rc(out)
+    if rc is None:
+        return None, "", (err.strip() or "远端没有回传退出码标记")[-200:]
+    return rc, body, ""
+
+
+# --- 三个语义采集口。`transport=local` 的节点走本机 Python（**不起 shell** ——
+#     本机是 Windows，posix 的 `cat`/`ls` 在这里根本不存在）；其余节点走 ssh。
+
+def _is_local(target):
+    return (target.get("transport") or "") == "local"
+
+
+def read_file(target, path, timeout=40.0):
+    """读一个文件 → `(rc, 内容, 说明)`。`rc=0` 有；`rc!=0` 文件不在（不是错）；`rc=None` 采集失败。"""
+    if _is_local(target):
+        if not os.path.isfile(path):
+            return 1, "", ""
+        try:
+            with io.open(path, encoding="utf-8", errors="replace") as fh:
+                return 0, fh.read(), ""
+        except OSError as exc:
+            return None, "", "读不了：%s" % exc
+    return run_remote(target, "cat %s" % path, timeout)
+
+
+def list_dir(target, path, timeout=40.0):
+    """列一个目录 → `(rc, 名字列表, 说明)`。语义同 `read_file`。"""
+    if _is_local(target):
+        if not os.path.isdir(path):
+            return 1, [], ""
+        try:
+            return 0, sorted(os.listdir(path)), ""
+        except OSError as exc:
+            return None, [], "列不了：%s" % exc
+    rc, body, why = run_remote(target, "ls -1 %s" % path, timeout)
+    if rc is None or rc != 0:
+        return rc, [], why
+    return 0, [ln.strip() for ln in body.splitlines() if ln.strip()], why
+
+
+def http_get(target, url, timeout=40.0):
+    """GET 一个**环回**地址 → `(rc, 正文, 说明)`。远端经 ssh 在该机上打，本机直接打。"""
+    if _is_local(target):
+        import urllib.request
+        try:
+            with urllib.request.urlopen(url, timeout=min(timeout, 10.0)) as resp:
+                return 0, resp.read().decode("utf-8", "replace"), ""
+        except Exception as exc:                        # noqa: BLE001 —— 打不通就是采集失败
+            return None, "", "打不通：%s" % exc
+    return run_remote(target, "curl -s --max-time 8 %s" % url, timeout)
+
+
+def node_dirs(name, target):
+    """该节点上「NATS 配置目录」与「运行目录」的绝对路径（**真值全部来自 L0 档案 / 部署表**）。"""
+    runtime = _expand(target.get("runtime_dir") or "")
+    if node_profile.target_flavour(name) == "nt":
+        conf_dir = (runtime.rstrip("/\\") + "/nats") if runtime else ""
+    else:
+        conf_dir = node_profile.nats_conf_dir_posix()
+    out = []
+    for path in (conf_dir, runtime):
+        if path and path not in out:
+            out.append(path)
+    return conf_dir, out
+
+
+def collect_live(hubs, targets, timeout=40.0):
+    """只读采真机 → `artifacts`。远端只发 `cat` / `ls` / `curl -s`，一个写操作都没有。"""
+    nodes = sorted(targets)
+    art = {"hubs": sorted(hubs), "nodes": nodes,
+           "conf": {}, "connz": {}, "routez": {}, "creds": {}, "errors": []}
+
+    def err(node, what, why):
+        art["errors"].append({"kind": "collect_error", "node": node,
+                              "what": what, "why": str(why)[:200]})
+
+    for name in nodes:
+        target = targets[name]
+        conf_dir, dirs = node_dirs(name, target)
+        art["conf"][name] = None
+        art["creds"][name] = {}
+
+        # --- nats.conf（不在 = 该机没有 nats 配置，不是错）
+        if conf_dir:
+            rc, body, why = read_file(target, conf_dir + "/nats.conf", timeout)
+            if rc is None:
+                err(name, "nats.conf", why or "采集失败")
+            elif rc == 0:
+                if not body.strip():
+                    err(name, "nats.conf", "配置文件存在但内容为空")
+                else:
+                    art["conf"][name] = body
+
+        # --- 凭据文件：两个候选目录都查，成员名从文件名推；**当场换成 sha256**
+        for d in dirs:
+            rc, names, why = list_dir(target, d, timeout)
+            if rc is None:
+                err(name, "列目录 %s" % os.path.basename(d.rstrip("/\\")), why or "采集失败")
+                continue
+            if rc != 0:
+                continue                                # 目录不在 —— 不是错
+            for filename in names:
+                if filename in art["creds"][name]:
+                    continue                            # 同名先到先得（两个候选目录撞名）
+                if not any(fnmatch.fnmatch(filename, g) for g, _rx in CRED_PATTERNS):
+                    continue
+                crc, content, cwhy = read_file(target, d + "/" + filename, timeout)
+                if crc is None:
+                    err(name, "读凭据 %s" % filename, cwhy or "采集失败")
+                    continue
+                if crc != 0:
+                    continue
+                #: 口令明文到此为止 —— 只留摘要，明文连 artifacts 都进不去
+                art["creds"][name][filename] = sha256_hex(content.strip())
+
+        # --- 中枢才有监控口（只绑环回，故经 ssh 在该机上打）
+        if name not in art["hubs"]:
+            continue
+        for what in ("connz", "routez"):
+            url = "http://127.0.0.1:%d/%s" % (MONITOR_PORT, what)
+            rc, body, why = http_get(target, url, timeout)
+            art[what][name] = None
+            if rc is None or rc != 0:
+                err(name, what, why or "curl rc=%s" % rc)
+                continue
+            try:
+                art[what][name] = json.loads(body)
+            except ValueError as exc:
+                err(name, what, "监控口回的不是 JSON：%s" % exc)
+
+    for hub in art["hubs"]:
+        if hub in targets and art["conf"].get(hub) is None \
+                and not any(e["node"] == hub and e["what"] == "nats.conf" for e in art["errors"]):
+            err(hub, "nats.conf", "中枢上没有 nats.conf")
+        if art["conf"].get(hub) and not parse_conf(art["conf"][hub])["users"]:
+            err(hub, "nats.conf", "中枢配置里解析不出任何用户")
+    return art
+
+
+# ============================================================ 采集面 B：冻结夹具（离线）
+
+def collect_fixtures(root, hubs_override=None):
+    """从夹具目录读**同一形状**的 artifacts（装置只走这条，不联网）。
+
+    目录结构::
+
+        <DIR>/case.json                 可选 {"hubs": [...], "nodes": [...]}
+        <DIR>/<node>/nats.conf          该节点的配置（缺 = 该机没有 nats 配置）
+        <DIR>/<node>/connz.json         中枢才有
+        <DIR>/<node>/routez.json        中枢才有
+        <DIR>/<node>/creds/<文件名>      落地的凭据文件（`<m>.pass` / `nats-<m>.pass`）
+    """
+    art = {"hubs": [], "nodes": [], "conf": {}, "connz": {}, "routez": {},
+           "creds": {}, "errors": []}
+
+    def err(node, what, why):
+        art["errors"].append({"kind": "collect_error", "node": node,
+                              "what": what, "why": str(why)[:200]})
+
+    if not os.path.isdir(root):
+        err("", "夹具目录", "夹具目录不存在：%s" % os.path.basename(root.rstrip("/\\")))
+        return art
+
+    nodes, hubs = [], []
+    case_path = os.path.join(root, "case.json")
+    if os.path.isfile(case_path):
+        try:
+            with io.open(case_path, encoding="utf-8") as fh:
+                case = json.load(fh) or {}
+            nodes = list(case.get("nodes") or [])
+            hubs = list(case.get("hubs") or [])
+        except ValueError as exc:
+            err("", "case.json", "夹具清单不是合法 JSON：%s" % exc)
+    if not nodes:
+        nodes = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
+    if not hubs:
+        hubs = [n for n in nodes if os.path.isfile(os.path.join(root, n, "connz.json"))]
+    if hubs_override:
+        hubs = list(hubs_override)
+
+    art["nodes"], art["hubs"] = sorted(nodes), sorted(hubs)
+    for name in art["nodes"]:
+        base = os.path.join(root, name)
+        art["conf"][name] = None
+        art["creds"][name] = {}
+        conf_path = os.path.join(base, "nats.conf")
+        if os.path.isfile(conf_path):
+            text = io.open(conf_path, encoding="utf-8", errors="replace").read()
+            if not text.strip():
+                err(name, "nats.conf", "配置文件存在但内容为空")
+            else:
+                art["conf"][name] = text
+        cred_dir = os.path.join(base, "creds")
+        if os.path.isdir(cred_dir):
+            for filename in sorted(os.listdir(cred_dir)):
+                if not any(fnmatch.fnmatch(filename, g) for g, _rx in CRED_PATTERNS):
+                    continue
+                content = io.open(os.path.join(cred_dir, filename),
+                                  encoding="utf-8", errors="replace").read()
+                art["creds"][name][filename] = sha256_hex(content.strip())
+        for what in ("connz", "routez"):
+            art[what][name] = None
+            if name not in art["hubs"]:
+                continue
+            path = os.path.join(base, what + ".json")
+            if not os.path.isfile(path):
+                err(name, what, "中枢夹具缺 %s.json" % what)
+                continue
+            try:
+                art[what][name] = json.loads(
+                    io.open(path, encoding="utf-8", errors="replace").read())
+            except ValueError as exc:
+                err(name, what, "监控口夹具不是 JSON：%s" % exc)
+
+    for hub in art["hubs"]:
+        if art["conf"].get(hub) is None \
+                and not any(e["node"] == hub and e["what"] == "nats.conf" for e in art["errors"]):
+            err(hub, "nats.conf", "中枢上没有 nats.conf")
+        if art["conf"].get(hub) and not parse_conf(art["conf"][hub])["users"]:
+            err(hub, "nats.conf", "中枢配置里解析不出任何用户")
+    return art
+
+
+# ============================================================ 人读输出 / 基线比对
+
+def render(report):
+    """六项各一行，差异逐条缩进打印。"""
+    out = ["=" * 78,
+           "成员入网只读对账 · %s" % report["schema"],
+           "中枢 %s ｜ 节点 %s ｜ 名册 %d 人"
+           % ("、".join(report["hub_list"]) or "—",
+              "、".join(report["node_list"]) or "—", len(report["roster"])),
+           "=" * 78]
+    for key, name in CHECKS:
+        items = report["findings"][key]
+        out.append("%s %-18s %s 差异 %d 条" % (key, name, "✓" if not items else "✗", len(items)))
+        for item in items:
+            out.append("    · " + _one_line(item))
+    src = report.get("live_sources") or {}
+    out.append("")
+    out.append("活连接成员身份来源（两个来源都记，不许只留一个）：")
+    for name in sorted(src):
+        out.append("    %-16s %s" % (name, "、".join(src[name]) or "—"))
+    if report["collect_errors"]:
+        out.append("")
+        out.append("采集失败 %d 条（退出码 2）：" % len(report["collect_errors"]))
+        for item in report["collect_errors"]:
+            out.append("    ✗ %s / %s：%s" % (item.get("node") or "—",
+                                              item.get("what"), item.get("why")))
+    out.append("")
+    out.append("合计差异 %d 条%s" % (sum(report["counts"].values()),
+                                     "，采集完整" if not report["collect_errors"] else ""))
+    return "\n".join(out)
+
+
+def _one_line(item):
+    """一条 finding 压成一行（键名排序；口令永远只以 sha256_8 出现）。"""
+    kind = item.get("kind", "?")
+    rest = ", ".join("%s=%s" % (k, item[k]) for k in sorted(item) if k != "kind")
+    return "%s  %s" % (kind, rest)
+
+
+def diff_baseline(report, baseline):
+    """本次 vs 冻结基线 → 逐条「新增 / 消失」。返回 `(行列表, 是否一致)`。"""
+    lines, same = [], True
+    for key in COMPARE_KEYS:
+        cur, old = report.get(key), baseline.get(key)
+        if key == "findings":
+            for ck in CHECK_KEYS:
+                a = {json.dumps(x, sort_keys=True, ensure_ascii=False) for x in (cur or {}).get(ck, [])}
+                b = {json.dumps(x, sort_keys=True, ensure_ascii=False) for x in (old or {}).get(ck, [])}
+                for text in sorted(a - b):
+                    same = False
+                    lines.append("  ✗ %s 新增  %s" % (ck, _one_line(json.loads(text))))
+                for text in sorted(b - a):
+                    same = False
+                    lines.append("  ✗ %s 消失  %s" % (ck, _one_line(json.loads(text))))
+            continue
+        if cur != old:
+            same = False
+            lines.append("  ✗ %s 变了" % key)
+            lines.append("      基线 %s" % json.dumps(old, sort_keys=True, ensure_ascii=False))
+            lines.append("      本次 %s" % json.dumps(cur, sort_keys=True, ensure_ascii=False))
+    return lines, same
+
+
+# ============================================================ main
+
+def build_report(args):
+    """按 `--live` / `--fixtures` 采一次 + 算一次 → 报告。"""
+    hubs = [h.strip() for h in (args.hub or "").split(",") if h.strip()] or list(HUBS_DEFAULT)
+    if args.fixtures:
+        artifacts = collect_fixtures(args.fixtures, hubs_override=hubs if args.hub else None)
+    else:
+        targets = load_targets()
+        missing = [h for h in hubs if h not in targets]
+        artifacts = collect_live(hubs, targets, timeout=args.timeout)
+        for h in missing:
+            artifacts["errors"].append({"kind": "collect_error", "node": h, "what": "部署表",
+                                        "why": "内部真值表里没有这个节点，拿不到 ssh 目标"})
+    import gen_nats_conf                                 # noqa: E402 —— L1 角色模板的唯一出处
+    return analyze(artifacts, gen_nats_conf.perm_list)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="成员入网只读对账（阶段5 第一刀）")
+    ap.add_argument("--live", action="store_true", help="只读采真机")
+    ap.add_argument("--fixtures", default="", help="从冻结夹具目录采（离线）")
+    ap.add_argument("--check", action="store_true", help="采一次 + 与冻结基线逐项比对")
+    ap.add_argument("--write-baseline", dest="write_baseline", default="",
+                    help="把本次结果冻结成基线文件")
+    ap.add_argument("--baseline", default=BASELINE_PATH, help="基线文件路径")
+    ap.add_argument("--hub", default="", help="覆盖中枢清单（逗号分隔；**测试用**）")
+    ap.add_argument("--json", action="store_true", help="机器可读输出")
+    ap.add_argument("--out", default="", help="把 JSON 另存到文件")
+    ap.add_argument("--timeout", type=float, default=40.0, help="单条远端命令超时（秒）")
+    args = ap.parse_args(argv)
+
+    if not (args.live or args.fixtures or args.check or args.write_baseline):
+        ap.error("要么 --live，要么 --fixtures <DIR>，要么 --check")
+
+    report = build_report(args)
+    text = canonical(report)
+
+    if args.out:
+        with io.open(args.out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+    if args.json:
+        sys.stdout.write(text)
+    else:
+        print(render(report))
+
+    if report["collect_errors"]:
+        if not args.json:
+            print("\n采集失败 —— 本次结果不作数（退出码 2）")
+        return EXIT_COLLECT
+
+    if args.write_baseline:
+        with io.open(args.write_baseline, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        if not args.json:
+            print("\n已冻结基线 → %s" % os.path.basename(args.write_baseline))
+        return EXIT_OK
+
+    if args.check:
+        if not os.path.isfile(args.baseline):
+            print("\n找不到冻结基线 %s —— 先跑 --live --write-baseline"
+                  % os.path.basename(args.baseline))
+            return EXIT_COLLECT
+        with io.open(args.baseline, encoding="utf-8") as fh:
+            baseline = json.load(fh)
+        lines, same = diff_baseline(report, baseline)
+        if not args.json:
+            print("\n[与冻结基线比对] %s" % os.path.basename(args.baseline))
+            print("\n".join(lines) if lines else "  ✓ 逐项一致")
+        return EXIT_OK if same else EXIT_DRIFT
+
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())

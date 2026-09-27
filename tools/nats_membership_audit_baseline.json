@@ -1,0 +1,99 @@
+{
+  "check_names": {
+    "M1": "hub_user_matrix",
+    "M2": "perm_template",
+    "M3": "cred_landing",
+    "M4": "roster_coverage",
+    "M5": "live_subset",
+    "M6": "legacy_and_routes"
+  },
+  "collect_errors": [],
+  "counts": {
+    "M1": 0,
+    "M2": 0,
+    "M3": 0,
+    "M4": 1,
+    "M5": 0,
+    "M6": 2
+  },
+  "findings": {
+    "M1": [],
+    "M2": [],
+    "M3": [],
+    "M4": [
+      {
+        "kind": "zombie_credential",
+        "member": "bbgw",
+        "why": "名册里有，但全网既无凭据文件也无活连接"
+      }
+    ],
+    "M5": [],
+    "M6": [
+      {
+        "bad_ports": [
+          4222,
+          8222
+        ],
+        "has_permissions": false,
+        "kind": "legacy_hub",
+        "node": "quantum",
+        "user_count": 5,
+        "why": "conf 里没有 permissions 块（= 全权）；监听端口 4222,8222 不属于 v2 端口体系 9930/9931/9932"
+      },
+      {
+        "cluster": "agent-team",
+        "hubs": [
+          {
+            "hub": "lobster",
+            "num_routes": 4,
+            "stale_routes": 3
+          },
+          {
+            "hub": "top001",
+            "num_routes": 4,
+            "stale_routes": 3
+          }
+        ],
+        "kind": "duplicate_route",
+        "stale_threshold_seconds": 3600,
+        "why": "两台中枢之间应当只有 1 条活路由；条目数 >2 或存在 idle 超阈值的陈旧条目"
+      }
+    ]
+  },
+  "hub_list": [
+    "lobster",
+    "top001"
+  ],
+  "live_sources": {
+    "authorized_user": [],
+    "name_prefix": [
+      "claudecode",
+      "codex",
+      "hermes",
+      "lobster",
+      "openclaw-nb",
+      "piagent",
+      "quantum",
+      "top001"
+    ]
+  },
+  "node_list": [
+    "lobster",
+    "quantum",
+    "thinkbook",
+    "top001"
+  ],
+  "ok": false,
+  "roster": [
+    "bbgw",
+    "claudecode",
+    "codex",
+    "hermes",
+    "lobster",
+    "openclaw-nb",
+    "piagent",
+    "quantum",
+    "top001"
+  ],
+  "schema": "l5-membership-audit/1"
+}

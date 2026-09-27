@@ -367,6 +367,21 @@
       "layer": "T",
       "port": null,
       "note": "a2a_edge 能力端口测试：未注入降级口径 + 注入后 /ctx-usage 实测 + 残留守卫（L1 内不得出现 agent_usage）"
+    },
+    "tools/nats_membership_audit.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：成员入网「只读对账」（刀25 · 阶段5 第一刀）。六项检查 M1 两中枢用户/口令矩阵一致 · M2 权限串 == gen_nats_conf.perm_list(user) 逐字符 · M3 各机 *.pass 内容 == 名册口令 · M4 名册成员落地覆盖（无凭据文件且无活连接 = 僵尸凭据）· M5 活连接 ⊆ 名册 · M6 遗留中枢（无 permissions 块 / 非 v2 端口）与集群路由重复。**三个铁律**：① 只读（远端只发 cat / ls -1 / curl -s GET，无任何写操作、不重启单元、不改 nats.conf）② 口令一个字节都不出门（采集器当场换 sha256，明文连 artifacts 都进不去，出口只许 {member,location,sha256_8}）③ analyze() 是纯函数（无 IO/无 time），角色模板由参数注入 —— 正件在 main() 传 L1 gen_nats_conf.perm_list，装置传它自己那份独立实现，两路互证。默认中枢 ('lobster','top001') 按节点名（非 IP）声明、ssh 目标经 tools/deploy_targets.json 解析；--live / --fixtures / --check / --write-baseline；退出码 0 与冻结基线逐项一致 / 1 有漂移 / 2 采集失败。基线冻结在 tools/nats_membership_audit_baseline.json（本刀实测非零项 3 条＝如实记账的已知项，阶段5 后续刀去消，**不许改口径消红**）"
+    },
+    "tools/equivalence/membership_audit_equiv.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：刀25 的等价/冻结矩阵装置（106 格 × N 轮）。A 段 = 角色模板互证（正件走 L1 perm_list vs 旧侧自拼，逐字符）；B 段 = 10 例冻结夹具（clean / zombie / cred_mismatch / cred_orphan / perm_drift / hub_divergence / outside_roster / legacy_hub / dup_route / malformed）逐例比「新侧规范 JSON ↔ 冻结期望」且**新旧两侧互比**；含 --runs 自证确定性（EQUIV_SENTINEL_OK / EQUIV_DETERMINISM_OK）与 --negative 强制负控（注毒 3 处两侧都必须报红、还原转绿）"
+    },
+    "tools/equivalence/_old/membership_audit_old_k25.py": {
+      "layer": "T",
+      "port": null,
+      "note": "刀25 的「旧侧」独立第二实现（**另一条算法路径**：逐行状态机 + 顶层逗号切词；角色模板自己按文档口径拼，不 import 正件、不 import gen_nats_conf）—— 装置功能依赖件，用于把「正件对不对」变成两路互证"
     }
   },
   "rules": {

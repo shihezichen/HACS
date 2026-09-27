@@ -77,8 +77,9 @@
     <h1>HACS 分层规划 · Handoff</h1>
     <div class="sub">Human-Agent Communication System — 分层与解耦方案（资深架构评审结论）</div>
     <div class="verline">
-      <b>v12</b> · 刷新日期 <b>2026-09-26</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5，刀 5 升 v6，刀 6 升 v7，刀 7a 升 v8，刀 7b 升 v9，刀 8a·8b·8c 升 v10，刀 9 升 v11，刀 10·11·12·13 升 v12<br>
+      <b>v13</b> · 刷新日期 <b>2026-09-27</b> · 首版 v1 同日升 v2，阶段 2 刀 2 升 v3，阶段 1 刀 3 升 v4，刀 4 升 v5，刀 5 升 v6，刀 6 升 v7，刀 7a 升 v8，刀 7b 升 v9，刀 8a·8b·8c 升 v10，刀 9 升 v11，刀 10·11·12·13 升 v12，阶段 4 刀 21–24 与阶段 5 刀 25 升 v13<br>
       本次内容：对「通行层 / 前台层」两分法的评审 → 五层 + 三横切 + 组合根的目标划分 → 七条解耦判据 → 四处最痛耦合 → 六阶段落地计划<br>
+      <b>v13 变更（仅进度标注，方案未改）：</b>阶段 5 <b>第一刀（刀25）· 成员入网「只读对账」已落地</b> —— 按「先量 → 再冻结 → 最后才生成」的顺序，本刀<b>不动 NATS、不改任何运行件</b>，只做两件事：① 新增只读对账器 <code>tools/nats_membership_audit.py</code>（T 工具面），六项检查 <b>M1</b> 两中枢 (用户→口令) 矩阵一致 / <b>M2</b> 每用户权限串 <b>==</b> <code>gen_nats_conf.perm_list(user)</code> 逐字符（角色模板<b>唯一出处</b>）/ <b>M3</b> 各机 <code>*.pass</code> 内容 == 名册口令 / <b>M4</b> 成员落地覆盖（无凭据文件且无活连接 = <b>僵尸凭据</b>）/ <b>M5</b> 活连接 ⊆ 名册 / <b>M6</b> 遗留中枢（无 <code>permissions</code> 块 = 全权）与集群路由重复；只读铁律「远端只发 <code>cat</code> / <code>ls -1</code> / <code>curl -s</code> GET」+ 口令采集即换 sha256 不出门 + <code>analyze()</code> 纯函数。② 把真机结果<b>冻结成基线</b> <code>tools/nats_membership_audit_baseline.json</code>，<code>--check</code> 与之逐项比，<b>连「差异消失」都算漂移</b>（退出码 0/1/2）—— 于是每一次放宽都必须留一次过账痕迹。实测基线：名册 <b>9</b> 名成员，M1/M2/M3/M5 <b>全 0</b>；<b>M4 = 1</b>（<code>bbgw</code> 无凭据文件、零活连接 → 僵尸凭据）；<b>M6 = 2</b>（一台非中枢机上另有一份全权 nats-server：4222 + 8222 监控 + TLS + JetStream、5 个用户且整份配置无 <code>permissions</code>；两中枢 <code>/routez</code> 各报 <code>num_routes=4</code>、其中 3 条陈旧）—— 这 3 条非零项<b>如实记账不消红</b>，成为后续刀的工作清单（吊销僵尸凭据 / 收敛遗留中枢 / 路由去重 / 期望矩阵改由「档案 + 探针」推导）。等价证据 <code>tools/equivalence/membership_audit_equiv.py</code> <b>106 格 × 2 轮</b>（10 例冻结夹具 + 3 处注毒负控 + 确定性自证），旧侧为独立第二实现。<b>本刀不改任何运行期件，故无部署步骤</b>；台账升 <b>v11</b>（件数 72 / 边 84，含一并订正的一处历史基线漂移）。<br>
       <b>v12 变更（仅进度标注，方案未改）：</b>第四节点名的「前台 107 KB 单文件」这处耦合已拆完 —— 阶段 2 <b>刀 10</b> 先收口前端运行真值（线上被直改的字节回写源码仓、<code>ui/</code> 五件补登进部署表），<b>刀 11·12·13</b>「前端拆三件套」按<b>传输客户端 → 渲染壳·样式表 → 业务视图</b>三刀切完：<code>agent-team/ui/group_transport.js</code>（1983 B）、<code>group.css</code>（31078 B）、<code>group_view.js</code>（74858 B）各自从 <code>group.html</code> <b>逐字节原样搬出</b>，<code>group.html</code> 112774 → <b>4942 B</b>，只剩 HTML 骨架 + 1 个样式外链 + 6 个脚本外链，<b>零内联 <code>&lt;style&gt;</code>、零内联 <code>&lt;script&gt;</code></b>。三刀均零行为改变、零 <code>.py</code> 改动，由 <code>tools/equivalence/group_frontend_equiv.py</code>（无头浏览器 + CDP）逐刀取证：文本级逐字节 + 计算样式 87 元素 × 92 属性 + CSSOM 233 规则/24425 字符 + 六类运行轨迹 + 外链确已加载的反向证据，末刀 <code>EQUIV_SENTINEL_OK</code> / <code>EQUIV_DETERMINISM_OK</code>。判据与分期未改；逐刀证据与最新基线数字见台账（v9）。<br>
       <b>v11 变更（仅进度标注，方案未改）：</b>阶段 2 刀 <b>8a·8b·8c</b> 与 <b>9</b> 落地 —— <code>chat_svc.py</code> 的 HTTP 面（应答出口 / 非 GET 方法分派 / GET+HEAD 整张路由表 + 前端页服务）已收进 L1 <code>web_gateway.py</code>（等价 311/311）；<code>a2a_edge.py</code> 的 HTTP 面同样收进 L1（<code>A2AHandler</code> 继承 <code>GW.handler_class()</code>、路由改 <code>@GW.route</code> 登记表、请求体改 <code>@GW.pre</code> 读一次，<b>组合根 <code>a2a_svc.py</code> 一个字节未动</b>，等价 46/46 + 线上四台逐字节 0 处不一致）。判据与分期未改；逐刀证据与最新基线数字见台账（v6）。<br>
       <b>v9 变更（仅进度标注，方案未改）：</b>刀 <b>7b</b> 落地 —— 把 L3 <code>blackboard_svc.py</code> 的
@@ -533,7 +534,7 @@
       <td><b>5 · 入网动态化</b><br>（与阶段 4 强相关，可并做）</td>
       <td>注册 / 授权服务 + 引导包生成器 + 服务端动态授权接入 + 吊销流程 + 入网台账</td>
       <td><span class="badge b-plan">中</span></td>
-      <td>注册服务 + 引导包 + 一条命令入网（取代逐台配置）</td>
+      <td>注册服务 + 引导包 + 一条命令入网（取代逐台配置）<br><b>进度（2026-09-27 · 刀25）：</b>第一刀「只读对账」已落地 —— 六项检查把现网量清并<b>冻结成基线</b>（名册 9 名 / M4 僵尸凭据 1 / M6 遗留中枢 1 + 路由重复 1，如实记账不消红）；<b>第二阶段待做</b>：消掉这 3 条 → 期望矩阵改由「L0 档案 + nodelet 探针」推导 → 生成器写配置。对账器届时转为验收门禁。</td>
     </tr>
   </tbody>
 </table>
