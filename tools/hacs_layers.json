@@ -332,6 +332,17 @@
       "duty": "平台层：**节点档案**（nodelet 的静态那一半）。一句话职责＝让上层对操作系统零感知 —— ①节点身份（flavour/home）②运行与配置目录（薄委托 node_paths）③执行器路径 claude/codex/pi/node（薄委托）④**目标主机档案**（target_known/target_flavour/target_home/target_claude_exec，刀4 雏形在此正式化）⑤宿主真源路径（Hermes state.db / config.yaml / agent 包目录、OpenClaw sessions.json 的候选来源）⑥**只读探针**（open_hermes_state_ro / hermes_session_usage_row / hermes_active_messages / openclaw_session_entry / hermes_config_model_window）⑦日志与探针口（log_dir / a2a_probe_base / a2a_probe_token）",
       "note": "L0 平台层：节点档案（刀21 阶段4 新增）。两条铁律：**只读**（SQLite 一律 mode=ro URI 打开、用完即 close，不建目录不写状态）；**不编造**（没配置/文件不在/记录不在 → None 或空；真出错 → **原样抛**，由调用方按自己口径降级记日志 —— 不把「打不开」偷偷变成「没有数据」）。未登记目标主机沿用 posix 兜底 + target_known()=False。①②③ 是对同层 node_paths 的薄委托，且**惰性 import**（函数体内 import node_paths），所以 node_paths → node_profile 的模块级 import 不成环。本件承接 storage_handle_exceptions 里那条例外的下沉终点：sqlite3 句柄从 L2 搬到这里。等价证据 tools/equivalence/node_profile_equiv.py（26 格冻结矩阵 + agent_usage 行为面 13 例样本）"
     },
+    "agent-team/nodelet.py": {
+      "layer": "L0",
+      "port": 9971,
+      "duty": "平台层：**轻量节点守护**（节点档案的动态那一半）。对外只有一个只读探针口 GET /probe，返回键名与顺序**冻结**的 JSON：node（节点名）/ profile（档案完整性：file·ok·missing）/ facts（运行目录与日志目录 exists·writable、Hermes state.db 与 OpenClaw sessions.json 的 configured·exists、凭据面 present·len、各声明单元的 name·known·active）/ version（磁盘上本件 md5 前 8 位，每次探针现算）/ uptime_s / ts",
+      "note": "L0 平台层：轻量节点守护（刀23 阶段4 第三刀新增）。三条铁律：**只读**（不写文件、不建目录、不启停任何单元；连目录可写性都只用 os.access(W_OK) 判、不试写）；**不越层**（只 import 同层 node_profile —— HTTP 面因此用纯标准库 http.server 自己搭，不碰 L1 web_gateway，这是 L0 的代价不是疏漏）；**不泄密**（绝不输出凭据值，**也绝不输出路径全文**；凡名字含 token/secret/口令/credential/key 词根的面，唯一合法形态是 {present,len}，出口前由 enforce_credential_redline() 机械复核，违反直接抛）。绑定默认 127.0.0.1:9971，AGENT_TEAM_NODELET_BIND 可覆盖但 parse_bind() 只放行环回与尾网 <tailnet-cidr>，写别的地址拒启。声明单元清单来自 env AGENT_TEAM_NODELET_SERVICES（部署表 → tools/nodelet_gen.py → 单元 Environment= → 本件）—— 守护自己**不读部署表**（那是 T 面内部真值表，不下发到节点）。契约见 agent-team/docs/l0-nodelet.md；等价证据 tools/equivalence/nodelet_equiv.py（285 格，旧侧是独立第二实现 _old/nodelet_old_k23.py）"
+    },
+    "tools/nodelet_gen.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：节点守护单元的生成与核对（刀23）。--gen 由「部署表 + L0 档案」推导出各机单元内容并**只打印不落盘**（systemd 单元文件 / schtasks 命令行）；--check 经各机通道跑只读查询（systemctl list-unit-files / schtasks /Query），核对规范单元在不在、有没有异名同类单元。单元模板**全仓只此一份**，规范名只从 nodelet.UNIT_NAME_POSIX / UNIT_NAME_NT 取、本件不另抄。不 import deploy.py（契约 §4）；ssh 参数与 probe_model_channel.py 同一套"
+    },
     "agent-team/tests/test_agent_model.py": {
       "layer": "T",
       "port": null,
@@ -431,6 +442,7 @@
     "9950": "PostgreSQL（黑板块库）",
     "9960": "成员守护管理口（只绑回环）",
     "9970": "CLI 类 Agent 统一后端",
+    "9971": "轻量节点守护的只读探针口（每节点一份，默认只绑回环）",
     "9980": "对话台后端 · 公网入口实例（只绑回环）",
     "9981": "群任务清单",
     "9984": "对话台后端 · 尾网实例（默认文档 = 群聊页）",

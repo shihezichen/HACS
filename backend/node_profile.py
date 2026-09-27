@@ -61,7 +61,7 @@ import sqlite3
 
 __all__ = [
     # ① 节点身份
-    "flavour", "home",
+    "flavour", "home", "ENV_NODE_NAME", "node_name",
     # ② 运行与配置
     "runtime_dir", "etc_dirs", "etc_dir", "log_dir", "nats_dir",
     # ③ 执行器
@@ -125,6 +125,30 @@ def flavour(value=None):
 def home():
     """本节点当前用户的家目录。"""
     return os.path.expanduser("~")
+
+
+#: 本节点名的 env 覆盖（刀 23 新增：轻量节点守护要回答「我是哪台」）
+ENV_NODE_NAME = "AGENT_TEAM_NODE"
+
+
+def node_name():
+    """**本节点**在档案表 / 部署表里的名字。
+
+    口径：env `AGENT_TEAM_NODE` 优先 → 否则取主机名并归一（去域名后缀、小写，
+    与 `target_host()` 同一套归一规则，这样 `node_name()` 拿去查 `target_known()`
+    才是同一把尺子）。取不到主机名返回空串 —— **不猜**（与本件其它面同一条铁律）。
+
+    纯读取：不碰网络、不写状态。刀 23 新增的**只读 helper**，既有面一字未动。
+    """
+    explicit = _first_env(ENV_NODE_NAME)
+    if explicit:
+        return target_host(explicit)
+    import socket
+    try:
+        raw = socket.gethostname() or ""
+    except OSError:
+        return ""
+    return target_host(raw.split(".", 1)[0])
 
 
 # ======================================================== ② 运行目录与配置目录
