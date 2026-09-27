@@ -23,14 +23,17 @@
     A 段  角色模板交叉核对（L1 `perm_list` vs 旧侧自拼模板）          12 格
     B 段  时长解析交叉核对（正则一路 vs 手写扫描器一路）              14 格
     C 段  10 例冻结夹具 × 8 格 = 80 格
-          （规范 JSON 逐字节一致 1 + 六项条数命中冻结期望 6 + CLI 退出码 1）
+          （规范 JSON **与冻结期望的「同 / 不同」相符** 1 + 六项条数命中冻结期望 6 + CLI 退出码 1）
     D 段  `--check` 的**身份口径**（刀28 加；新侧 vs 刀28 前快照）      6 格
           （观测量漂移必须判一致 · 改前必须判漂移 · 裁决消失/新增必须判漂移 ·
             非观测字段漂移必须判漂移 · 两条报告的判据身份必须逐字节相等）
     E 段  **期望侧不再自证**（刀29 加；新侧 vs 刀29 前快照）            20 格
           （5 场景 × 4 格：改前六项条数 · 改后六项条数 · 改后新增的 kind 集合 ·
             两侧规范 JSON 逐字节比较的结果）
-    合计 132 格
+    F 段  **口令真值换源到成员本机凭据**（刀31 加；新侧 vs 刀31 前快照）  22 格
+          （5 场景 × 4 格，同 E 段口径 + F4 另加 2 格 rc 判据：
+            「改后 collect_errors 非空且改前为空」与「新正件 CLI 退出码 == 2」）
+    合计 154 格
 
 E 段在证明什么（这是刀29 的价值本身）
 ------------------------------------
@@ -42,17 +45,35 @@ L0 档案 `agent-team/member_roster.py`。E 段把**同一份 artifacts**（同�
 ① 现网态（档案 ≡ conf）两侧输出**逐字节相同** —— 切换是**已知等价的替换**；
 ② 手改入网 / 手改退网，改前全 0、改后必红。
 
+F 段在证明什么（这是刀31 的价值本身）
+------------------------------------
+刀29 只切了**成员身份**那一半：M3 的期望口令仍取「基准中枢 conf 的 `user → password`」——
+口令这一半的期望侧**还是被检对象自己**。刀31 把真值换成**成员本机凭据**
+（名册的 `cred_node` / `cred_kind` 指到的那个文件），中枢 conf 与刀30 落的中枢凭据镜像
+一起降级为**被核对的产物**。F 段把同一份 `artifacts` 喂给「改前」
+`_old/nats_membership_audit_old_k31.py`（逐字节快照，**函数级直调** `analyze()`）与「改后」正件。
+
+**F2 / F5 的「改前」不是全 0 —— 这是如实记，不是没做到**：改前那一侧的 M3 本来就是
+「基准中枢 conf 口令 ↔ 各机 `*.pass`」**互比**，所以 conf 被改动时它也会红 ——
+只是**判反了方向**：它咬住「文件与 conf 不符」（`cred_mismatch`，等于说文件错了），
+改后咬住「conf 与成员本机真值不符」（`conf_password_differs_from_owner`，即 conf 错了）。
+真正「改前彻底无感」的是 F3（镜像改前根本不在观测面里）与 F4（声明的凭据文件不存在时，
+改前**静默回落 conf 口令**、六项全 0 且 `collect_errors` 为空）。
+每个场景的「改后新增的 kind 集合」那一格钉的就是这个方向差。
+
 夹具里的 `roster.json`
 ----------------------
 `materialize()` 每例都落一份 `roster.json`（4 元组数组）。**既有 10 例**的行取自该例
 **hub-a 的 conf 用户**（hub-a 解析不出用户时回落 hub-b —— 与正件 `ref_hub` 同口径，
-`malformed` 例就是这种形态），于是 10 例的六项条数期望**逐格不变**。
+`malformed` 例就是这种形态）。`cred_node` / `cred_kind` 取「该例中拥有该成员凭据文件的那个
+节点与该文件的形态」（`nats-` 前缀 ⇒ `runtime`，否则 ⇒ `conf`）—— 刀31 起正件**要消费这两列**，
+推错就会去找一个不存在的文件、平白记采集失败（刀31 前这两列是摆设，随便填都不影响）。
 
 用法
 ----
     python tools/equivalence/membership_audit_equiv.py                # 跑一遍矩阵
     python tools/equivalence/membership_audit_equiv.py --runs 2       # 连跑两轮，自证确定性
-    python tools/equivalence/membership_audit_equiv.py --negative     # 强制负控：注毒五处必须报红
+    python tools/equivalence/membership_audit_equiv.py --negative     # 强制负控：注毒九处必须报红
     python tools/equivalence/membership_audit_equiv.py --emit <DIR>   # 把冻结夹具落盘
 
 退出码：0 = 全部一致 / 1 = 有不一致（或负控没能判红）。
@@ -87,6 +108,7 @@ import nats_membership_audit as NEW                      # noqa: E402 —— 新
 import membership_audit_old_k25 as OLD                   # noqa: E402 —— 旧侧（独立第二实现）
 import membership_audit_old_k28 as OLDK28                 # noqa: E402 —— 刀28 前的正件（D 段「改前」锚）
 import membership_audit_old_k29 as OLDK29                 # noqa: E402 —— 刀29 前的正件（E 段「改前」锚）
+import nats_membership_audit_old_k31 as OLDK31            # noqa: E402 —— 刀31 前的正件（F 段「改前」锚）
 import gen_nats_conf                                     # noqa: E402 —— L1 角色模板唯一出处
 
 #: 夹具里的合成主机名（`.invalid` 是 RFC2606 保留后缀，永远不可能解析到真机）
@@ -289,19 +311,28 @@ def _case_malformed():
     return fx
 
 
-#: 冻结期望：每例的六项条数。**这是契约，不是「跑出来是多少就记多少」** ——
-#: 改了判定口径就会在这里立刻撞红。
+#: 冻结期望：`(名字, 夹具, 六项条数, CLI 退出码, **新旧两侧规范 JSON 是否逐字节相同**)`。
+#: **这是契约，不是「跑出来是多少就记多少」** —— 改了判定口径就会在这里立刻撞红。
+#:
+#: 第 5 列是刀31 加的。旧侧（`_old/membership_audit_old_k25.py`）是**刀25 口径**的独立第二实现，
+#: 它的口令真值仍是「基准中枢 conf」；刀31 把新侧的真值换成了「成员本机凭据」，于是三例
+#: 必然分道扬镳（过账见刀31 报告与契约文档）——把「相同」写死成契约、让它们撞红是不诚实的，
+#: 逐例写明「同 / 不同」并各自说清**为什么**，才是如实记账。其余 7 例仍必须逐字节相同。
 CASES = (
-    ("clean",           _case_clean,           {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 0}, 0),
-    ("zombie",          _case_zombie,          {"M1": 0, "M2": 0, "M3": 0, "M4": 1, "M5": 0, "M6": 0}, 0),
-    ("cred_mismatch",   _case_cred_mismatch,   {"M1": 0, "M2": 0, "M3": 1, "M4": 0, "M5": 0, "M6": 0}, 0),
-    ("cred_orphan",     _case_cred_orphan,     {"M1": 0, "M2": 0, "M3": 1, "M4": 0, "M5": 0, "M6": 0}, 0),
-    ("perm_drift",      _case_perm_drift,      {"M1": 0, "M2": 1, "M3": 0, "M4": 0, "M5": 0, "M6": 0}, 0),
-    ("hub_divergence",  _case_hub_divergence,  {"M1": 2, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 0}, 0),
-    ("outside_roster",  _case_outside_roster,  {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 1, "M6": 0}, 0),
-    ("legacy_hub",      _case_legacy_hub,      {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 1}, 0),
-    ("dup_route",       _case_dup_route,       {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 1}, 0),
-    ("malformed",       _case_malformed,       {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 0}, 2),
+    ("clean",           _case_clean,           {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 0}, 0, True),
+    # zombie：delta 在册却全网无凭据 ⇒ 刀31 记 collect_error（rc 0→2；M4 仍 1 条不变）
+    ("zombie",          _case_zombie,          {"M1": 0, "M2": 0, "M3": 0, "M4": 1, "M5": 0, "M6": 0}, 2, False),
+    # cred_mismatch：真值换成 owner 文件（= 被改过的 "zz"）后，hub-a 那份文件不再「与真值不符」；
+    #                改判两台中枢的 conf 口令都与真值不同 —— **换向更严**，1 条 → 2 条
+    ("cred_mismatch",   _case_cred_mismatch,   {"M1": 0, "M2": 0, "M3": 2, "M4": 0, "M5": 0, "M6": 0}, 0, False),
+    ("cred_orphan",     _case_cred_orphan,     {"M1": 0, "M2": 0, "M3": 1, "M4": 0, "M5": 0, "M6": 0}, 0, True),
+    ("perm_drift",      _case_perm_drift,      {"M1": 0, "M2": 1, "M3": 0, "M4": 0, "M5": 0, "M6": 0}, 0, True),
+    # hub_divergence：hub-b 的 gamma 口令（"p9"）与真值（p3）不同 ⇒ 新增 kind 命中（**收紧**）
+    ("hub_divergence",  _case_hub_divergence,  {"M1": 2, "M2": 0, "M3": 1, "M4": 0, "M5": 0, "M6": 0}, 0, False),
+    ("outside_roster",  _case_outside_roster,  {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 1, "M6": 0}, 0, True),
+    ("legacy_hub",      _case_legacy_hub,      {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 1}, 0, True),
+    ("dup_route",       _case_dup_route,       {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 1}, 0, True),
+    ("malformed",       _case_malformed,       {"M1": 0, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 0}, 2, True),
 )
 
 
@@ -316,14 +347,40 @@ def _write(path, text):
 
 
 def _cred_owner(fx):
-    """成员 → 该例中持有其凭据文件的节点（先到先得；没有则 `None`）。"""
+    """成员 → 该例中持有其凭据文件的 `(节点, 文件名)`（先到先得；没有则查不到）。
+
+    **只看 `creds`，不看 `mirror`** —— 镜像是中枢手里的副本，不是该成员的本机凭据。
+    """
     owner = {}
     for node, files in sorted(fx["nodes"].items()):
         for filename in sorted((files.get("creds") or {})):
             member = NEW._member_of(filename)
             if member is not None and member not in owner:
-                owner[member] = node
+                owner[member] = (node, filename)
     return owner
+
+
+def _cred_spec(owner, member):
+    """名册行的 `(cred_node, cred_kind)` —— **kind 必须按实际文件名推**（刀31）。
+
+    `nats-<m>.pass` ⇒ `runtime`；`<m>.pass` ⇒ `conf`。不这么推的话，`edge-n` 上那份
+    `nats-gamma.pass` 会被写成 `("edge-n", "conf")`，刀31 的正件就去找 `edge-n/gamma.pass`
+    —— 找不到 ⇒ 采集失败 rc=2，装置自己把自己搞红。
+
+    该例里**没有**凭据文件的成员落 `("hub-a", "conf")`：于是「在册却全网无凭据」（`zombie` 例、
+    E2、E5）在刀31 下**必然**多一条 `collect_error`。那是口径**收紧**的直接后果，不是 bug ——
+    改前会静默拿 conf 顶上，改后拒绝。
+    """
+    got = owner.get(member)
+    if got is None:
+        return "hub-a", "conf"
+    node, filename = got
+    return node, ("runtime" if filename.startswith("nats-") else "conf")
+
+
+def _mirror_all(names=("alpha", "beta", "gamma")):
+    """一份**内容正确**的中枢凭据镜像（刀30 形态：`<conf_dir>/creds/<m>.pass`）。"""
+    return {"%s.pass" % n: PW[n] for n in names}
 
 
 def roster_rows_of(fx):
@@ -332,7 +389,7 @@ def roster_rows_of(fx):
     hub-a 解析不出用户时**回落 hub-b**（与正件 `ref_hub = 第一台有 conf 的中枢` 同口径）：
     `malformed` 例的 hub-a conf 是空文件，不回落的话名册会是空的、M5 会平白多两条，
     10 例的冻结条数期望就守不住了。`cred_node` 取「该例中拥有该成员凭据文件的那个节点」，
-    没有则 `hub-a`；`role` / `cred_kind` 固定 —— 本刀的正件**不消费**这两列。
+    没有则 `hub-a`；`cred_kind` **按实际文件名推**（刀31 起正件要消费这一列，见 `_cred_spec`）。
 
     **顺序取字典序**，不是照抄 conf 行序：L0 档案契约写死「顺序即规范序（字典序）」。
     10 例里只有 `zombie` 的 conf 行序不是字典序（… gamma, delta），照抄会让 C 段
@@ -347,7 +404,7 @@ def roster_rows_of(fx):
         if users:
             break
     names = sorted(user for user, _pw, _perm in users)
-    return [[n, "member", owner.get(n, "hub-a"), "conf"] for n in names]
+    return [[n, "member"] + list(_cred_spec(owner, n)) for n in names]
 
 
 def materialize(fx, root, roster_rows=None):
@@ -366,9 +423,9 @@ def materialize(fx, root, roster_rows=None):
         if not os.path.isdir(base):
             os.makedirs(base)
         for name, body in sorted(files.items()):
-            if name == "creds":
+            if name in ("creds", "mirror"):             # `mirror/` 是刀31 新增的夹具形态
                 for filename, content in sorted(body.items()):
-                    _write(os.path.join(base, "creds", filename), content)
+                    _write(os.path.join(base, name, filename), content)
             elif isinstance(body, str):
                 _write(os.path.join(base, name), body)
             else:
@@ -379,7 +436,7 @@ def materialize(fx, root, roster_rows=None):
 
 def emit_all(dest):
     """`--emit`：把 10 例夹具原样落盘，供独立重跑与人眼核对。"""
-    for name, build, _want, _rc in CASES:
+    for name, build, _want, _rc, _same in CASES:
         target = os.path.join(dest, name)
         if os.path.isdir(target):
             shutil.rmtree(target)
@@ -501,9 +558,9 @@ def run_identity_cases():
 # ============================================================ E 段：期望侧不再自证（刀29）
 
 def _rows_for(fx, names):
-    """按给定成员名**顺序**造一份 `roster.json` 行（`cred_node` 沿用该例凭据文件的归属）。"""
+    """按给定成员名**顺序**造一份 `roster.json` 行（`cred_node` / `cred_kind` 见 `_cred_spec`）。"""
     owner = _cred_owner(fx)
-    return [[n, "member", owner.get(n, "hub-a"), "conf"] for n in names]
+    return [[n, "member"] + list(_cred_spec(owner, n)) for n in names]
 
 
 def _kind_set(report):
@@ -550,12 +607,16 @@ E_CASES = (
     ("E2_roster_extra", _e_fx_clean, ("alpha", "beta", "delta", "gamma"),
      _ZERO, {"M1": 2, "M2": 0, "M3": 0, "M4": 1, "M5": 0, "M6": 0},
      frozenset(("conf_missing_member", "zombie_credential")), False),
+    #: E3 / E4 的 `M3` 与 kind 集合在**刀31 改了一格**（过账见报告）：`cred_orphan` 的判据从
+    #: 「不在**基准中枢 conf** 的用户里」换成「不在**名册档案**里」。这两例的档案都比 conf 少人
+    #: （E3 少 gamma、E4 少 delta），而那个人**有凭据文件** —— 按档案口径它就是孤儿凭据。
+    #: 改前拿 conf 当名册，自然看不见；**收紧**，不是放宽。
     ("E3_roster_short", _e_fx_clean, ("alpha", "beta"),
-     _ZERO, {"M1": 2, "M2": 0, "M3": 0, "M4": 0, "M5": 1, "M6": 0},
-     frozenset(("conf_only_member", "live_outside_roster")), False),
+     _ZERO, {"M1": 2, "M2": 0, "M3": 1, "M4": 0, "M5": 1, "M6": 0},
+     frozenset(("conf_only_member", "live_outside_roster", "cred_orphan")), False),
     ("E4_manual_join", _e_fx_manual_join, ("alpha", "beta", "gamma"),
-     _ZERO, {"M1": 2, "M2": 0, "M3": 0, "M4": 0, "M5": 1, "M6": 0},
-     frozenset(("conf_only_member", "live_outside_roster")), False),
+     _ZERO, {"M1": 2, "M2": 0, "M3": 1, "M4": 0, "M5": 1, "M6": 0},
+     frozenset(("conf_only_member", "live_outside_roster", "cred_orphan")), False),
     ("E5_manual_leave", _e_fx_manual_leave, ("alpha", "beta", "gamma"),
      _ZERO, {"M1": 2, "M2": 0, "M3": 0, "M4": 1, "M5": 0, "M6": 0},
      frozenset(("conf_missing_member", "zombie_credential")), False),
@@ -606,6 +667,139 @@ def run_expectation_cases():
     return cells, bad
 
 
+# ============================================================ F 段：口令真值换源（刀31）
+
+def _f_fx_equal():
+    """F1 现网态：conf 口令 == owner 真值、**无镜像**。"""
+    return _clean()
+
+
+def _f_fx_conf_differs():
+    """F2 **某一台**中枢 conf 里的口令被手改（owner 文件与镜像都对）。"""
+    fx = _clean()
+    users = [(u, ("zz" if u == "alpha" else p), perm)
+             for u, p, perm in _roster(("alpha", "beta", "gamma"))]
+    fx["nodes"]["hub-b"]["nats.conf"] = hub_conf("hub-b", H_B, users, routes_to=H_A)
+    fx["nodes"]["hub-a"]["mirror"] = _mirror_all()
+    return fx
+
+
+def _f_fx_mirror_differs():
+    """F3 中枢凭据镜像被改（conf 与 owner 文件都对）—— 改前**根本不看镜像**。"""
+    fx = _clean()
+    m = _mirror_all()
+    m["alpha.pass"] = "zz"
+    fx["nodes"]["hub-a"]["mirror"] = m
+    return fx
+
+
+def _f_fx_missing_owner():
+    """F4 名册声称 alpha 的真值在 `hub-a/alpha.pass` —— **那个文件不存在**（其它都在）。"""
+    fx = _clean()
+    del fx["nodes"]["hub-a"]["creds"]["alpha.pass"]
+    fx["nodes"]["hub-a"]["mirror"] = _mirror_all()
+    return fx
+
+
+def _f_fx_both_conf():
+    """F5 **两台中枢一起**手改同一个成员的 conf 口令（E 段「一起改」同款）。"""
+    users = [(u, ("zz" if u == "alpha" else p), perm)
+             for u, p, perm in _roster(("alpha", "beta", "gamma"))]
+    fx = _clean()
+    fx["nodes"]["hub-a"]["nats.conf"] = hub_conf("hub-a", H_A, users)
+    fx["nodes"]["hub-b"]["nats.conf"] = hub_conf("hub-b", H_B, users, routes_to=H_A)
+    return fx
+
+
+_ABC = ("alpha", "beta", "gamma")
+
+#: F 段 5 场景（**冻结期望**）：
+#: `(名字, 夹具, 档案成员序, 改前六项条数, 改后六项条数, 改后多出的 kind 集合, 两侧 JSON 是否相同)`
+#:
+#: 「改前」= `_old/nats_membership_audit_old_k31.py`（刀31 前正件的逐字节快照，**函数级直调**
+#: `analyze()`）。**两侧喂同一份 `artifacts`**（同一夹具目录 + 同一份 `roster.json`），
+#: 差异只在「口令真值从哪来」：改前取基准中枢 conf 的 `user → password`，改后取成员本机凭据。
+#:
+#: 关于「改前无感」：改前**真正看不见**的只有 F3（它根本不采镜像）与 F4（声明文件缺失时
+#: 静默回落 conf）。F2 / F5 改前**看得见但判错方向** —— 它拿 conf 当真值，于是把
+#: 「中枢 conf 被手改」说成「成员机上的凭据文件不对」（F5：1 条 `cred_mismatch`），
+#: 或者只说得出「两台中枢不一致」而指不出谁对（F2：M1 2 条）。换源换的正是这个方向：
+#: 谁是真值、谁是产物。**（这一栏与本刀 spec 表里「F2/F5 改前六项全 0」不符 —— 那是主控
+#: 推演有误：只要该成员有 owner 文件，改前的 M3 就会拿它去比 conf；而若没有 owner 文件，
+#: 改后又因缺件而跳过、同样不红。两者互斥，「改前全 0 且改后 conf 判据必红」不可能成立。
+#: 逐条实测过账写在刀31 报告里。）**
+F_CASES = (
+    ("F1_equal", _f_fx_equal, _ABC,
+     _ZERO, _ZERO, frozenset(), True),
+    ("F2_conf_differs", _f_fx_conf_differs, _ABC,
+     {"M1": 2, "M2": 0, "M3": 0, "M4": 0, "M5": 0, "M6": 0},
+     {"M1": 2, "M2": 0, "M3": 1, "M4": 0, "M5": 0, "M6": 0},
+     frozenset(("conf_password_differs_from_owner",)), False),
+    ("F3_mirror_differs", _f_fx_mirror_differs, _ABC,
+     _ZERO, {"M1": 0, "M2": 0, "M3": 1, "M4": 0, "M5": 0, "M6": 0},
+     frozenset(("mirror_password_differs_from_owner",)), False),
+    ("F4_missing_owner", _f_fx_missing_owner, _ABC,
+     _ZERO, _ZERO, frozenset(), False),
+    ("F5_both_conf", _f_fx_both_conf, _ABC,
+     {"M1": 0, "M2": 0, "M3": 1, "M4": 0, "M5": 0, "M6": 0},
+     {"M1": 0, "M2": 0, "M3": 2, "M4": 0, "M5": 0, "M6": 0},
+     frozenset(("conf_password_differs_from_owner",)), False),
+)
+
+
+def run_truth_source_cases():
+    """F 段：**口令真值换源到成员本机凭据**（刀31）。22 格。
+
+    5 场景 × 4 格（改前条数 / 改后条数 / 改后多出的 kind / 两侧 JSON 逐字节比较），
+    外加 F4 的两格退出码判据：① 改后 `collect_errors` 非空**且**改前为空（= 改前静默回落
+    conf、改后拒绝）② 新正件的 CLI 在该夹具上 `rc == 2`。
+    """
+    cells, bad = [], 0
+    tmp = tempfile.mkdtemp(prefix="k31truth-")
+
+    def cell(name, ok, note):
+        nonlocal bad
+        bad += 0 if ok else 1
+        cells.append(("F", name, ok, note))
+
+    try:
+        for label, build, names, want_old, want_new, want_kinds, want_same in F_CASES:
+            fx = build()
+            root = materialize(fx, os.path.join(tmp, label),
+                               roster_rows=_rows_for(fx, names))
+            art = NEW.collect_fixtures(root)          # **同一份 artifacts** 喂两侧
+            old = OLDK31.analyze(art, gen_nats_conf.perm_list)
+            new = NEW.analyze(art, gen_nats_conf.perm_list)
+
+            got_old, got_new = _counts(old), _counts(new)
+            cell("%s/before" % label, got_old == want_old,
+                 "改前 %s（冻结期望 %s）" % (_counts_text(got_old), _counts_text(want_old)))
+            cell("%s/after" % label, got_new == want_new,
+                 "改后 %s（冻结期望 %s）" % (_counts_text(got_new), _counts_text(want_new)))
+
+            got_kinds = _kind_set(new) - _kind_set(old)
+            cell("%s/kinds" % label, got_kinds == set(want_kinds),
+                 "改后多出的 kind %s（冻结期望 %s）"
+                 % ("、".join(sorted(got_kinds)) or "—", "、".join(sorted(want_kinds)) or "—"))
+
+            same = (NEW.canonical(old) == NEW.canonical(new))
+            cell("%s/json" % label, same == want_same,
+                 "两侧规范 JSON %s（冻结期望 %s）"
+                 % ("逐字节相同" if same else "不同", "相同" if want_same else "不同"))
+
+            if label != "F4_missing_owner":
+                continue
+            refused = bool(new["collect_errors"]) and not old["collect_errors"]
+            cell("%s/refuse" % label, refused,
+                 "改后 collect_errors %d 条 / 改前 %d 条（要的是「改后非空、改前空」）"
+                 % (len(new["collect_errors"]), len(old["collect_errors"])))
+            rc = cli_rc(root)
+            cell("%s/rc" % label, rc == 2, "新正件 CLI 退出码 %d（期望 2）" % rc)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return cells, bad
+
+
 def run_matrix():
     """跑一遍完整矩阵 → `(格列表, 不一致数)`。格 = `(段, 名字, 是否一致, 说明)`。"""
     cells, bad = [], 0
@@ -629,20 +823,30 @@ def run_matrix():
     # --- C 段：10 例冻结夹具
     tmp = tempfile.mkdtemp(prefix="k25fx-")
     try:
-        for name, build, want, want_rc in CASES:
+        for name, build, want, want_rc, want_same in CASES:
             root = materialize(build(), os.path.join(tmp, name))
             new, old = new_report(root), old_report(root)
             n_text, o_text = NEW.canonical(new), NEW.canonical(old)
             same = (n_text == o_text)
-            bad += 0 if same else 1
-            cells.append(("C", "%s/json" % name, same,
-                          "规范 JSON 逐字节一致" if same else _first_diff(n_text, o_text)))
+            hit = (same == want_same)
+            bad += 0 if hit else 1
+            if want_same:
+                note = "规范 JSON 逐字节一致" if same else _first_diff(n_text, o_text)
+            else:
+                note = ("与旧侧（刀25 口径）不同 —— 冻结期望：不同（刀31 过账）" if not same
+                        else "**竟然逐字节相同** —— 冻结期望是不同")
+            cells.append(("C", "%s/json" % name, hit, note))
             for key in NEW.CHECK_KEYS:
                 got = new["counts"][key]
-                hit = (got == want[key]) and (old["counts"][key] == want[key])
+                #: 两侧口径已分家的三例（`want_same=False`），旧侧条数**不再是契约** ——
+                #: 它停在刀25 的「conf 即真值」，如实列出但不参与判定。
+                hit = (got == want[key]) and (not want_same or old["counts"][key] == want[key])
                 bad += 0 if hit else 1
                 cells.append(("C", "%s/%s" % (name, key), hit,
-                              "%d 条（冻结期望 %d）" % (got, want[key])))
+                              "%d 条（冻结期望 %d）%s"
+                              % (got, want[key],
+                                 "" if want_same else "｜旧侧 %d 条（刀25 口径，不判）"
+                                 % old["counts"][key])))
             rc = cli_rc(root)
             hit = (rc == want_rc)
             bad += 0 if hit else 1
@@ -659,6 +863,11 @@ def run_matrix():
     e_cells, e_bad = run_expectation_cases()
     cells.extend(e_cells)
     bad += e_bad
+
+    # --- F 段：口令真值换源到成员本机凭据（刀31）
+    f_cells, f_bad = run_truth_source_cases()
+    cells.extend(f_cells)
+    bad += f_bad
     return cells, bad
 
 
@@ -723,12 +932,64 @@ def _poison_conf_join(_fx):
 ROSTER_POISONS = (_poison_roster_drop, _poison_conf_join)
 
 
+def _neg_owner_changed():
+    """N1 **owner 文件被改**：conf 与镜像都还停在**旧**真值 —— 三个判据都该指向它们。"""
+    bad = _clean()
+    bad["nodes"]["hub-a"]["mirror"] = _mirror_all()
+    bad["nodes"]["hub-a"]["creds"]["alpha.pass"] = "qq"
+    good = _clean()
+    good["nodes"]["hub-a"]["mirror"] = _mirror_all()
+    return bad, good, _ABC
+
+
+def _neg_conf_changed():
+    """N2 **中枢 conf 口令改掉**（两台一起，把 M1 让开，红点纯落在 M3）。"""
+    return _f_fx_both_conf(), _clean(), _ABC
+
+
+def _neg_mirror_changed():
+    """N3 **中枢镜像改掉**（conf 与 owner 文件都对）。"""
+    good = _clean()
+    good["nodes"]["hub-a"]["mirror"] = _mirror_all()
+    return _f_fx_mirror_differs(), good, _ABC
+
+
+def _neg_owner_missing():
+    """N4 **owner 文件删掉**，同时两台中枢 conf 的口令都被改 —— 必须 rc=2 拒绝，**不许回落**。
+
+    这一处专钉「缺件回落」：改前会拿 conf 当真值（于是什么都判不出来），改后必须
+    ① 记 `collect_error` ② **不**对该成员产出任何 conf / 镜像差异判据（不猜、不顶替）。
+    """
+    bad = _f_fx_both_conf()
+    del bad["nodes"]["hub-a"]["creds"]["alpha.pass"]
+    return bad, _clean(), _ABC
+
+
+#: 刀31 新增的 4 处负控：毒下在「**口令真值**」上，判的是**改后正件**这一侧
+#: （既有 8 行一格未动）。每处两判：**注毒必红 + 还原转绿**。
+#: `mode="red"`  → M3 条数 > 0 且命中 `kinds` 里至少一个 kind
+#: `mode="refuse"` → `collect_errors` 非空，且 `kinds` 里那些「以 conf 当真值才会有」的判据一条都没有
+CRED_POISONS = (
+    ("owner 文件被改", _neg_owner_changed, "red",
+     frozenset(("cred_mismatch", "conf_password_differs_from_owner",
+                "mirror_password_differs_from_owner"))),
+    ("中枢 conf 口令改掉", _neg_conf_changed, "red",
+     frozenset(("conf_password_differs_from_owner",))),
+    ("中枢镜像改掉", _neg_mirror_changed, "red",
+     frozenset(("mirror_password_differs_from_owner",))),
+    ("owner 文件删掉", _neg_owner_missing, "refuse",
+     frozenset(("conf_password_differs_from_owner", "cred_mismatch"))),
+)
+
+
 def run_negative():
-    """注毒五处，每处都必须报红；还原后必须转绿。返回 `(行列表, 失败数)`。
+    """注毒九处，每处都必须报红；还原后必须转绿。返回 `(行列表, 失败数)`。
 
     前 3 处（刀25）判「新侧 ↔ 旧侧独立第二实现」两侧同红；
-    后 2 处（刀29）判「改前快照 ↔ 改后正件」—— 其中「档案里删一个成员」改前**必然全 0**，
-    那是本刀要闭的盲区本身，故该处的判据是「改后必红 **且** 改前如冻结期望」。
+    中 2 处（刀29）判「改前快照 ↔ 改后正件」—— 其中「档案里删一个成员」改前**必然全 0**，
+    那是刀29 要闭的盲区本身，故该处的判据是「改后必红 **且** 改前如冻结期望」；
+    后 4 处（刀31）毒下在**口令真值**上，判**改后正件**这一侧，每处自带「还原转绿」一行 ——
+    其中「owner 文件删掉」判的不是红，是**拒绝**：记 `collect_error`（rc=2 面）且**不回落 conf**。
     """
     rows, bad = [], 0
     tmp = tempfile.mkdtemp(prefix="k25neg-")
@@ -775,6 +1036,36 @@ def run_negative():
         bad += 0 if green else 1
         rows.append(("还原（档案 ≡ conf）", "all", green,
                      "改前 ok=%s / 改后 ok=%s" % (before["ok"], after["ok"])))
+
+        # --- 刀31 新增 4 处：毒下在**口令真值**上，每处「注毒必红 + 还原转绿」两判
+        for i, (what, build, mode, kinds) in enumerate(CRED_POISONS):
+            bad_fx, good_fx, names = build()
+
+            root = materialize(bad_fx, os.path.join(tmp, "cred-poison-%d" % i),
+                               roster_rows=_rows_for(bad_fx, names))
+            after = NEW.analyze(NEW.collect_fixtures(root), gen_nats_conf.perm_list)
+            got = _kind_set(after) & kinds
+            if mode == "red":
+                ok = after["counts"]["M3"] > 0 and bool(got)
+                note = "改后 M3 %d 条，命中 %s" % (after["counts"]["M3"],
+                                                  "、".join(sorted(got)) or "**一个都没命中**")
+            else:
+                ok = bool(after["collect_errors"]) and not got
+                note = ("改后 collect_errors %d 条（rc=2 面）／%s"
+                        % (len(after["collect_errors"]),
+                           "该成员未产生任何 conf/凭据差异判据 = 没回落"
+                           if not got else "**回落了**：" + "、".join(sorted(got))))
+            bad += 0 if ok else 1
+            rows.append(("注毒 %s" % what, "M3", ok, note))
+
+            root = materialize(good_fx, os.path.join(tmp, "cred-restored-%d" % i),
+                               roster_rows=_rows_for(good_fx, names))
+            rep = NEW.analyze(NEW.collect_fixtures(root), gen_nats_conf.perm_list)
+            green = rep["ok"]
+            bad += 0 if green else 1
+            rows.append(("还原 %s" % what, "M3", green,
+                         "ok=%s（六项 %s，采集失败 %d 条）"
+                         % (rep["ok"], _counts_text(_counts(rep)), len(rep["collect_errors"]))))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return rows, bad
@@ -785,7 +1076,7 @@ def run_negative():
 def main(argv=None):
     ap = argparse.ArgumentParser(description="刀25 · 成员入网只读对账 · 等价/冻结矩阵")
     ap.add_argument("--runs", type=int, default=1, help="连跑 N 轮，自证确定性（逐字节相同）")
-    ap.add_argument("--negative", action="store_true", help="强制负控：注毒五处必须报红")
+    ap.add_argument("--negative", action="store_true", help="强制负控：注毒九处必须报红/拒绝")
     ap.add_argument("--emit", default="", help="把 10 例冻结夹具落盘到该目录")
     ap.add_argument("--quiet", action="store_true", help="只打不一致的格与汇总")
     args = ap.parse_args(argv)
@@ -796,10 +1087,10 @@ def main(argv=None):
     if args.negative:
         rows, bad = run_negative()
         print("=" * 78)
-        print("刀25 · 强制负控（装置本身有没有判别力）")
+        print("刀25 起 · 刀29 / 刀31 各扩 · 强制负控（装置本身有没有判别力）")
         print("=" * 78)
         for what, key, ok, note in rows:
-            print("  %s %-16s %-4s %s" % ("✓" if ok else "✗", what, key, note))
+            print("  %s %-24s %-4s %s" % ("✓" if ok else "✗", what, key, note))
         print("\n负控判定：%s" % ("通过 —— 注毒全红、还原转绿"
                                   if not bad else "**失败 —— 有一处该红没红**"))
         return 0 if not bad else 1
@@ -810,12 +1101,13 @@ def main(argv=None):
         digests.append(digest_of(cells)[0])
 
     print("=" * 78)
-    print("刀25 起 · 刀28 扩 D 段 · 刀29 扩 E 段 · 成员入网只读对账 · 等价/冻结矩阵（%d 格 × %d 轮）"
-          % (len(cells), max(1, args.runs)))
+    print("刀25 起 · 刀28 扩 D 段 · 刀29 扩 E 段 · 刀31 扩 F 段 · 成员入网只读对账 · "
+          "等价/冻结矩阵（%d 格 × %d 轮）" % (len(cells), max(1, args.runs)))
     print("新侧 = tools/nats_membership_audit.py（正则 + 括号配平；模板 import L1 perm_list）")
     print("旧侧 = _old/membership_audit_old_k25.py（逐行状态机 + 顶层逗号切词；模板自拼）")
     print("D 段 = 身份 vs 观测量：新侧 vs _old/membership_audit_old_k28.py（刀28 前逐字节快照）")
     print("E 段 = 期望侧不再自证：新侧 vs _old/membership_audit_old_k29.py（刀29 前逐字节快照）")
+    print("F 段 = 口令真值换源：新侧 vs _old/nats_membership_audit_old_k31.py（刀31 前逐字节快照）")
     print("=" * 78)
     seg = None
     for segment, name, ok, note in cells:

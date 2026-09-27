@@ -11,8 +11,8 @@
 本件就是那把尺子 —— **只读**地把六件事量出来，冻结成基线，之后每次跑都与基线比。
 它**不改任何配置、不重启任何单元、不写远端任何文件**；远端只发 `cat` 与 `curl -s` 两种命令。
 
-名册真源（契约，**刀29 修订**）
-------------------------------
+名册真源（契约，**刀29 立 · 刀31 修订**）
+----------------------------------------
   · **名册 = L0 档案 `agent-team/member_roster.py` 的 `ROSTER`**（顺序即规范序）。
     刀25 曾把名册真源定义为「两台中枢 `nats.conf` 里 `authorization.users` 的规范形」——
     那让**期望侧就是被检对象自己**：谁登上两台中枢把 conf 一起手改（加人 / 删人），
@@ -21,8 +21,15 @@
   · 档案经 `artifacts["roster_rows"]` 注入（`[(member, role, cred_node, cred_kind), …]`，
     **顺序即规范序，不许再排一遍**）。**注不进来就是采集失败** —— 记一条 `collect_error`、
     退出码 2，**绝不回退到「conf 并集」**（回退就是把自证请回来）。
-  · **本刀只切「成员身份」这一半**：M3 的期望口令仍取**基准中枢 conf** 的 `user → password`
-    （口令改动的漏点由既有 M3 覆盖，故不阻塞）；`cred_node` / `cred_kind` 本刀**未消费**。
+  · **口令真值 = 成员本机凭据（刀31）**。刀29 只切了「成员身份」这一半，M3 的期望口令仍取
+    **基准中枢 conf** 的 `user → password` —— 那仍是拿被检对象自己当尺子。刀31 把这一半也切了：
+    名册每条 `(member, role, cred_node, cred_kind)` 指到**哪台机的哪个文件**，那个文件的内容
+    才是该成员的口令真值（`cred_kind == "runtime"` ⇒ `nats-<member>.pass`，`"conf"` ⇒
+    `<member>.pass`）。于是 `cred_node` / `cred_kind` 两列**从此被消费**，中枢 conf 与
+    中枢凭据镜像（刀30）一起**降级为被核对的产物**，不再自证。
+  · **缺件必拒，绝不回落**：名册说不清某成员的真值在哪（节点不在采集范围 / `cred_kind` 不认 /
+    行不是 4 元组 / 声明的文件根本不存在）⇒ 记一条 `collect_error`、退出码 2，且**所有以该成员
+    owner 真值为准的比对一律跳过**（不判、不猜、不拿 conf 顶上）。静默回落 conf 正是刀31 要修的。
   · **角色模板的唯一出处 = `gen_nats_conf.perm_list(user)`**（L1）。期望权限串一律**调它算**，
     本件源码里**没有**第二份模板字符串。它由 `main()` 注入进 `analyze()`，所以
     `analyze()` 本身是**纯函数**（无 IO / 无 time / 无随机），装置可以塞自己那份独立实现进来互证。
@@ -33,16 +40,17 @@
 --------------------------
   M1 `hub_user_matrix`   两中枢的 `(user → password)` 集合完全相同，**且成员集 == L0 名册档案**
   M2 `perm_template`     每个 user 的 `permissions` 逐字符 == `perm_list(user)`
-  M3 `cred_landing`      各机 `*.pass` 内容 == 名册中同名成员的口令
+  M3 `cred_landing`      各机 `*.pass` 内容 == 该成员的**本机凭据真值**；中枢 conf 里的口令、
+                         中枢凭据镜像（刀30）也一并与真值核对（刀31）
   M4 `roster_coverage`   名册每个成员至少有一处落地（pass 文件 ∪ 活连接）
   M5 `live_subset`       活连接的成员身份必须 ⊆ 名册（**硬违规**）
   M6 `legacy_and_routes` 非 v2 形状的中枢；集群路由条目 >2 或存在陈旧路由
 
 口令一个字节都不出门
 --------------------
-采集器**当场把 `*.pass` 的内容换成 sha256**，明文连 `artifacts` 都进不去；名册口令只在
-`analyze()` 内部用来算 sha256 做比对，输出里只出现 `sha256_8`（前 8 位十六进制）。
-stdout / `--out` / 基线文件 / 报告里**不可能**出现任何口令明文。
+采集器**当场把 `*.pass` 与镜像文件的内容换成 sha256**，明文连 `artifacts` 都进不去；
+conf 里的口令只在 `analyze()` 内部用来算 sha256 做比对，输出里只出现 `sha256_8`
+（前 8 位十六进制）。stdout / `--out` / 基线文件 / 报告里**不可能**出现任何口令明文。
 
 用法
 ----
@@ -71,6 +79,27 @@ stdout / `--out` / 基线文件 / 报告里**不可能**出现任何口令明文
 （NATS 每次重启后路由 idle 归零、约 1 小时后计数必由 0 变正）→ 基线的「瞬时值」每次必假红。
 **修的是「身份里混进了钟」，不是放宽判据**：裁决消失（例：重复路由不再存在）照旧报「消失」，
 双向严格一点没削（`docs/l5-membership-audit.md`《身份与观测量》节 + 装置 D 段有机械证据）。
+
+刀31 修订：口令真值换源到成员本机凭据
+------------------------------------
+**改前**：M3 拿「基准中枢 conf 的 `user → password`」当期望口令 —— 期望侧又是被检对象自己，
+于是「登上中枢把 conf 里某人的口令改掉」这件事，只要两台中枢改得一样，本件**完全无感**；
+名册档案里的 `cred_node` / `cred_kind` 两列**一直没人消费**。
+
+**改后**（本节取代上文一切「口令真值仍取 conf」的表述）：
+
+  · `artifacts` 多一个采集面 `mirror`（`{节点: {文件名: sha256}}`）—— 中枢 `<conf_dir>/creds/`
+    下的**凭据镜像**（刀30 落的）。它**不并进 `creds`**：镜像是「中枢手里的副本」，
+    不是「该机成员的落地凭据」，并进去会污染 M4 的落地判据。
+  · `owner_digest[member]` = `creds[cred_node][声明文件名]` —— **成员本机凭据**即真值。
+  · M3 因此从「一比」变成「三比」，**既有 kind 名与文案一字未改**：
+      `cred_mismatch` / `cred_orphan`          各机 `*.pass` ↔ 真值（换了比较对象，判据同形）
+      `conf_password_differs_from_owner`（新）  **中枢** conf 里的口令 ↔ 真值
+      `mirror_password_differs_from_owner`（新）中枢凭据镜像 ↔ 真值
+  · **显式非目标**：`conf_password_differs_from_owner` **只判 `hubs`**。非中枢节点上的 conf
+    由 M6 `legacy_hub` 覆盖（那类机器根本不该跑中枢形状的 nats），本刀不重复判。
+  · M1 / M2 / M4 / M5 / M6 的判据与文案、`CHECKS` / `COMPARE_KEYS` / `VOLATILE_KEYS` /
+    `SCHEMA` / `render()` / `diff_baseline()` **一字未改**；`analyze()` 签名与返回键集合未动。
 """
 from __future__ import annotations
 
@@ -358,6 +387,7 @@ def analyze(artifacts, perm_fn):
     connz = artifacts.get("connz") or {}
     routez = artifacts.get("routez") or {}
     creds = artifacts.get("creds") or {}
+    mirror = artifacts.get("mirror") or {}
     errors = list(artifacts.get("errors") or [])
 
     parsed = {n: parse_conf(conf_text.get(n)) for n in nodes if conf_text.get(n) is not None}
@@ -372,13 +402,51 @@ def analyze(artifacts, perm_fn):
         roster_rows = []
     roster = [row[0] for row in roster_rows]               # **档案顺序即规范序**，不许再 sort
 
-    # ---- 口令真值侧**本刀未切**：仍以第一台有 conf 的中枢为基准（见模块文档串「名册真源」）
     hub_users = {}
     for h in hubs:
         if h in parsed:
             hub_users[h] = {u: p for u, p, _perm in parsed[h]["users"]}
     ref_hub = next((h for h in hubs if h in hub_users), "")
-    roster_pw = dict(hub_users.get(ref_hub) or {})
+
+    # ---- 口令真值侧（刀31）：**成员本机凭据**。名册每条指到「哪台机的哪个文件」，
+    #      那个文件的 sha256 就是该成员的 owner 真值。中枢 conf 与中枢镜像都只是**被核对的产物**。
+    #      档案说不清（四种形态）⇒ 记采集失败（退出码 2）+ 该成员的 owner 比对**全部跳过**，
+    #      **绝不回落 conf 真值** —— 静默回落正是本刀要修的那件事。
+    node_set = set(nodes)
+    owner_digest = {}
+    for row in roster_rows:
+        if len(row) < 4:
+            errors.append({
+                "kind": "collect_error", "node": "-",
+                "what": "名册条目 %s" % (row[0] if row else "-"),
+                "why": "名册行不是 (member, role, cred_node, cred_kind) 四元组，"
+                       "说不清口令真值在哪（不回落 conf 真值）"})
+            continue
+        member, _role, cred_node, cred_kind = row[0], row[1], row[2], row[3]
+        if cred_kind not in ("runtime", "conf"):
+            errors.append({
+                "kind": "collect_error", "node": cred_node,
+                "what": "名册条目 %s" % member,
+                "why": "名册声称 %s 的凭据位置种类是 %s，既不是 runtime 也不是 conf"
+                       "（不回落 conf 真值）" % (member, cred_kind)})
+            continue
+        filename = ("nats-%s.pass" % member) if cred_kind == "runtime" else ("%s.pass" % member)
+        if cred_node not in node_set:
+            errors.append({
+                "kind": "collect_error", "node": cred_node,
+                "what": "成员凭据 %s" % filename,
+                "why": "名册声称 %s 的口令真值在 %s 的 %s，该节点不在采集范围里"
+                       "（不回落 conf 真值）" % (member, cred_node, filename)})
+            continue
+        digest = (creds.get(cred_node) or {}).get(filename)
+        if digest is None:
+            errors.append({
+                "kind": "collect_error", "node": cred_node,
+                "what": "成员凭据 %s" % filename,
+                "why": "名册声称 %s 的口令真值在 %s 的 %s，实际不存在（不回落 conf 真值）"
+                       % (member, cred_node, filename)})
+            continue
+        owner_digest[member] = digest
 
     findings = {k: [] for k in CHECK_KEYS}
 
@@ -428,7 +496,7 @@ def analyze(artifacts, perm_fn):
             findings["M2"].append({"kind": "perm_drift", "hub": h, "member": user,
                                    "expected": expected, "actual": perm})
 
-    # ---- M3 pass 文件内容 == 名册中同名成员的口令
+    # ---- M3a 各机 pass 文件内容 == 该成员的 **owner 真值**（刀31 只换比较对象，判据同形）
     for node in nodes:
         for filename, digest in sorted((creds.get(node) or {}).items()):
             member = _member_of(filename)
@@ -436,12 +504,48 @@ def analyze(artifacts, perm_fn):
                 continue
             item = {"member": member, "node": node,
                     "location": "%s:%s" % (node, filename), "sha256_8": digest[:8]}
-            if member not in roster_pw:
+            if member not in arch_members:
                 findings["M3"].append(dict(item, kind="cred_orphan",
                                            why="该机上有凭据文件，名册里没有这个成员"))
-            elif sha256_hex(roster_pw[member]) != digest:
+            elif member in owner_digest and owner_digest[member] != digest:
                 findings["M3"].append(dict(item, kind="cred_mismatch",
                                            why="凭据文件内容与名册口令不一致"))
+            # owner 真值未知（档案说不清，已记 collect_error）→ **跳过，不拿 conf 顶上**
+
+    # ---- M3b（刀31 新增）**中枢 conf 里的口令** ↔ owner 真值。中枢从此不再自证。
+    #      **只判 hubs**：非中枢节点上的 conf 由 M6 `legacy_hub` 覆盖（显式非目标）。
+    for h in hubs:
+        if h not in parsed:
+            continue
+        for member, conf_password, _perm in parsed[h]["users"]:
+            if member not in arch_members or member not in owner_digest:
+                continue
+            conf_digest = sha256_hex(conf_password)
+            if conf_digest == owner_digest[member]:
+                continue
+            findings["M3"].append({
+                "kind": "conf_password_differs_from_owner", "hub": h, "member": member,
+                "conf_sha256_8": conf_digest[:8],
+                "owner_sha256_8": owner_digest[member][:8],
+                "why": "该中枢 conf 里的口令与成员本机凭据真值不同（conf 不再自证）"})
+
+    # ---- M3c（刀31 新增）**中枢凭据镜像**（刀30 落的 `<conf_dir>/creds/`）↔ owner 真值
+    for node in nodes:
+        for filename, digest in sorted((mirror.get(node) or {}).items()):
+            member = _member_of(filename)
+            if member is None:
+                continue
+            if member not in arch_members:
+                findings["M3"].append({
+                    "kind": "cred_orphan", "member": member, "node": node,
+                    "location": "%s:creds/%s" % (node, filename), "sha256_8": digest[:8],
+                    "why": "该机上有凭据文件，名册里没有这个成员"})
+            elif member in owner_digest and digest != owner_digest[member]:
+                findings["M3"].append({
+                    "kind": "mirror_password_differs_from_owner", "node": node, "member": member,
+                    "location": "%s:creds/%s" % (node, filename), "sha256_8": digest[:8],
+                    "owner_sha256_8": owner_digest[member][:8],
+                    "why": "中枢凭据镜像（刀30）与成员本机真值不同"})
 
     # ---- M4 名册每个成员至少有一处落地（pass 文件 ∪ 活连接）
     landed_files = set()
@@ -674,7 +778,10 @@ def collect_live(hubs, targets, timeout=40.0):
     import member_roster                                 # noqa: E402 —— L0 名册档案（期望侧唯一真源）
     nodes = sorted(targets)
     art = {"hubs": sorted(hubs), "nodes": nodes,
-           "conf": {}, "connz": {}, "routez": {}, "creds": {}, "errors": [],
+           "conf": {}, "connz": {}, "routez": {}, "creds": {},
+           #: 第 5 类采集对象：**中枢凭据镜像**（刀30 落在 `<conf_dir>/creds/`）。刀31 拿它
+           #: 跟 owner 真值核对；**不并进 `creds`** —— 它是副本不是该机成员的落地凭据。
+           "mirror": {}, "errors": [],
            #: 第 4 类采集对象：**档案**（刀29）。它不是「实现」而是输入数据，所以跟
            #: conf / creds 一样放进 artifacts —— `analyze()` 因此仍是纯函数、签名不变。
            "roster_rows": [tuple(r) for r in member_roster.ROSTER]}
@@ -688,6 +795,7 @@ def collect_live(hubs, targets, timeout=40.0):
         conf_dir, dirs = node_dirs(name, target)
         art["conf"][name] = None
         art["creds"][name] = {}
+        art["mirror"][name] = {}
 
         # --- nats.conf（不在 = 该机没有 nats 配置，不是错）
         if conf_dir:
@@ -721,6 +829,27 @@ def collect_live(hubs, targets, timeout=40.0):
                     continue
                 #: 口令明文到此为止 —— 只留摘要，明文连 artifacts 都进不去
                 art["creds"][name][filename] = sha256_hex(content.strip())
+
+        # --- 凭据镜像（刀31 加）：`<conf_dir>/creds/` —— 规则与上面的 creds 完全同形，
+        #     但**单独存一格**，不许并进 `creds`（并进去会动到 M4 的落地判据）。
+        if conf_dir:
+            mirror_dir = conf_dir + "/creds"
+            rc, names, why = list_dir(target, mirror_dir, timeout)
+            if rc is None:
+                err(name, "列镜像目录 creds", why or "采集失败")
+            elif rc == 0:                               # 目录不在（rc!=0）—— 不是错
+                for filename in names:
+                    if filename in art["mirror"][name]:
+                        continue                        # 同名先到先得
+                    if not any(fnmatch.fnmatch(filename, g) for g, _rx in CRED_PATTERNS):
+                        continue
+                    crc, content, cwhy = read_file(target, mirror_dir + "/" + filename, timeout)
+                    if crc is None:
+                        err(name, "读镜像凭据 %s" % filename, cwhy or "采集失败")
+                        continue
+                    if crc != 0:
+                        continue
+                    art["mirror"][name][filename] = sha256_hex(content.strip())
 
         # --- 中枢才有监控口（只绑环回，故经 ssh 在该机上打）
         if name not in art["hubs"]:
@@ -760,9 +889,10 @@ def collect_fixtures(root, hubs_override=None):
         <DIR>/<node>/connz.json         中枢才有
         <DIR>/<node>/routez.json        中枢才有
         <DIR>/<node>/creds/<文件名>      落地的凭据文件（`<m>.pass` / `nats-<m>.pass`）
+        <DIR>/<node>/mirror/<文件名>     中枢凭据镜像（刀31；对应真机 `<conf_dir>/creds/`）
     """
     art = {"hubs": [], "nodes": [], "conf": {}, "connz": {}, "routez": {},
-           "creds": {}, "errors": [], "roster_rows": None}
+           "creds": {}, "mirror": {}, "errors": [], "roster_rows": None}
 
     def err(node, what, why):
         art["errors"].append({"kind": "collect_error", "node": node,
@@ -804,6 +934,7 @@ def collect_fixtures(root, hubs_override=None):
         base = os.path.join(root, name)
         art["conf"][name] = None
         art["creds"][name] = {}
+        art["mirror"][name] = {}
         conf_path = os.path.join(base, "nats.conf")
         if os.path.isfile(conf_path):
             text = io.open(conf_path, encoding="utf-8", errors="replace").read()
@@ -819,6 +950,14 @@ def collect_fixtures(root, hubs_override=None):
                 content = io.open(os.path.join(cred_dir, filename),
                                   encoding="utf-8", errors="replace").read()
                 art["creds"][name][filename] = sha256_hex(content.strip())
+        mirror_dir = os.path.join(base, "mirror")       # 刀31：无此目录 = `{}`
+        if os.path.isdir(mirror_dir):
+            for filename in sorted(os.listdir(mirror_dir)):
+                if not any(fnmatch.fnmatch(filename, g) for g, _rx in CRED_PATTERNS):
+                    continue
+                content = io.open(os.path.join(mirror_dir, filename),
+                                  encoding="utf-8", errors="replace").read()
+                art["mirror"][name][filename] = sha256_hex(content.strip())
         for what in ("connz", "routez"):
             art[what][name] = None
             if name not in art["hubs"]:
