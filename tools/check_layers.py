@@ -125,25 +125,63 @@ def _strip_docstrings(src: str) -> str:
     return TRIPLE_RX.sub(lambda m: '\n' * m.group(0).count('\n'), src)
 
 
+def host_path_owners(layers) -> list:
+    """`host_path_owner` —— **兼容 str 与 list**（刀33）。
+
+    历史形态是单值字符串（只能写一个所有者）；刀33 起是列表，因为
+    `agent-team/node_paths.py` 与 `agent-team/node_profile.py` 两件同属 L0、
+    语义上共同构成「宿主字面量的唯一合法去处」。
+
+    · `str` → 视为单元素列表（旧表照常能跑）。
+    · `list` → 视为「允许多个所有者」，逐项 `endswith` 匹配。
+
+    放宽**只到这张表为止**：不在表里的件持宿主路径字面量，仍一律报「要收」。
+    """
+    raw = (layers.get('rules') or {}).get('host_path_owner')
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    return [x for x in raw if x]
+
+
+def path_fp_index(layers) -> dict:
+    """已登记的 `PATH_RX` 误判（刀33）：键 =（件, 命中原串），值 = 理由。
+
+    键要求**原串全等**（不是按件豁免、不是按行号豁免）——源码一改，命中串就变，
+    本条自动失效、该处立刻重新计进「要收」，不会悄悄替新硬编码背书。
+    """
+    out = {}
+    for e in (layers.get('rules') or {}).get('path_known_false_positives') or []:
+        out[(e.get('file', ''), e.get('match', ''))] = e.get('reason', '')
+    return out
+
+
 def check_hardcode(layers, files):
-    """宿主字面量检查，**分两类**（只有一类是真该收的）：
+    """宿主字面量检查，**分三类**（只有一类是真该收的）：
 
       · `host_paths` —— 宿主路径字面量（真硬编码）。唯一合法去处 = 层归属表里声明的
-        `host_path_owner`（当前 = L0 `agent-team/node_paths.py`）；其余件出现即「要收」，
-        这类数字应当单调趋 0，是「配置零硬编码 / 跨 OS 解耦」的可机械校验进度指标。
+        `host_path_owner`（刀33 起是**列表**：L0 `agent-team/node_paths.py` +
+        `agent-team/node_profile.py`）；其余件出现即「要收」，这类数字应当单调趋 0，
+        是「配置零硬编码 / 跨 OS 解耦」的可机械校验进度指标。
+      · `known-FP` —— `PATH_RX` 把源码里的**正则串**（`id:\\s*`、`:\\n`、字符类
+        `[...Z:\\-+.]`）误判成盘符路径。逐条实名登记在
+        `rules.path_known_false_positives` 里，**检查本身保留**、命中仍逐条打印
+        （文件:行号 + 原文 + 理由），只是不计进「要收」的路径指标。
       · `net_literals` —— IP / 端口默认值（提示级）。大量是**合法的**默认（loopback、
         兜底基址），强行收走反而降低可读性，故只提示不设门禁。
 
     文档字符串与注释里的示例地址一律不计（`_strip_docstrings`）。
     """
     run_layers = {'L1', 'L2', 'L3', 'L4'}
-    owner = (layers.get('rules') or {}).get('host_path_owner') or ''
+    owners = host_path_owners(layers)
+    fp_idx = path_fp_index(layers)
     hits = []
     for rel, meta in files.items():
         if meta['layer'] not in run_layers:
             continue
         src = _strip_docstrings(read_src(rel))
-        ips, paths = [], []
+        ips, paths, fps = [], [], []
         for i, line in enumerate(src.splitlines(), 1):
             s = line.strip()
             if s.startswith('#'):
@@ -153,12 +191,17 @@ def check_hardcode(layers, files):
                     continue
                 ips.append((i, m.group(0), s[:70]))
             for m in PATH_RX.finditer(line):
-                paths.append((i, m.group(0), s[:70]))
-        if owner and rel.replace('\\', '/').endswith(owner):
-            paths = []                     # 合法去处：宿主默认值的唯一出处，不计数
-        if ips or paths:
+                why = fp_idx.get((rel.replace('\\', '/'), m.group(0)))
+                if why is None:
+                    paths.append((i, m.group(0), s[:70]))
+                else:
+                    fps.append((i, m.group(0), s[:70], why))
+        if owners and any(rel.replace('\\', '/').endswith(o) for o in owners):
+            paths, fps = [], []            # 合法去处：宿主默认值的唯一出处，不计数
+        if ips or paths or fps:
             hits.append(dict(file=rel, layer=meta['layer'], ips=ips[:6], ip_count=len(ips),
-                             paths=paths[:4], path_count=len(paths)))
+                             paths=paths, path_count=len(paths),
+                             fps=fps, fp_count=len(fps)))
     return hits
 
 
@@ -269,9 +312,16 @@ def main():
     host_paths = [dict(file=h['file'], layer=h['layer'], count=h['path_count'],
                        samples=[p[2] for p in h['paths'][:2]]) for h in w3 if h['path_count']]
     net_literals = [dict(file=h['file'], layer=h['layer'], count=h['ip_count']) for h in w3 if h['ip_count']]
+    owners = host_path_owners(layers)
+    # 「要收」= 非所有者件里的宿主路径字面量（known-FP 已剔除，但已逐条登记在案并照常打印）
+    to_fix = [dict(file=h['file'], layer=h['layer'], line=i, match=v, text=s)
+              for h in w3 for (i, v, s) in h['paths']]
+    known_fp = [dict(file=h['file'], layer=h['layer'], line=i, match=v, text=s, reason=why)
+                for h in w3 for (i, v, s, why) in h['fps']]
     report = dict(direction_violations=v1, transport_business_hits=w2,
                   hardcode=w3, host_paths=host_paths, net_literals=net_literals,
-                  host_path_owner=(layers.get('rules') or {}).get('host_path_owner') or '',
+                  host_path_owner=owners,
+                  host_paths_to_fix=to_fix, path_known_false_positives=known_fp,
                   storage=w4, private_surface=w5,
                   edges=len(edges), files=len(files), declared_exceptions=DECLARED)
     if args.json:
@@ -297,12 +347,33 @@ def main():
     print('\n检查 3 · 宿主硬编码（提示级）')
     if not w3:
         print('  ✓ 无命中')
-    for h in sorted(w3, key=lambda x: -(x['ip_count'] + x['path_count'])):
-        print('  · %-34s [%s] IP×%-3d 路径×%-3d' % (h['file'], h['layer'], h['ip_count'], h['path_count']))
+    for h in sorted(w3, key=lambda x: -(x['ip_count'] + x['path_count'] + x['fp_count'])):
+        print('  · %-34s [%s] IP×%-3d 路径×%-3d known-FP×%-3d'
+              % (h['file'], h['layer'], h['ip_count'], h['path_count'], h['fp_count']))
         for i, v, s in h['ips'][:3]:
             print('        L%-5d IP    %s   | %s' % (i, v, s))
         for i, v, s in h['paths'][:3]:
             print('        L%-5d 路径  %s   | %s' % (i, v, s))
+        for i, v, s, _why in h['fps'][:3]:
+            print('        L%-5d 路径  %s   | %s   [known-FP]' % (i, v, s))
+
+    print('\n  宿主路径字面量的唯一合法去处 host_path_owner（%d 件，其余件出现即「要收」）：' % len(owners))
+    for o in owners:
+        print('      · %s' % o)
+    if to_fix:
+        print('  ✗ 要收：%d 处宿主路径字面量落在**非所有者**件里' % len(to_fix))
+        for d in to_fix:
+            print('      ✗ %s:%d [%s]  命中 %s' % (d['file'], d['line'], d['layer'], d['match']))
+            print('           原文：%s' % d['text'])
+    else:
+        print('  ✓ 要收 0 处：L1–L4 里未登记的宿主路径字面量为 0')
+    if known_fp:
+        print('  🛈 known-FP %d 处（PATH_RX 把正则串误判成盘符路径；**检查保留**，只是不计进「要收」）：'
+              % len(known_fp))
+        for d in known_fp:
+            print('      🛈 [known-FP] %s:%d [%s]  命中 %s' % (d['file'], d['line'], d['layer'], d['match']))
+            print('           原文：%s' % d['text'])
+            print('           理由：%s' % d['reason'])
 
     print('\n检查 4 · 直接持存储句柄的件（提示级；打 ⚠ 的是「不该持」的层）')
     for h in w4:

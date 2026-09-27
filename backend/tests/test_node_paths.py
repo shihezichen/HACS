@@ -132,12 +132,12 @@ def t_target_profile():
             assert np.target_flavour(host) == "posix", host
             assert np.target_home(host) == "/root", host
             assert np.target_claude_exec(host) == \
-                "/root/.local/share/hermes/scripts/claude_exec.py", host
+                "<home>/.local/share/hermes/scripts/claude_exec.py", host
         # 未登记 / 空串：按 posix 兜底，但 target_known 必须说实话
         for host in ("nosuchhost", "user@nosuchhost", "", None, "   "):
             assert np.target_known(host) is False, host
             assert np.target_flavour(host) == "posix", host
-            assert np.target_claude_exec(host).startswith("/root/"), host
+            assert np.target_claude_exec(host).startswith("<home>/"), host
     finally:
         if saved is not None:
             os.environ[np.ENV_TARGET_PROFILE_JSON] = saved

@@ -22,7 +22,7 @@
 --------------------------------------
 上面那组函数回答的全是「**本机**的路径长什么样」。跨主机调用（例如经 ssh 去另一台机上跑
 执行器）要的是「**那台机**的路径长什么样」—— 两者拿混了就会静默出事：2026-09-25 实测，
-lobster（Linux）把本机的 `/root/.local/.../claude_exec.py` 当成 ssh 目标 thinkbook（Windows）
+lobster（Linux）把本机的 `<home>/.local/.../claude_exec.py` 当成 ssh 目标 thinkbook（Windows）
 的路径发过去，远端报 `can't open file`，模型通道整条静默失效。
 
 所以本文件另设一组 `target_*` 函数（阶段 4 节点档案的**雏形**）：按「目标主机名」查档案，

@@ -146,7 +146,7 @@ def t_remote_path_follows_target():
 
     _reload({"AGENT_TEAM_SSH_TARGET": "root@lobster"})
     posix = am.ssh_argv()[-1]
-    assert "/root/.local/share/hermes/scripts/claude_exec.py" in posix, posix
+    assert "<home>/.local/share/hermes/scripts/claude_exec.py" in posix, posix
 
     # 缺陷本体：远端路径不许等于「本机」路径（在 Windows 上跑时这两者恰好同形，
     # 所以用「目标是 lobster 时不得出现盘符」来钉住跨主机语义）

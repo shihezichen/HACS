@@ -144,7 +144,7 @@ def norm(text, tmp):
 
 
 def legacy_route_pass_for_old(tmp):
-    """OLD 侧（改前原文）不认 env 覆盖，只会读 `/root/.nats-route.pass`。
+    """OLD 侧（改前原文）不认 env 覆盖，只会读 `<home>/.nats-route.pass`。
 
     Windows 上这个绝对路径按**当前盘**解析（case 目录在 C:）→ 真实落点 `C:\\root\\.nats-route.pass`。
     装置按它真实解析的位置预置一份固定内容，两侧路由口令才可比。

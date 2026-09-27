@@ -14,7 +14,7 @@ NODES = {"lobster": "lobster", "top001": "top001", "quantum": "quantum"}
 
 FIX_REMOTE = r'''
 import json, os
-p = "/root/.openclaw/openclaw.json"
+p = "<home>/.openclaw/openclaw.json"
 d = json.load(open(p, encoding="utf-8"))
 removed = d.pop("http", None)          # 删掉我错放的顶层 http
 gw = d.setdefault("gateway", {})
@@ -70,7 +70,7 @@ for name, host in NODES.items():
     print(f"   网关: active={o3.strip()} | 监听 {port}: {'✓' if ready else '✗ 仍未起'}")
 
     # 取 token 真调 /v1/chat/completions
-    rc4, tok, _ = run(host, "python3 -c \"import json;d=json.load(open('/root/.openclaw/openclaw.json',encoding='utf-8'));print((d.get('gateway',{}).get('auth',{}) or {}).get('token') or '',end='')\"")
+    rc4, tok, _ = run(host, "python3 -c \"import json;d=json.load(open('<home>/.openclaw/openclaw.json',encoding='utf-8'));print((d.get('gateway',{}).get('auth',{}) or {}).get('token') or '',end='')\"")
     tok = tok.strip()
     body = json.dumps({"model": "openclaw/default",
                        "messages": [{"role": "user", "content": "ping"}],
@@ -87,7 +87,7 @@ for name, host in NODES.items():
 
     # 飞书通道健康（openclaw status）
     rc6, out6, err6 = run(host,
-                          "export PATH=$PATH:/root/.nvm/versions/node/v24.20.0/bin; openclaw status 2>&1 | head -30",
+                          "export PATH=$PATH:<home>/.nvm/versions/node/v24.20.0/bin; openclaw status 2>&1 | head -30",
                           timeout=120)
     print("   --- openclaw status ---")
     for line in (out6 or err6).strip().splitlines()[:20]:

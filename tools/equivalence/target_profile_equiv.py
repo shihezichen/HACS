@@ -77,25 +77,25 @@ WIPE = ["AGENT_TEAM_TARGET_PROFILE_JSON", "CHAT_ENRICH_CMD", "CHAT_ENRICH_SSH",
 FROZEN = {
  "no-env|<user>@<node>": "True|nt|<home>/AppData/Local/hermes/scripts/claude_exec.py|python -X utf8 <home>/AppData/Local/hermes/scripts/claude_exec.py --timeout 150 -",
  "no-env|thinkbook": "True|nt|<home>/AppData/Local/hermes/scripts/claude_exec.py|python -X utf8 <home>/AppData/Local/hermes/scripts/claude_exec.py --timeout 150 -",
- "no-env|lobster": "True|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /root/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
- "no-env|quantum": "True|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /root/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
- "no-env|top001": "True|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /root/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
- "no-env|nosuchhost": "False|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /root/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
- "no-env|": "False|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /root/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
+ "no-env|lobster": "True|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 <home>/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
+ "no-env|quantum": "True|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 <home>/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
+ "no-env|top001": "True|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 <home>/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
+ "no-env|nosuchhost": "False|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 <home>/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
+ "no-env|": "False|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 <home>/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
  "profile-json|<user>@<node>": "True|posix|/srv/tb/bin/claude_exec.py|python -X utf8 /srv/tb/bin/claude_exec.py --timeout 150 -",
  "profile-json|thinkbook": "True|posix|/srv/tb/bin/claude_exec.py|python -X utf8 /srv/tb/bin/claude_exec.py --timeout 150 -",
  "profile-json|lobster": "True|posix|/data/nbhome/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /data/nbhome/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
- "profile-json|quantum": "False|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /root/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
- "profile-json|top001": "False|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /root/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
- "profile-json|nosuchhost": "False|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /root/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
- "profile-json|": "False|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /root/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
+ "profile-json|quantum": "False|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 <home>/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
+ "profile-json|top001": "False|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 <home>/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
+ "profile-json|nosuchhost": "False|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 <home>/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
+ "profile-json|": "False|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 <home>/.local/share/hermes/scripts/claude_exec.py --timeout 150 -",
  "enrich-cmd|<user>@<node>": "True|nt|<home>/AppData/Local/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
  "enrich-cmd|thinkbook": "True|nt|<home>/AppData/Local/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
- "enrich-cmd|lobster": "True|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
- "enrich-cmd|quantum": "True|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
- "enrich-cmd|top001": "True|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
- "enrich-cmd|nosuchhost": "False|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
- "enrich-cmd|": "False|posix|/root/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
+ "enrich-cmd|lobster": "True|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
+ "enrich-cmd|quantum": "True|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
+ "enrich-cmd|top001": "True|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
+ "enrich-cmd|nosuchhost": "False|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
+ "enrich-cmd|": "False|posix|<home>/.local/share/hermes/scripts/claude_exec.py|python -X utf8 /custom/exec.py --timeout 150 -",
 }
 
 
@@ -139,7 +139,7 @@ def check_ssh_argv():
     import agent_model
     results = []
     for host, must, kind in [("<user>@<node>", "<home>/AppData/Local/hermes/scripts/claude_exec.py", "Windows 路径"),
-                             ("root@lobster", "/root/.local/share/hermes/scripts/claude_exec.py", "posix 路径")]:
+                             ("root@lobster", "<home>/.local/share/hermes/scripts/claude_exec.py", "posix 路径")]:
         _wipe({"CHAT_ENRICH_SSH": host})
         importlib.reload(importlib.import_module("node_paths"))
         importlib.reload(agent_model)

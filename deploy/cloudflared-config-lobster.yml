@@ -1,5 +1,5 @@
 tunnel: <tunnel-id>
-credentials-file: /root/.cloudflared/<tunnel-id>.json
+credentials-file: <home>/.cloudflared/<tunnel-id>.json
 
 # 固定公网入口（2026-09-22 v1.5 webPortal 上线）：
 #   example.com       → 门户首页（webPortal 卡片墙，白板本尊在 /board）→ 127.0.0.1:9942

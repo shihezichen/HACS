@@ -7,7 +7,7 @@
 
 用法（在龙虾上以 root 跑）：
   python3 tunnel.py quick   # 快速隧道：零账号，秒级给出 https 地址（重启会换地址）
-  python3 tunnel.py named --hostname board.example.com --token-file /root/.cf/tunnel.token
+  python3 tunnel.py named --hostname board.example.com --token-file <home>/.cf/tunnel.token
   python3 tunnel.py status
   python3 tunnel.py stop
 

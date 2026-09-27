@@ -42,11 +42,11 @@ NODES = {
     "top001": {"ssh": "top001", "ip": AGENT_TEAM_NODES["top001"], "agents": ["top001"]},
     "quantum": {"ssh": "quantum", "ip": AGENT_TEAM_NODES["quantum"], "agents": ["quantum"]},
 }
-BACKUP = "/root/backup-openclaw-20260919"
+BACKUP = "<home>/backup-openclaw-20260919"
 
 PATCH_REMOTE = r'''
 import json, os, shutil, sys, time
-p = "/root/.openclaw/openclaw.json"
+p = "<home>/.openclaw/openclaw.json"
 os.makedirs("__BACKUP__", exist_ok=True)
 dst = "__BACKUP__/openclaw.json.bak"
 if not os.path.exists(dst):
@@ -113,7 +113,7 @@ def phase_a():
             time.sleep(3)
         print(f"   监听 {port}: {'就绪 ✓' if ready else '未就绪 ✗'}")
         # 取 token（不打印）
-        rc, tok, _ = run(host, "python3 -c \"import json;print(json.load(open('/root/.openclaw/openclaw.json',encoding='utf-8'))['gateway']['auth']['token'],end='')\"")
+        rc, tok, _ = run(host, "python3 -c \"import json;print(json.load(open('<home>/.openclaw/openclaw.json',encoding='utf-8'))['gateway']['auth']['token'],end='')\"")
         tok = tok.strip()
         # 真实调用
         body = json.dumps({"model": "openclaw/default",

@@ -28,7 +28,7 @@ SLICES = {
     'A11': 'CHAT_BASE_DEFAULT = os.environ.get("AGENT_TEAM_CHAT_BASE") or "http://<host>:9984"\n',
     'A12': '    ap.add_argument("--nats-host", required=True, help="NATS 中枢地址（如 <host>）")\n',
     'B1a': 'AGENT_TEAM_NATS_DIR = os.environ.get("AGENT_TEAM_NATS_DIR") or "/etc/nats"\n',
-    'B1b': 'ROUTE_PASS_FILE = "/root/.nats-route.pass"\n',
+    'B1b': 'ROUTE_PASS_FILE = "<home>/.nats-route.pass"\n',
     'B2a': 'DB_DEFAULT = "<deploy-dir>/task_svc.db"\n',
     'B2b': 'LOG_DEFAULT = "<deploy-dir>/logs/task_svc.log"\n',
     'B3': 'CODEX_WORKDIR = os.environ.get("AGENT_TEAM_CODEX_WORKDIR") or os.environ.get("CODEX_WORKDIR") or r"<work-dir>"\n',

@@ -64,15 +64,15 @@ ssh <node> 'systemctl disable --now <unit>'
 
 ## 5.5 凭据轮换（`route` 集群口令 · 刀29 实测流程）
 
-真源：**两中枢各一份 `/root/.nats-route.pass`**（32B / 0600），**必须两机同值** ——
+真源：**两中枢各一份 `<home>/.nats-route.pass`**（32B / 0600），**必须两机同值** ——
 生成器只读它，把它写进 `cluster.authorization.password`，并在**对端拨号那条**里内联进
 `routes = [ "nats-route://route:<口令>@<对端>:9931" ]`。
 
 ```bash
 # 1) 备份（两机）：口令文件 + conf 各留 .bak-k<刀号>-<ts>
-ssh <hub> 'cp -a /root/.nats-route.pass{,.bak-k29-<ts>} && cp -a /etc/nats/nats.conf{,.bak-k29-<ts>}'
+ssh <hub> 'cp -a <home>/.nats-route.pass{,.bak-k29-<ts>} && cp -a /etc/nats/nats.conf{,.bak-k29-<ts>}'
 # 2) 生新值并**经管道**写两机（不打印、不落本机文件；保持 32 字节、无换行）
-printf '%s' "<新口令>" | ssh <hub> 'umask 077; cat > /root/.nats-route.pass; chmod 600 /root/.nats-route.pass'
+printf '%s' "<新口令>" | ssh <hub> 'umask 077; cat > <home>/.nats-route.pass; chmod 600 <home>/.nats-route.pass'
 # 3) 生成器目录必须**带上依赖模块**：node_profile.py + node_paths.py + member_roster.py（刀30 起，少一个都 ImportError）
 scp agent-team/{gen_nats_conf.py,node_profile.py,node_paths.py,member_roster.py} <hub>:/tmp/k29/
 # 4) 先 dry-run 对差：遮掉口令（含内联 URL 形态）后与现网 conf 逐行比，**只许差时间戳行**
@@ -170,7 +170,7 @@ python tools/roster_creds_mirror.py --rollback
 - 镜像**只是口令的搬运**：加人减人一律改 `member_roster.py`，**不许**靠手塞一份 `.pass` 进 `creds/` 让人"上线"。
 这串报错同时是「旧口令确实被拒」的**实证**。若重启 1 分钟后仍持续刷认证失败 → 口令未同步，**回滚**。
 
-**回滚**：`cp -a /root/.nats-route.pass.bak-k29-<ts> /root/.nats-route.pass` + `cp -a /etc/nats/nats.conf.bak-k29-<ts> /etc/nats/nats.conf` + 两机重启。
+**回滚**：`cp -a <home>/.nats-route.pass.bak-k29-<ts> <home>/.nats-route.pass` + `cp -a /etc/nats/nats.conf.bak-k29-<ts> /etc/nats/nats.conf` + 两机重启。
 
 **泄漏清理（口令一旦进过日志/会话记录）**：本机有**两处**要扫 ——
 `~/.claude/**/*.jsonl`（Claude 会话记录）与 `~/AppData/Local/hermes/state.db`
