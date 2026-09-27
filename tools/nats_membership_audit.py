@@ -11,10 +11,18 @@
 本件就是那把尺子 —— **只读**地把六件事量出来，冻结成基线，之后每次跑都与基线比。
 它**不改任何配置、不重启任何单元、不写远端任何文件**；远端只发 `cat` 与 `curl -s` 两种命令。
 
-名册真源（契约，别翻案）
-------------------------
-  · **名册 = 两台 v2 中枢 `nats.conf` 里 `authorization.users` 的「规范形」**。
-    本刀不引入新的名册文件 —— 名册提升为独立档案件是阶段5 后续刀的事。
+名册真源（契约，**刀29 修订**）
+------------------------------
+  · **名册 = L0 档案 `agent-team/member_roster.py` 的 `ROSTER`**（顺序即规范序）。
+    刀25 曾把名册真源定义为「两台中枢 `nats.conf` 里 `authorization.users` 的规范形」——
+    那让**期望侧就是被检对象自己**：谁登上两台中枢把 conf 一起手改（加人 / 删人），
+    本件**完全看不见**。刀29 把期望侧切到档案，这个盲区才闭合（刀27 已真机证明
+    「档案 + 凭据探针 ⇒ 中枢用户区」逐字节成立，所以这是**已知等价的替换**）。
+  · 档案经 `artifacts["roster_rows"]` 注入（`[(member, role, cred_node, cred_kind), …]`，
+    **顺序即规范序，不许再排一遍**）。**注不进来就是采集失败** —— 记一条 `collect_error`、
+    退出码 2，**绝不回退到「conf 并集」**（回退就是把自证请回来）。
+  · **本刀只切「成员身份」这一半**：M3 的期望口令仍取**基准中枢 conf** 的 `user → password`
+    （口令改动的漏点由既有 M3 覆盖，故不阻塞）；`cred_node` / `cred_kind` 本刀**未消费**。
   · **角色模板的唯一出处 = `gen_nats_conf.perm_list(user)`**（L1）。期望权限串一律**调它算**，
     本件源码里**没有**第二份模板字符串。它由 `main()` 注入进 `analyze()`，所以
     `analyze()` 本身是**纯函数**（无 IO / 无 time / 无随机），装置可以塞自己那份独立实现进来互证。
@@ -23,7 +31,7 @@
 
 六项检查（键名与顺序冻结）
 --------------------------
-  M1 `hub_user_matrix`   两中枢的 `(user → password)` 集合完全相同
+  M1 `hub_user_matrix`   两中枢的 `(user → password)` 集合完全相同，**且成员集 == L0 名册档案**
   M2 `perm_template`     每个 user 的 `permissions` 逐字符 == `perm_list(user)`
   M3 `cred_landing`      各机 `*.pass` 内容 == 名册中同名成员的口令
   M4 `roster_coverage`   名册每个成员至少有一处落地（pass 文件 ∪ 活连接）
@@ -354,14 +362,23 @@ def analyze(artifacts, perm_fn):
 
     parsed = {n: parse_conf(conf_text.get(n)) for n in nodes if conf_text.get(n) is not None}
 
-    # ---- 名册：以第一台有 conf 的中枢为基准；成员名取所有中枢的并集
+    # ---- 期望侧的成员身份 = **L0 名册档案**（刀29）。注不进来就是采集失败 —— 不回退到 conf 并集，
+    #      回退等于把「拿被检对象当期望」的自证请回来，本刀要闭的正是这个盲区。
+    roster_rows = artifacts.get("roster_rows")
+    if roster_rows is None:
+        errors.append({"kind": "collect_error", "node": "-", "what": "名册档案",
+                       "why": "期望侧名册未注入（既不是 L0 member_roster 档案、"
+                              "也不是夹具里的 roster.json）"})
+        roster_rows = []
+    roster = [row[0] for row in roster_rows]               # **档案顺序即规范序**，不许再 sort
+
+    # ---- 口令真值侧**本刀未切**：仍以第一台有 conf 的中枢为基准（见模块文档串「名册真源」）
     hub_users = {}
     for h in hubs:
         if h in parsed:
             hub_users[h] = {u: p for u, p, _perm in parsed[h]["users"]}
     ref_hub = next((h for h in hubs if h in hub_users), "")
     roster_pw = dict(hub_users.get(ref_hub) or {})
-    roster = sorted(set().union(*[set(v) for v in hub_users.values()]) if hub_users else set())
 
     findings = {k: [] for k in CHECK_KEYS}
 
@@ -382,6 +399,23 @@ def analyze(artifacts, perm_fn):
                     "kind": "hub_matrix_extra", "member": u, "hub": h, "ref_hub": ref_hub,
                     "why": "口令与基准中枢不同" if u in hub_users[ref_hub]
                            else "该成员不在基准中枢名册里"})
+
+    # ---- M1（刀29 增量）每个中枢的**成员集** vs L0 名册档案。
+    #      上面那两类只能发现「两台中枢互相不一致」；**两台一起被手改**时它们是全绿的 ——
+    #      下面这两类才是抓「手改入网 / 手改退网」的那把钳子。
+    arch_members = set(roster)
+    for h in hubs:
+        if h not in hub_users:
+            continue
+        conf_members = set(hub_users[h])
+        for u in sorted(conf_members - arch_members):
+            findings["M1"].append({
+                "kind": "conf_only_member", "member": u, "hub": h,
+                "why": "该中枢配置里有此成员，但名册档案里没有（谁手改加了人？）"})
+        for u in sorted(arch_members - conf_members):
+            findings["M1"].append({
+                "kind": "conf_missing_member", "member": u, "hub": h,
+                "why": "名册档案里有此成员，但该中枢配置里没有"})
 
     # ---- M2 每个 user 的 permissions 逐字符 == perm_fn(user)
     for h in hubs:
@@ -637,9 +671,13 @@ def node_dirs(name, target):
 
 def collect_live(hubs, targets, timeout=40.0):
     """只读采真机 → `artifacts`。远端只发 `cat` / `ls` / `curl -s`，一个写操作都没有。"""
+    import member_roster                                 # noqa: E402 —— L0 名册档案（期望侧唯一真源）
     nodes = sorted(targets)
     art = {"hubs": sorted(hubs), "nodes": nodes,
-           "conf": {}, "connz": {}, "routez": {}, "creds": {}, "errors": []}
+           "conf": {}, "connz": {}, "routez": {}, "creds": {}, "errors": [],
+           #: 第 4 类采集对象：**档案**（刀29）。它不是「实现」而是输入数据，所以跟
+           #: conf / creds 一样放进 artifacts —— `analyze()` 因此仍是纯函数、签名不变。
+           "roster_rows": [tuple(r) for r in member_roster.ROSTER]}
 
     def err(node, what, why):
         art["errors"].append({"kind": "collect_error", "node": node,
@@ -716,13 +754,15 @@ def collect_fixtures(root, hubs_override=None):
     目录结构::
 
         <DIR>/case.json                 可选 {"hubs": [...], "nodes": [...]}
+        <DIR>/roster.json               名册档案（JSON 数组的数组，4 元组全字符串；
+                                        **缺 = 期望侧没注入 ⇒ 采集失败**，不回退 conf 并集）
         <DIR>/<node>/nats.conf          该节点的配置（缺 = 该机没有 nats 配置）
         <DIR>/<node>/connz.json         中枢才有
         <DIR>/<node>/routez.json        中枢才有
         <DIR>/<node>/creds/<文件名>      落地的凭据文件（`<m>.pass` / `nats-<m>.pass`）
     """
     art = {"hubs": [], "nodes": [], "conf": {}, "connz": {}, "routez": {},
-           "creds": {}, "errors": []}
+           "creds": {}, "errors": [], "roster_rows": None}
 
     def err(node, what, why):
         art["errors"].append({"kind": "collect_error", "node": node,
@@ -731,6 +771,16 @@ def collect_fixtures(root, hubs_override=None):
     if not os.path.isdir(root):
         err("", "夹具目录", "夹具目录不存在：%s" % os.path.basename(root.rstrip("/\\")))
         return art
+
+    # --- 名册档案（刀29）：夹具里的 `roster.json` 顶替真机上的 L0 `member_roster`。
+    #     **缺文件不回退** —— 留 `None` 交给 `analyze()` 记采集失败（退出码 2）。
+    roster_path = os.path.join(root, "roster.json")
+    if os.path.isfile(roster_path):
+        try:
+            with io.open(roster_path, encoding="utf-8") as fh:
+                art["roster_rows"] = [tuple(row) for row in (json.load(fh) or [])]
+        except (ValueError, TypeError) as exc:
+            err("-", "roster.json", "名册档案不是合法 JSON 数组的数组：%s" % exc)
 
     nodes, hubs = [], []
     case_path = os.path.join(root, "case.json")
@@ -801,6 +851,7 @@ def render(report):
            "中枢 %s ｜ 节点 %s ｜ 名册 %d 人"
            % ("、".join(report["hub_list"]) or "—",
               "、".join(report["node_list"]) or "—", len(report["roster"])),
+           "名册来源  L0 档案 agent-team/member_roster.py（顺序即规范序）",
            "=" * 78]
     for key, name in CHECKS:
         items = report["findings"][key]

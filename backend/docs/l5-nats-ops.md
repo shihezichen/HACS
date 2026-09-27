@@ -56,6 +56,46 @@ ssh <node> 'systemctl disable --now <unit>'
 条目并发建立多条连接（实测 4 条、全 idle、无 duplicate 告警），重启可复现 → 属上游竞态，
 配置侧无解，**如实记账**。下一步候选：网关(gateway)替代 routes / 升 nats 版本。
 
+## 5.5 凭据轮换（`route` 集群口令 · 刀29 实测流程）
+
+真源：**两中枢各一份 `/root/.nats-route.pass`**（32B / 0600），**必须两机同值** ——
+生成器只读它，把它写进 `cluster.authorization.password`，并在**对端拨号那条**里内联进
+`routes = [ "nats-route://route:<口令>@<对端>:9931" ]`。
+
+```bash
+# 1) 备份（两机）：口令文件 + conf 各留 .bak-k<刀号>-<ts>
+ssh <hub> 'cp -a /root/.nats-route.pass{,.bak-k29-<ts>} && cp -a /etc/nats/nats.conf{,.bak-k29-<ts>}'
+# 2) 生新值并**经管道**写两机（不打印、不落本机文件；保持 32 字节、无换行）
+printf '%s' "<新口令>" | ssh <hub> 'umask 077; cat > /root/.nats-route.pass; chmod 600 /root/.nats-route.pass'
+# 3) 生成器目录必须**带上依赖模块**：node_profile.py + node_paths.py（只放 gen_nats_conf.py 会 ImportError）
+scp agent-team/{gen_nats_conf.py,node_profile.py,node_paths.py} <hub>:/tmp/k29/
+# 4) 先 dry-run 对差：遮掉口令（含内联 URL 形态）后与现网 conf 逐行比，**只许差时间戳行**
+ssh <hub> 'cd /tmp/k29 && python3 gen_nats_conf.py <server_name> <self_ip> <peer_ip> --dry-run'
+# 5) 真跑 → 依次重启（不并发）→ 复查
+ssh <hub> 'cd /tmp/k29 && python3 gen_nats_conf.py <server_name> <self_ip> <peer_ip>'
+ssh <hub> 'systemctl restart agent-team-nats'
+ssh <hub> 'curl -s http://127.0.0.1:9932/routez'
+```
+
+**验收判据**：① 两机 `route.pass` sha256 相同且 ≠ 旧值；② dry-run 遮罩后与现网**逐行 0 差异**
+（含用户块、权限块原样）；③ 新 conf「含新口令、不含旧口令」，与改前备份遮罩逐行 0 差异；
+④ 重启后两机 `num_routes ≥ 1`、对端名正确、**1 分钟后无新的认证失败**。
+
+**预期现象（不是故障）**：先重启的一台会立刻对**尚未重启**的对端报
+`authentication error - User "route"`（对端还是旧口令内存态），持续约 20 秒，对端重启即停。
+这串报错同时是「旧口令确实被拒」的**实证**。若重启 1 分钟后仍持续刷认证失败 → 口令未同步，**回滚**。
+
+**回滚**：`cp -a /root/.nats-route.pass.bak-k29-<ts> /root/.nats-route.pass` + `cp -a /etc/nats/nats.conf.bak-k29-<ts> /etc/nats/nats.conf` + 两机重启。
+
+**泄漏清理（口令一旦进过日志/会话记录）**：本机有**两处**要扫 ——
+`~/.claude/**/*.jsonl`（Claude 会话记录）与 `~/AppData/Local/hermes/state.db`
+（Hermes 会话库的 `messages.content/reasoning/reasoning_content` + `messages_fts`，改完必须
+`INSERT INTO messages_fts(messages_fts) VALUES('rebuild')` 再 `PRAGMA integrity_check`，
+改前先整库备份）。轮换后旧值即**废值**，替换为 `[REDACTED-ROTATED]` 占位符即可。
+
+**红线**：打印 conf 做取证时，遮蔽规则**必须同时覆盖** `password: "…"` **与内联 URL**
+`nats-route://user:<口令>@…` 两种形态 —— 只遮前者会把口令原样打出来（刀29 踩过）。
+
 ## 5. 红线
 
 - 退场**只许动被点名的成员**；同一台机的其他成员与凭据文件不碰。
