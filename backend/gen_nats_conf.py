@@ -9,9 +9,20 @@
 用法（在目标机上以 root 跑）：
   python3 gen_nats_conf.py <本机server_name> <本机tailnet_ip> <对端tailnet_ip>
 路由口令从 <PASS_FILE> 读（不存在则生成）。
+
+成员与口令的来源（**刀30 起改这一条，其余一字未动**）
+------------------------------------------------------
+  · 成员集合与顺序 = L0 名册档案 `member_roster.ROSTER`（顺序即规范序）
+  · 每人的口令     = `<NATS_DIR>/creds/<member>.pass`（由 `tools/roster_creds_mirror.py` 单向镜像过来）
+
+刀30 之前这两样都是从**旧 conf 里继承**的（`user: "x", password: "y"` 正则捞一把）——
+配置自证配置：中枢上手改一行，仓里没有任何痕迹，对账器也看不见。切到「档案 + 镜像」之后，
+「谁是成员」由档案单向决定，口令真值仍然只来自各成员自己那台机。
+
+**缺件必拒**：任一名册成员的镜像文件缺失/读不到 → **rc=2 并点名**，
+**绝不回落旧 conf 继承** —— 静默回落等于把本刀的意义抹掉（缺件时照样生成一份"看起来对"的配置）。
 """
 import os
-import re
 import secrets
 import shutil
 import sys
@@ -19,10 +30,14 @@ import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（配置目录 / 路由凭据文件）
+import member_roster as _roster  # noqa: E402  L0 名册档案：成员集合与规范序的唯一真源
 
 # PHASE2_TODO: 待节点注入 env 后删除
 AGENT_TEAM_NATS_DIR = os.environ.get("AGENT_TEAM_NATS_DIR") or _npf.nats_conf_dir_posix()
 CONF = AGENT_TEAM_NATS_DIR + "/nats.conf"
+# 凭据镜像目录：`tools/roster_creds_mirror.py --apply` 灌过来的 `<member>.pass`（0700/0600/root）。
+# 位置跟着 NATS_DIR 走 —— 同一个 env 覆盖口，装置不必再开第二个洞。
+CREDS_DIR = AGENT_TEAM_NATS_DIR + "/creds"
 # 路由凭据文件：位置由 L0 档案给（posix 惯例值）；可用 env 顶掉 —— 与上面的 NATS_DIR 同款
 # 覆盖口，给等价装置/演练用（不开这个口，装置就得往 /root 那种真系统路径上写文件）。
 ROUTE_PASS_FILE = (os.environ.get("AGENT_TEAM_NATS_ROUTE_PASS")
@@ -55,6 +70,35 @@ def perm_list(user):
         'publish: ["a2a.>", %s, "team.probe.%s", "bb.>", "$JS.API.>", "_INBOX.>"], '
         'subscribe: ["a2a.>", "team.>", "bb.>", "_INBOX.>"]' % (hb, user)
     )
+
+
+def cred_file(member):
+    """该成员在**本机镜像目录**里的凭据文件绝对路径（位置面跟着 NATS_DIR 走）。"""
+    return CREDS_DIR + "/%s.pass" % member
+
+
+def read_roster_users():
+    """L0 名册 + 本机凭据镜像 → `([(成员, 口令)], 缺件成员名)`，**顺序 = 档案规范序**。
+
+    口令**只从镜像文件读**，一个字节都不从旧 conf 继承 —— 缺件由调用方拒绝改写（rc=2）。
+    读到的内容按 `strip()` 归一：现网 `.pass` 不带尾随换行，但手工补写的文件可能带，
+    两者代表同一个口令，不该因为一个 `\\n` 生成出不同的 conf。
+    """
+    users, missing = [], []
+    for row in _roster.ROSTER:
+        member = row[0]
+        path = cred_file(member)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                password = fh.read().strip()
+        except (OSError, UnicodeDecodeError):
+            missing.append(member)
+            continue
+        if not password:
+            missing.append(member)
+            continue
+        users.append((member, password))
+    return users, missing
 
 
 USAGE = ("用法: gen_nats_conf.py <server_name> <self_ip> <peer_ip> "
@@ -110,25 +154,21 @@ def main():
         return 2
     server_name, self_ip, peer_ip = pos[0], pos[1], pos[2]
 
+    # 旧 conf 仍然必须在位：它是**改写对象**（要备份成 .bak-<ts> 再就地重写），
+    # 但从刀30 起**不再从它身上继承任何口令** —— 只当落点，不当真源。
     if not os.path.exists(CONF):
         sys.stderr.write("找不到 %s\n" % CONF)
         return 2
-    with open(CONF, "r", encoding="utf-8") as fh:
-        old = fh.read()
 
-    # 保留原有用户口令（原样复用，不新造、不丢失）
-    users = re.findall(r'user:\s*"([^"]+)",\s*password:\s*"([^"]+)"', old)
-    # 幂等：重跑时旧配置里已含集群授权行（user: "route"），别把它当成客户端用户再收进来
-    seen = set()
-    uniq = []
-    for u, p in users:
-        if u == ROUTE_USER or u in seen:
-            continue
-        seen.add(u)
-        uniq.append((u, p))
-    users = uniq
+    # ---- 成员与口令：L0 名册档案（集合与顺序） + 凭据镜像（口令真值）----
+    users, missing = read_roster_users()
+    if missing:
+        sys.stderr.write("凭据镜像缺件，拒绝改写：%s\n" % ",".join(missing))
+        sys.stderr.write("（应在 %s/<成员>.pass；先跑 tools/roster_creds_mirror.py --apply）\n"
+                         % CREDS_DIR)
+        return 2
     if not users:
-        sys.stderr.write("解析不到任何用户，拒绝改写\n")
+        sys.stderr.write("名册为空，拒绝改写\n")
         return 2
 
     # ---- 成员退场（--drop-user）：只剔除点名的用户；其余用户的口令/权限串**原样保留** ----

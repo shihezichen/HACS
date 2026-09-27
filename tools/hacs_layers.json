@@ -406,7 +406,17 @@
     "tools/equivalence/gen_nats_conf_equiv.py": {
       "layer": "T",
       "port": null,
-      "note": "刀26 等价装置（56 格 × N 轮）：同一份输入分别喂**旧侧/新侧子进程**，只比「渲染出的 conf 文本 + 退出码 + 是否写盘」；B 段退场用例的期望由装置**独立第二算法**（按行删条目 + 逗号归位）算出，不照抄被测件；含 `--runs` 确定性自证与 `--neg` 注毒负控（红 4 处）"
+      "note": "刀26 + 刀30 等价装置（**66 格 × N 轮**）：同一份输入分别喂**旧侧/新侧子进程**，只比「渲染出的 conf 文本 + 退出码 + 是否写盘」；旧侧自刀30 起是 _old/gen_nats_conf_old_k30.py。夹具从刀30 起同时摆「一份 conf（改写对象）+ 一套 creds/<成员>.pass 镜像（口令真源）」。A 段区分两类夹具：用户集合 == 名册时要求**两侧逐字节相同**（等值格），conf 里有名册外用户（bbgw）时判「NEW == 装置独立算出的『OLD 去掉 bbgw』」（行为差异格）；B 段退场用例的期望由装置**独立第二算法**（按行删条目 + 逗号归位）算出，不照抄被测件，退场对象改为名册内成员 piagent；**K30 F 段 9 格**＝镜像齐备等值 / 缺 1 人 NEW rc=2 点名且不写盘（同现场 OLD 照旧静默继承）/ 镜像口令 ≠ conf 口令时 NEW 取镜像值 OLD 取 conf 值 / --drop-user 与镜像共存 / --dry-run 不写盘不备份 / 顺序 == 档案规范序 / 镜像目录整个不在 → 点名全部 8 人 / 空镜像文件也算缺件；含 `--runs` 确定性自证与 `--neg` 注毒负控（红 4 处）"
+    },
+    "tools/roster_creds_mirror.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面 · 刀30 阶段5 第六刀：**中枢侧凭据镜像通道**。把「L0 名册档案 + 各机凭据真值」单向镜像到两台中枢的 <conf_dir>/creds/<成员>.pass（目录 0700 / 文件 0600 / owner=root），补上「生成器在中枢机上拿不到全员口令」这个已量出的缺口。采集面**复用** roster_derive_conf 的 collect_live()/read_file()/run_remote()/cred_path()，不另写一套 ssh 取凭据逻辑；写入面口令**只走 ssh stdin**（不进 argv、不落本机临时文件、不进日志），出口只允许 `成员名 + sha256[:12] + mode`——analyze() 是纯函数且入参里根本没有明文（结构上拿不到）。--check 只读盘点（远端只发 stat/sha256sum/cut）· --apply 写入后自跑 --check 定退出码 · --rollback 删两中枢 creds/（唯一回滚动作）。退出码 0 全在位一致 / 1 缺失·漂移·mode·owner 不符 / 2 采集失败（绝不退化）。红线：不碰 nats.conf、不重启任何单元、幂等、只写 root 路径。代价（明写）：两中枢从此持全员口令明文副本 —— 用户 2026-09-27 批准的取舍，见 agent-team/docs/l5-nats-ops.md 「凭据镜像通道」"
+    },
+    "tools/equivalence/roster_creds_mirror_equiv.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：刀30 凭据镜像通道的等价装置（**31 格**，全程离线、零 ssh）。正件被切成「采集/写入（有 IO）」与「analyze()/parse_probe()/命令串构造（纯函数）」两半，装置只打后半截 —— 而全部七种结论（在位/缺件/漂移/mode/owner/目录/采集失败）都在那半截里。判据不放宽：逐成员**状态名**必须精确命中（missing/drift/mode/owner），采集失败必须判 2 且**优先于**一切漂移结论，parse_probe 读不懂时必须返回 None（不许退化成『缺件』），写入命令串里不得有任何口令字面量、探针命令串里不得有任何写操作，报告（人读 + 规范 JSON）里不得出现明文，sha256[:12] 与装置自己那份 hashlib 独立实现逐字符相同。--neg 三处注毒（期望侧改一字节 / 不删那一件 / 不改 mode）必须红 6 格，还原转绿"
     },
     "tools/equivalence/roster_derive_equiv.py": {
       "layer": "T",

@@ -56,6 +56,12 @@ ssh <node> 'systemctl disable --now <unit>'
 条目并发建立多条连接（实测 4 条、全 idle、无 duplicate 告警），重启可复现 → 属上游竞态，
 配置侧无解，**如实记账**。下一步候选：网关(gateway)替代 routes / 升 nats 版本。
 
+## 5. 红线
+
+- 退场**只许动被点名的成员**；同一台机的其他成员与凭据文件不碰。
+- 停单元**只许停已证"无人用"的**（活连接 0 + 全网零引用）。
+- 基线数字随真实收敛下调时，**必须单独 commit 留痕**，不许当"放水"顺手改。
+
 ## 5.5 凭据轮换（`route` 集群口令 · 刀29 实测流程）
 
 真源：**两中枢各一份 `/root/.nats-route.pass`**（32B / 0600），**必须两机同值** ——
@@ -67,8 +73,8 @@ ssh <node> 'systemctl disable --now <unit>'
 ssh <hub> 'cp -a /root/.nats-route.pass{,.bak-k29-<ts>} && cp -a /etc/nats/nats.conf{,.bak-k29-<ts>}'
 # 2) 生新值并**经管道**写两机（不打印、不落本机文件；保持 32 字节、无换行）
 printf '%s' "<新口令>" | ssh <hub> 'umask 077; cat > /root/.nats-route.pass; chmod 600 /root/.nats-route.pass'
-# 3) 生成器目录必须**带上依赖模块**：node_profile.py + node_paths.py（只放 gen_nats_conf.py 会 ImportError）
-scp agent-team/{gen_nats_conf.py,node_profile.py,node_paths.py} <hub>:/tmp/k29/
+# 3) 生成器目录必须**带上依赖模块**：node_profile.py + node_paths.py + member_roster.py（刀30 起，少一个都 ImportError）
+scp agent-team/{gen_nats_conf.py,node_profile.py,node_paths.py,member_roster.py} <hub>:/tmp/k29/
 # 4) 先 dry-run 对差：遮掉口令（含内联 URL 形态）后与现网 conf 逐行比，**只许差时间戳行**
 ssh <hub> 'cd /tmp/k29 && python3 gen_nats_conf.py <server_name> <self_ip> <peer_ip> --dry-run'
 # 5) 真跑 → 依次重启（不并发）→ 复查
@@ -83,6 +89,85 @@ ssh <hub> 'curl -s http://127.0.0.1:9932/routez'
 
 **预期现象（不是故障）**：先重启的一台会立刻对**尚未重启**的对端报
 `authentication error - User "route"`（对端还是旧口令内存态），持续约 20 秒，对端重启即停。
+
+## 6. 凭据镜像通道（成员口令 · 刀30 新增）
+
+### 6.1 它解决什么
+
+刀27 已机械证明「**L0 名册档案 + 各机凭据真值 ⇒ 中枢用户区**」成立，但生成器是**在中枢机上跑的**，
+而 8 位成员的凭据散在 4 台机（thinkbook 5 / lobster / top001 / quantum 各 1）——
+中枢拿不到全员口令，所以刀30 之前生成器只能从**旧 conf 里正则继承**口令（配置自证配置：
+中枢上手改一行，仓里没有痕迹，对账器也看不见）。
+
+镜像通道就是那条缺口上的桥：
+
+```
+tools/roster_creds_mirror.py --apply
+  → 两中枢各落一份  <conf_dir>/creds/<成员>.pass   （目录 0700 / 文件 0600 / owner=root）
+agent-team/gen_nats_conf.py
+  → 成员集合与顺序取自 member_roster.ROSTER，口令取自上面那套镜像（**不再继承旧 conf**）
+```
+
+**方向是单向的**：节点 → 中枢。镜像是**派生物**不是真源 —— 删了随时可从各机真值重建。
+
+### 6.2 代价（明写，不藏）
+
+两台中枢从此**持有全员口令的明文副本**。这是 2026-09-27 用户明确批准的取舍：
+换来「成员集合可被档案单向决定」。缓解手段就四条，缺一不可：
+
+- 目录 0700 / 文件 0600 / owner=root（只有 root 读得到）；
+- **不入 git、不进日志**：工具的出口只有 `成员名 + sha256[:12] + mode`，
+  写入时口令走 **ssh stdin**（不进 argv → 远端 `ps` 看不到；不落本机临时文件）；
+- 随时可 `--rollback` 删除（见 6.4）；
+- 中枢一旦失陷，处置等级按「**全员口令泄露**」办：走 5.5 的轮换流程逐个换，不是只换 route。
+
+### 6.3 日常操作
+
+```bash
+# 只读盘点（默认动作；逐中枢逐成员报 存在?/sha256[:12]/mode）
+python tools/roster_creds_mirror.py --check
+# 建/刷新镜像（幂等；写完自跑一次 --check，用它的结论定退出码）
+python tools/roster_creds_mirror.py --apply
+```
+
+退出码：`0` 全在位且与源侧一致 · `1` 有缺失/漂移/mode 或 owner 不符 · `2` 采集失败
+（ssh 不通 / 算不出路径 / 名册为空 / 探针输出读不懂）。**采集失败绝不退化成 0 或 1。**
+
+**顺序铁律**：动生成器之前**先** `--check` 到 rc=0。镜像缺任一份，生成器会
+**rc=2 点名该成员并拒绝改写** —— 它**不会**回落旧 conf 继承（静默回落等于把本刀的意义抹掉）。
+
+改名册（加人/减人）时的完整链条：
+
+```
+改 agent-team/member_roster.py :: ROSTER
+  → roster_creds_mirror.py --apply          （把新人的凭据镜像上去）
+  → roster_creds_mirror.py --check  rc=0
+  → gen_nats_conf.py --dry-run  遮罩归一后与现网 conf 对差（只许差预期那几行）
+  → 真跑 → 依次重启两中枢（不并发）
+  → nats_membership_audit.py --live / --check 复核
+```
+
+### 6.4 回滚
+
+```bash
+# 唯一的回滚动作：删两中枢的 creds/（镜像可重建，删它不丢真值）
+python tools/roster_creds_mirror.py --rollback
+```
+
+完整回滚（连生成器一起退回刀30 之前）：
+
+1. `python tools/roster_creds_mirror.py --rollback`；
+2. `git revert` 生成器那笔改动；
+3. 用 `nats.conf.bak-<ts>` 覆盖回去，**依次**重启两中枢。
+
+回滚件一律**按 sha 与 `git rev-parse HEAD:<件>` 比对**认定，**不许按时间戳取最新**。
+
+### 6.5 红线
+
+- 镜像工具**不碰 `nats.conf`**（那是生成器的活）、**不重启任何单元**。
+- stdout / stderr / `--json` 里**只许**出现 `成员名 + sha256[:12] + mode`；见到明文即事故。
+- 远端**只发只读命令**（`stat` / `sha256sum` / `cut`）盘点；写入只有 `umask 077; mkdir -p; cat >` 一条形态。
+- 镜像**只是口令的搬运**：加人减人一律改 `member_roster.py`，**不许**靠手塞一份 `.pass` 进 `creds/` 让人"上线"。
 这串报错同时是「旧口令确实被拒」的**实证**。若重启 1 分钟后仍持续刷认证失败 → 口令未同步，**回滚**。
 
 **回滚**：`cp -a /root/.nats-route.pass.bak-k29-<ts> /root/.nats-route.pass` + `cp -a /etc/nats/nats.conf.bak-k29-<ts> /etc/nats/nats.conf` + 两机重启。
@@ -95,9 +180,3 @@ ssh <hub> 'curl -s http://127.0.0.1:9932/routez'
 
 **红线**：打印 conf 做取证时，遮蔽规则**必须同时覆盖** `password: "…"` **与内联 URL**
 `nats-route://user:<口令>@…` 两种形态 —— 只遮前者会把口令原样打出来（刀29 踩过）。
-
-## 5. 红线
-
-- 退场**只许动被点名的成员**；同一台机的其他成员与凭据文件不碰。
-- 停单元**只许停已证"无人用"的**（活连接 0 + 全网零引用）。
-- 基线数字随真实收敛下调时，**必须单独 commit 留痕**，不许当"放水"顺手改。
