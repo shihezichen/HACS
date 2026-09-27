@@ -1,4 +1,8 @@
-# HACS 终态架构文档（内部完整版）
+# HACS 终态架构文档
+
+> **两份同源**：本文件 = 内部完整版（`agent-team/docs/architecture-final.md`，由 `tools/gen_arch_doc.py` 生成）；
+> 对外仓副本 = 同一份字节经 `tools/sanitizers/generic_deploy.py` 脱敏后的产物（真实主机地址 / 部署目录 / 真人 id → 占位符），
+> **除这些占位符外两份逐字相同、数字同源**；文中 SHA、md5、计数一律以本文实测为准。
 
 ## 1 一句话结论 + 架构口诀
 
@@ -59,7 +63,7 @@
 | 登记件数 | **83** | `python tools/check_layers.py`（读表头行） |
 | 层间 import 边 | **108** | `python tools/check_layers.py`（读表头行） |
 | 登记端口 | **17** 个 | `python -c "import io,json;print(len([k for k in json.load(io.open('tools/hacs_layers.json',encoding='utf-8'))['ports'] if k!='_readme']))"` |
-| 生成自 HEAD | `18e72c0`（2026-09-27） | `git rev-parse --short HEAD` / `git log -1 --date=short --format=%ad` |
+| 生成自 HEAD | `44d3755`（2026-09-27） | `git rev-parse --short HEAD` / `git log -1 --date=short --format=%ad` |
 
 口径说明：
 
