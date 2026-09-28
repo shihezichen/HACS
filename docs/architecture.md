@@ -63,7 +63,7 @@
 | 登记件数 | **78** | `python tools/check_layers.py`（读表头行） |
 | 层间 import 边 | **108** | `python tools/check_layers.py`（读表头行） |
 | 登记端口 | **17** 个 | `python -c "import io,json;print(len([k for k in json.load(io.open('tools/hacs_layers.json',encoding='utf-8'))['ports'] if k!='_readme']))"` |
-| 生成自 HEAD | `b87fa0a`（2026-09-28） | `git rev-parse --short HEAD` / `git log -1 --date=short --format=%ad` |
+| 生成自 HEAD | `7fb3645`（2026-09-28） | `git rev-parse --short HEAD` / `git log -1 --date=short --format=%ad` |
 
 口径说明：
 
@@ -229,6 +229,8 @@
 | 阶段6 收尾件 | 刀32 | `c5e6971` | 终态架构文档：模板 + 生成器 + 清单映射 ⇒ 内部完整版与对外脱敏版**同源同数字**（收尾 `44d3755`/`e24b17f`/`555aceb`） |
 | 阶段6 后收尾 | 刀33 | `3cc8b20` | 判据收口：`host_path_owner` 单值 → **列表（只 2 件）**、`PATH_RX` 3 处误判**实名登记 known-FP（检查保留）**、`L0` 持句柄**认现状不登记例外**、阶段归并（内容口径）与 29 撞号（A/B 并列）口径落定；随后清理两处旧版生成器裸副本 |
 | 阶段6 后收尾 | 刀34 | `d9cdaea` | **运行面纳管（解耦最后一公里）**：`session_ctx_archiver.py`（thinkbook 计划任务）+ `task_svc.py`（lobster systemd 9981）写进部署表（69 → **71** 件）；9984 静态面加「备份 / 临时件一律拦」判据（**只收紧**，106 格等价-增严矩阵自证）；`task_sys/task_svc.py` 裁定为无消费者的历史第一版、**物理件不动**；余 `ledger_patrol.py` / `cli_backend.py` 两件如实挂账、不擅自补条目 |
+| 阶段6 后收尾 | 刀35 | `4a97a7a` | **运行面收敛**：删 7 件无用孤儿（5 件阶段1 一次性部署脚本 + 2 件调试残留）；删前后层门禁**边数 108 一件未变** —— 真孤儿的铁证（不属于任何依赖关系）；登记表 83 → **78** 件；对外仓同步 `git rm` 5 件残留（台账回写 `d783b58`） |
+| 阶段6 后收尾 | 刀36 | `7fb3645` | **运行面纳管收尾**：thinkbook 纳管 5 件（薄壳 `team.py` + 依赖闭包 `team_cli_core.py` / `team_group.py` + 真在跑的 `ledger_patrol.py` + 其 import 依赖 `post_group.py`）⇒ 部署状态回到 **76 一致 / 漂移 0 / 缺失 0 / 多余 0**；`ledger_patrol.py` 运行期文案占位符**回正 2 处**，新增「仅文本改动」自证装置（AST 归一全等 + 串数不变 + 表外差异 0） |
 
 > **阶段归并的既有分歧（如实记账）**：长跑规划里把**刀13 前端收官记作阶段2 全闭、阶段3 自刀14 起**；
 > 而刀14–刀20 的提交说明自称「阶段3」。本表按「前端拆三件套 + L1 公共面」这一**内容口径**

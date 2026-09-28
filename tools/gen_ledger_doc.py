@@ -4,7 +4,7 @@
 为什么用脚本生成：台账是长期参考件，表格必须与机器可读的层归属表同源，
 人肉拷贝必然漂移。改层归属 → 改 json → 重跑本脚本 → 文档同步。
 """
-import io, json, os, re, sys
+import io, json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -76,8 +76,11 @@ def layer_table(layer):
 
 # ---------- 第四章：实测数字（check_layers 基线）----------
 BASELINE = {
-    # 前两项由 check_layers.py 实时打印（'分层门禁 · 台账（件数 N，层间 import 边 M）'）——
-    # 动结构后必须同步这两个数；下面其余各项是**刀 3 时点**的实测，不是随生成重算。
+    # 件数 / 层间 import 边**不在本表里硬编码**：刀36 起由 live_gate_numbers() 实时跑
+    # check_layers.py 解析表头行后注入（下方 BASELINE['files'], BASELINE['edges'] = ...）。
+    # 改前这两个常量是手抄的，刀35 删件后停在 83 而门禁实测已是 78 —— 手抄口径必然漂移，
+    # 故改为现算；下面其余各项是**刀 3 时点**的实测，不是随生成重算。
+    # 以下历史注释保留留痕（当时是手抄值的变更账）：
     # 刀27（阶段5 第三刀）：73 → 77（新增 L0 member_roster.py + T 推导器/装置/旧侧 3 件）、
     # 边 84 → 91。**含一条继承订正**：刀26 登记 gen_nats_conf_equiv.py 时件数已 72 → 73 而本常量漏同步。
     # 刀28（阶段5 第四刀）：77 → 78（新增 _old/membership_audit_old_k28.py——刀28 前正件的逐字节快照，
@@ -95,13 +98,42 @@ BASELINE = {
     # L1 gen_nats_conf + 装置 import 该快照 + 正件新增采中枢镜像 <conf_dir>/creds/ 的采集面）。
     # 刀32（阶段6 收尾件）：82 → 83（新增 T 面 tools/gen_arch_doc.py —— 终态架构文档生成器）、
     # 边 108 不变（该件纯标准库，不 import 任何登记件；它跑 check_layers.py 是 subprocess 不是 import）。
-    'files': 83, 'edges': 108, 'direction': 0, 'bizwords': 48,
+    'direction': 0, 'bizwords': 48,
     'hardcode_files': 25, 'storage': 11, 'storage_over': 2,
     # 刀 3 后：宿主字面量拆成「真硬编码（路径）」与「提示级（IP/端口默认值）」两个口径。
     'host_path_files': 42, 'host_path_sites_before': 111, 'host_path_sites_after': 80,
     'host_path_prod_files_before': 16, 'host_path_prod_sites_before': 27, 'host_path_prod_sites_after': 0,
     'net_files': 19, 'net_sites': 42,
 }
+
+#: check_layers.py 的表头行形态：`分层门禁 · 台账（件数 78，层间 import 边 108）`
+GATE_HEADER_RX = re.compile(r'件数\s*(\d+)\s*[，,]\s*层间\s*import\s*边\s*(\d+)')
+
+
+def live_gate_numbers():
+    """登记件数 / 层间 import 边 —— 实时跑分层门禁再解析表头行，本文件不存这两个数。
+
+    与 tools/gen_arch_doc.py 走**同一条表头行、同一条正则**，台账 HTML 与架构文档因此
+    同源同数。解析不出就退出码 2：宁可不出文档，也不许静默印一个陈旧数字。
+    """
+    env = dict(os.environ)
+    env['PYTHONIOENCODING'] = 'utf-8'
+    proc = subprocess.Popen([sys.executable, os.path.join(HERE, 'check_layers.py')],
+                            cwd=ROOT, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate()
+    out = out.decode('utf-8', 'replace')
+    m = GATE_HEADER_RX.search(out)
+    if not m:
+        sys.stderr.write('✗ gen_ledger_doc：check_layers.py 的表头行解析不出'
+                         '「件数 N，层间 import 边 M」（退出码 %d）\n---- 原文 ----\n%s%s\n'
+                         % (proc.returncode, out, err.decode('utf-8', 'replace')))
+        raise SystemExit(2)
+    return int(m.group(1)), int(m.group(2))
+
+
+BASELINE['files'], BASELINE['edges'] = live_gate_numbers()
+
 HARDCODE_TOP = [
     ('blackboard_view.py', 'L3', 19, 6, '注释里的隧道/deployment 说明 + 运行目录常量'),
     ('cli_backend.py', 'L2', 8, 11, '各 CLI 的代理地址、node.exe 绝对路径'),
@@ -611,8 +643,14 @@ HTML_HEAD = """<!DOCTYPE html>
     <h1>HACS 分层台账</h1>
     <div class="sub">阶段 0 产出 · 件 → 层 → 端口 → 契约 → 门禁基线的唯一权威版本</div>
     <div class="verline">
-      版本 <b>v20</b> · 2026-09-25 首版 / 2026-09-27 阶段 2–4 全闭 · 阶段 5 刀25（只读对账）→ 刀26（退场/收敛）→ 刀27（名册档案化 + 逐字节自证）→ 刀28（对账器身份口径）→ 刀29（对账器期望侧切 L0 档案）→ 刀30（凭据镜像通道 + 生成器切档案驱动）→ 刀31（对账器口令真值换源到成员本机凭据 · 收口）· <b>阶段 6</b> 刀32（终态架构文档：模板 + 生成器 + 清单映射 ⇒ 内部完整版与对外脱敏版同源同数字）→ 刀33（判据收口：<code>host_path_owner</code> 列表化 + <code>PATH_RX</code> 误判实名登记）→ 刀34（运行面纳管：真在跑的活件写进部署表 + 9984 静态面拦备份/临时件）→ 刀35（<b>运行面收敛</b>：删 7 件无用孤儿件 · 登记件数 <b>83 → 78</b>）· 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
-      本次变更（v20）：阶段 6 <b>后收尾 · 收敛刀</b>（刀35）—— 用户裁定：阶段 2「env 注入」<b>作废</b>，按「<b>无用即删除</b>」收敛。本刀<b>只改仓内件 + 登记表</b>，部署与生产机操作由主控执行。<br>
+      版本 <b>v21</b> · 2026-09-25 首版 / 2026-09-27 阶段 2–4 全闭 · 阶段 5 刀25（只读对账）→ 刀26（退场/收敛）→ 刀27（名册档案化 + 逐字节自证）→ 刀28（对账器身份口径）→ 刀29（对账器期望侧切 L0 档案）→ 刀30（凭据镜像通道 + 生成器切档案驱动）→ 刀31（对账器口令真值换源到成员本机凭据 · 收口）· <b>阶段 6</b> 刀32（终态架构文档：模板 + 生成器 + 清单映射 ⇒ 内部完整版与对外脱敏版同源同数字）→ 刀33（判据收口：<code>host_path_owner</code> 列表化 + <code>PATH_RX</code> 误判实名登记）→ 刀34（运行面纳管：真在跑的活件写进部署表 + 9984 静态面拦备份/临时件）→ 刀35（<b>运行面收敛</b>：删 7 件无用孤儿件 · 登记件数 <b>83 → 78</b>）→ 刀36（<b>运行面纳管收尾</b>：thinkbook 补齐 5 件纳管 · 运行期文案占位符回正）· 配套 <code>docs/HACS-分层规划-handoff.html</code>（规划文档，回答「为什么这么分」）<br>
+      本次变更（v21）：阶段 6 <b>后收尾 · 运行面纳管收尾刀</b>（刀36，<code>7fb3645</code>）—— 刀34 纳管了 2 件活件、刀35 把无用件删干净，剩下的缺口是 thinkbook 上那批「<b>真在跑、部署表却看不见</b>」的件。<br>
+      ① <b>本刀范围</b>：把 <b>3 类</b>「真在跑却未纳管」的件收进<b>声明式部署表</b>，并<b>回正 1 处运行期文案占位符</b>。本刀<b>不新增登记件、不改层归属</b> —— 门禁件 <b>{{NK_FILES}}</b> / 边 <b>{{NK_EDGES}}</b> 与改前一致。<br>
+      ② <b>纳管（只加声明，不改件行为）</b>：<code>tools/deploy_targets.json</code> 的 thinkbook 目标 <b>15 → 20</b> 件。<b><code>team.py</code></b>（刀15 起的<b>薄壳</b>组合根 —— lobster / top001 / quantum 三台早已声明，唯独 thinkbook 漏了，线上仍是刀15 前的 <b>1032</b> 行单体 vs 仓内 <b>245</b> 行）+ <b><code>team_cli_core.py</code></b> + <b><code>team_group.py</code></b>（后两件是薄壳的<b>依赖闭包</b>，<b>缺它们薄壳起不来</b>：只推薄壳则 <code>import team_group</code> 立刻 ModuleNotFoundError；而 <code>group_watch.py</code> 模块级 <code>from team_cli_core import call_one, REQ_FMT</code> 缺件已让计划任务 <code>AgentTeamGroupWatch</code> 实测报 <code>LastTaskResult=1</code> —— 是真炸过，不是推演）。<b><code>ledger_patrol.py</code></b>（<b>真在跑</b>：计划任务 <code>AgentTeamLedgerPatrol</code> 定时拉起运行目录副本 <code><deploy-dir>/ledger_patrol.py --once --log-file …</code>，工作目录 <code><deploy-dir></code>）+ <b><code>post_group.py</code></b>（<code>ledger_patrol.py</code> 第 44 行模块级 <code>from post_group import http as pg_http, pick_session, DEFAULT_SESSION</code> 的 import 依赖）。后两件 <code>services</code> <b>故意留空</b>（<b>周期任务</b>不是长驻进程，下次触发自然加载新件，没有需要重启的监管单元，同 <code>session_ctx_archiver.py</code>）。落盘顺序按本表「被依赖者必须排在依赖者之前」排定，顺带把既有的 <code>teamd.py → nats_client.py</code> 逆序一并消掉；<b>被纳管的件内容一字未改</b>。⇒ 主控部署后 <code>deploy.py --status</code> 回到 <b>76 一致 / 漂移 0 / 缺失 0 / 多余 0</b>。<br>
+      ③ <b>改件（本刀唯一真实改动）</b>：<code>agent-team/ledger_patrol.py</code> 的<b>运行期文案</b>占位符 <code>&lt;USER_ID&gt;</code> → <b>刚哥</b>，共 <b>2 处</b>（L531 <b>群汇报正文</b> 1 处 + L863 <code>argparse</code> <code>--help</code> 输出 1 处）；回正后这两行与线上副本<b>逐字节一致</b>。<b>模块 docstring 里的占位符按纪律不动</b>（L5 / L16 属对外脱敏面，不是运行期文案）—— 只回正「人真能看见」的那两处，不顺手统一。<br>
+      ④ <b>等价证据</b>：新增内部装置 <code>tools/equivalence/ledger_patrol_text_only_equiv.py</code>，<b>三条断言缺一不可</b>：<b>AST 归一化全等</b>（两侧全部字符串字面量抹成 <code>&lt;STR&gt;</code> 后 <code>ast.dump()</code> <b>逐字符相同</b> ⇒ 语句 / 表达式 / 名字 / 数字 / 控制流<b>一处没动</b>）· <b>字符串字面量数量不变</b>（防「删了一段文案」这类静默丢失）· <b>差异对全在明文允许表内</b>（只许「占位符 → 真值」<b>单向</b>替换，<b>表外差异 0</b>）。<b>双向负控已验</b>：表外差异<b>判红</b>、把源码改回占位符方向<b>亦判红</b>。冻结件 <code>tools/equivalence/_old/ledger_patrol_old_k36.py</code> = 改前<b>逐字节</b>（LF 归一 md5 <code>89e9198191d3e234</code>），<b>新名、不覆盖任何既有 <code>_old/*</code></b>。<br>
+      ⑤ <b>未覆盖 / 仍开（如实记）</b>：(1) 该装置<b>不随对外仓发布</b> —— 它的对照源 <code>agent-team/ledger_patrol.py</code> / <code>post_group.py</code> <b>本就不在对外发布面</b>（<code>tools/hacs_manifest.json</code> 里这三件都没有映射），所以对外仓看不到这条自证，<b>不是漏发</b>；(2) <code>team.py</code> 薄壳的<b>字节等价证据沿用既有装置</b> <code>tools/equivalence/team_cli_equiv.py</code>（<b>56/56</b> 例 CLI 矩阵，证薄壳 ↔ 刀15 前单体等价），<b>本刀未新增</b>装置 —— 这条等价不是本刀证的，是引用旧证；(3) 台架上仍存的<b>历史运维说明文档</b>与运行目录的差集<b>未逐件纳管</b>，留待后续刀。<br>
+      上一轮变更（v20）：阶段 6 <b>后收尾 · 收敛刀</b>（刀35）—— 用户裁定：阶段 2「env 注入」<b>作废</b>，按「<b>无用即删除</b>」收敛。本刀<b>只改仓内件 + 登记表</b>，部署与生产机操作由主控执行。<br>
       ① <b>删 7 件</b>（git 历史可恢复，删前 HEAD <code>b87fa0a</code>）：<code>agent-team/deploy_p1.py</code> · <code>deploy_p1b.py</code> · <code>deploy_quantum_a2a.py</code> · <code>deploy_p4_embed.py</code> · <code>fix_agents_json.py</code> · <code>extract_nats_pass.py</code> · <code>watch_wire.py</code>。<br>
       ② <b>删件判据（三条同时成立才删）</b>：(1) <b>0 处代码/手册引用</b> —— 唯一的「引用」出现在 <code>tools/hacs_layers.json</code> / <code>tools/hacs_manifest.json</code> / 台账 HTML 这些<b>登记件</b>里，属登记不是使用；(2) <b>不在层间 import 图内</b> —— 层门禁的<b>边数 108 一件未变</b>，是它们不属于任何依赖关系的最强证据；(3) 功能已被<b>声明式部署</b>取代（<code>tools/deploy_targets.json</code> + <code>tools/deploy.py --two-phase</code>）。<br>
       ③ <b>同步改动</b>：<code>tools/hacs_layers.json</code> 登记 <b>83 → 78</b> 件；<code>tools/hacs_manifest.json</code> 删 <b>5</b> 条映射（<b>164</b> 条余量）。<br>
@@ -698,7 +736,13 @@ HTML_FOOT = """
 </html>
 """
 
-html = HTML_HEAD + '\n'.join(secs[:6]) + '\n' + SVG + '\n' + '\n'.join(secs[6:]) + HTML_FOOT
+head = (HTML_HEAD
+        .replace('{{NK_FILES}}', str(BASELINE['files']))
+        .replace('{{NK_EDGES}}', str(BASELINE['edges'])))
+html = head + '\n'.join(secs[:6]) + '\n' + SVG + '\n' + '\n'.join(secs[6:]) + HTML_FOOT
+if '{{NK_' in html:
+    sys.stderr.write('✗ gen_ledger_doc：产物里仍有未替换的 {{NK_*}} 占位符，不许静默留坑\n')
+    raise SystemExit(2)
 io.open(OUT, 'w', encoding='utf-8', newline='\n').write(html)
 n = html.count('<h2>')
 print('已生成:', OUT)
