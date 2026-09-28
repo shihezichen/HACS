@@ -5,7 +5,9 @@
 > 本文件是**现状（as-built）**，不是规划。上一版把三台机写成三套完全不同的件，是一个误导——
 > 其实**通信层四台是对等的**，真正的不对等只有一层：**业务侧进程只放在中枢（龙虾）**。
 > 部署件目录（`quantum/` `lobster/` `top001/`）目前**尚未落件**，systemd 模板在 `deploy/systemd/`；
-> 现状部署是 `deploy_p1.py` 等一次性脚本 + 手工 scp 完成，落件工作待办。
+> 现状部署走 **声明式**：`tools/deploy_targets.json`（受管件清单）+ `tools/deploy.py --status / --node … --file … --two-phase`
+> （先传件复验 md5、再统一重启与健康检查）。早期的一次性脚本（`deploy_p1.py` / `deploy_p1b.py` /
+> `deploy_quantum_a2a.py` / `deploy_p4_embed.py` / `fix_agents_json.py`）已被其取代并删除，历史版本见上游仓提交历史。
 
 ---
 
