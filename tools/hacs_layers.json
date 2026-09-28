@@ -210,26 +210,6 @@
       "port": 9942,
       "note": "公网入口认证部署件"
     },
-    "agent-team/deploy_p1.py": {
-      "layer": "L0",
-      "port": null,
-      "note": "一次性部署脚本"
-    },
-    "agent-team/deploy_p1b.py": {
-      "layer": "L0",
-      "port": null,
-      "note": "一次性部署脚本"
-    },
-    "agent-team/deploy_p4_embed.py": {
-      "layer": "L0",
-      "port": null,
-      "note": "一次性部署脚本"
-    },
-    "agent-team/deploy_quantum_a2a.py": {
-      "layer": "L0",
-      "port": null,
-      "note": "一次性部署脚本"
-    },
     "agent-team/accept_auth.py": {
       "layer": "L0",
       "port": null,
@@ -289,11 +269,6 @@
       "layer": "T",
       "port": null,
       "note": "群页面验收"
-    },
-    "agent-team/fix_agents_json.py": {
-      "layer": "T",
-      "port": null,
-      "note": "成员配置修复（静态入网的典型手工作业）"
     },
     "agent-team/calc/calc_svc.py": {
       "layer": "T",

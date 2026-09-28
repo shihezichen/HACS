@@ -28,13 +28,13 @@
 | 层 | 一句话职责 | 件数 |
 | --- | --- | --- |
 | C | 组合根（进程入口装配：只做装配与注入，不含业务与传输实现） | 2 |
-| L0 | 平台层 Host（进程监管 / 路径 / 凭据 / 日志 / 探针 / 部署件） | 14 |
+| L0 | 平台层 Host（进程监管 / 路径 / 凭据 / 日志 / 探针 / 部署件） | 10 |
 | L1 | 通行层 Transport（投信封 / 保投到 / 不重复 / 可观测 / 成员入网控制面） | 10 |
 | L2 | 适配层 Adapter（Agent 差异唯一落脚点：调用 / 能力 / 上下文用量） | 5 |
 | L3 | 协作域 Domain（群聊 / 待回应账 / 任务 / 会议 / 黑板 / 共享内容） | 14 |
 | L4 | 呈现层 Experience（静态壳 / 业务视图 / 网关：同源托管 · 反代 · 鉴权跳转 · SSE 聚合） | 5 |
 | X | 横切（身份与授权 / 契约与事件总线 / 可观测与门禁） | 1 |
-| T | 工具面（巡检 / 驱动 / 验收 / 一次性脚本；不属于运行路径） | 32 |
+| T | 工具面（巡检 / 驱动 / 验收 / 一次性脚本；不属于运行路径） | 31 |
 
 **依赖方向（硬规则）**
 
@@ -60,10 +60,10 @@
 
 | 量 | 值 | 可复跑命令 |
 | --- | --- | --- |
-| 登记件数 | **83** | `python tools/check_layers.py`（读表头行） |
+| 登记件数 | **78** | `python tools/check_layers.py`（读表头行） |
 | 层间 import 边 | **108** | `python tools/check_layers.py`（读表头行） |
 | 登记端口 | **17** 个 | `python -c "import io,json;print(len([k for k in json.load(io.open('tools/hacs_layers.json',encoding='utf-8'))['ports'] if k!='_readme']))"` |
-| 生成自 HEAD | `d9cdaea`（2026-09-28） | `git rev-parse --short HEAD` / `git log -1 --date=short --format=%ad` |
+| 生成自 HEAD | `b87fa0a`（2026-09-28） | `git rev-parse --short HEAD` / `git log -1 --date=short --format=%ad` |
 
 口径说明：
 
