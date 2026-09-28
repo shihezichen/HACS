@@ -6,7 +6,8 @@
 > 其实**通信层四台是对等的**，真正的不对等只有一层：**业务侧进程只放在中枢（龙虾）**。
 > 部署件目录（`quantum/` `lobster/` `top001/`）目前**尚未落件**，systemd 模板在 `deploy/systemd/`；
 > 现状部署走 **声明式**：`tools/deploy_targets.json`（受管件清单）+ `tools/deploy.py --status / --node … --file … --two-phase`
-> （先传件复验 md5、再统一重启与健康检查）。早期的一次性脚本（`deploy_p1.py` / `deploy_p1b.py` /
+> （先传件复验 md5、再统一重启与健康检查）。**注：这份清单与部署工具留在内部源仓，不随本对外仓发布**——
+> 对外只公开描述口径，实际执行以内部源仓为准。早期的一次性脚本（`deploy_p1.py` / `deploy_p1b.py` /
 > `deploy_quantum_a2a.py` / `deploy_p4_embed.py` / `fix_agents_json.py`）已被其取代并删除，历史版本见上游仓提交历史。
 
 ---
