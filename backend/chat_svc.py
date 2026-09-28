@@ -312,6 +312,16 @@ UI_DIR_NAME = "ui"
 #: 对外**不可见**的开发辅助文件（清单第 1 条：过滤 serve.py / mock.js）
 STATIC_EXCLUDE = frozenset(["serve.py", "mock.js"])
 
+#: 刀34：备份 / 临时件不属于可 serve 的静态面。
+#: `tools/deploy.py` 每次部署第 1 步会把被覆盖的件留一份 `<path>.bak-<ts>` **就地**备份，
+#: 静态根 `ui/` 里的件也不例外 —— 于是 `ui/group.html.bak-20260926-155258`、
+#: `ui/group.css.bak-*`、`ui/codeblock.js.bak-inline-`、`ui/calc.html.bak-v1-*`
+#: 这些历史版本会**原样躺在静态根里被当静态件 serve 出去**（实测 lobster:<deploy-dir>/ui/
+#: 48 件里就有 4 类这种备份件）。`STATIC_EXCLUDE` 是逐件名单、隐藏件判定只认 `.` 开头，
+#: 两条都拦不住它们 —— 所以这里按形状拦：任一路径段命中即 404。
+#: 判据只收紧、不放宽：命中的件由「能取到」变成「取不到」，其余一格不动。
+STATIC_BACKUP_RE = re.compile(r"(\.bak($|[-._])|~$|\.orig$|\.rej$|\.tmp$|\.swp$|\.pre-)")
+
 #: 命中这些扩展名的未命中请求回 404，**不走 SPA fallback** ——
 #: 否则浏览器会把 index.html 当 JS/CSS 解析，报 MIME 错，排查起来很绕。
 STATIC_EXTS = frozenset([
@@ -4534,7 +4544,7 @@ class ChatHandler(_GatewayHandler):
     def _serve_admin(self, rel_path: str, method: str) -> Optional[Tuple[int, Dict[str, Any]]]:
         """托管 /calc/admin 静态资源。返回 None 表示响应已自行发出。
 
-        与 _serve_static 同规矩：目录穿越/隐藏文件/排除表一律拦，
+        与 _serve_static 同规矩：目录穿越/隐藏文件/排除表/备份临时件一律拦，
         带扩展名未命中 → 404（不回 index.html，否则浏览器把 HTML 当 JS 解析），
         无扩展名未命中 → SPA fallback 回 index.html。
         """
@@ -4557,7 +4567,8 @@ class ChatHandler(_GatewayHandler):
                  if p not in ("", ".")]
         blocked = ((not inside)
                    or any(p.startswith(".") for p in parts)
-                   or any(p in STATIC_EXCLUDE for p in parts))
+                   or any(p in STATIC_EXCLUDE for p in parts)
+                   or any(STATIC_BACKUP_RE.search(p) for p in parts))   # 刀34：备份/临时件
 
         target = None                          # type: Optional[str]
         if not blocked and os.path.isfile(candidate):
@@ -4615,6 +4626,7 @@ class ChatHandler(_GatewayHandler):
         """静态兜底。返回 None 表示响应已自行发出。
 
         清单对照：①排除 serve.py/mock.js ③SPA fallback ⑤no-cache ⑦MIME 钉死。
+        刀34 起再加一条：备份 / 临时件（`STATIC_BACKUP_RE`）一律拦 —— 见该常量处的说明。
         """
         if method not in ("GET", "HEAD"):
             # 写操作永远不做静态（清单第 2 条的精神：静态只读）
@@ -4631,13 +4643,14 @@ class ChatHandler(_GatewayHandler):
         rel = urllib.parse.unquote(path).lstrip("/")
         candidate = os.path.realpath(os.path.join(base, rel))
 
-        # 目录穿越 / 排除表 / 隐藏文件 —— 三条一起判，别拆开（拆开容易漏）
+        # 目录穿越 / 排除表 / 隐藏文件 / 备份临时件 —— 四条一起判，别拆开（拆开容易漏）
         inside = candidate == base or candidate.startswith(base + os.sep)
         parts = [p for p in os.path.relpath(candidate, base).split(os.sep)
                  if p not in ("", ".")]
         blocked = ((not inside)
                    or any(p.startswith(".") for p in parts)
-                   or any(p in STATIC_EXCLUDE for p in parts))
+                   or any(p in STATIC_EXCLUDE for p in parts)
+                   or any(STATIC_BACKUP_RE.search(p) for p in parts))   # 刀34：备份/临时件
 
         target = None                          # type: Optional[str]
         if not blocked:

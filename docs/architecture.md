@@ -63,7 +63,7 @@
 | 登记件数 | **83** | `python tools/check_layers.py`（读表头行） |
 | 层间 import 边 | **108** | `python tools/check_layers.py`（读表头行） |
 | 登记端口 | **17** 个 | `python -c "import io,json;print(len([k for k in json.load(io.open('tools/hacs_layers.json',encoding='utf-8'))['ports'] if k!='_readme']))"` |
-| 生成自 HEAD | `3cc8b20`（2026-09-28） | `git rev-parse --short HEAD` / `git log -1 --date=short --format=%ad` |
+| 生成自 HEAD | `d9cdaea`（2026-09-28） | `git rev-parse --short HEAD` / `git log -1 --date=short --format=%ad` |
 
 口径说明：
 
@@ -131,7 +131,8 @@
 **正件的逐字节冻结快照**（`tools/equivalence/_old/*`，用于原地改造件，先冻后改）。
 多数装置另带 `--runs N` 自证确定性、`--negative` / `--neg` 强制负控（注毒必须报红、还原必须转绿）。
 
-现有 19 个装置：
+现有 20 个装置（刀34 新增 1 个**等价-增严**型：除「改前改后逐字节相同」外，另有一批格子断言
+**定向**由「命中」变「拦」，且内置反方向护栏 —— 任一格放宽即判负）：
 
 | 装置 | 口径（比什么） | 格数 |
 | --- | --- | --- |
@@ -144,6 +145,7 @@
 | `blackboard_svc_http_equiv.py` | 黑板业务口 + 本机健康口各起新旧两份，同一张矩阵逐例比；数据库一个字节都不真连（注入假驱动） | 运行时打印（含 keep-alive 连发用例） |
 | `gateway_envelope_equiv.py` | `_envelope()` 与公开名 `envelope()` 的三元组 `(status, body_bytes, headers)` 逐例比，**不归一不剔字段** | 台账实测 41/41（含 `_envelope is envelope` 同一对象断言） |
 | `chat_svc_http_equiv.py` | chat_svc 的应答出口 + 非 GET 分派（刀8a）与 GET 路由表 + 前端页服务（刀8b）；三份实例同进程对跑 | 刀8c 实测 311 例（刀8a 及以前 155 + 刀8b 追加 156） |
+| `chat_svc_static_filter_equiv.py` | **等价-增严**（刀34）：静态面「备份/临时件一律拦」。同一张用例表喂改前（冻结基线 `_old/chat_svc_old_k34.py`）与改后两侧，每格预标 `same`（逐字节相同）或 `tighten`（200 → 404 `not_found`）；`_serve_static` 与 `_serve_admin` 两处判据各跑一遍 | 本件实测 106 格（HTTP 61 = 等价 40 + 增严 21；判据逐名 37；冻结方向 2；未动面 6） |
 | `group_frontend_equiv.py` | 前端拆三件套：无头浏览器 + CDP，钉客户端身份（UA / UA-CH / Accept-Language）防浏览器自动升级假红；刀20 起 CSS 冻结基线 `_old/group_css_old_k19.css` 三重身份硬校验 | 判据分段计（3 段正向 + 2 段反向 + 尾部残余 + 残留扫描），**只增不减** |
 | `team_cli_equiv.py` | 群聊/会议业务摘出后的 **CLI 级**冻结矩阵：`argv → (stdout, stderr, 退出码, 出站请求序列)` + 落盘产物 | 层表登记 56 例 |
 | `pg_literals_equiv.py` | pgvector 字面量与时间归一收口 L2 后，旧 3 份实现 vs 新 3 条别名 + 出处，逐字节比返回值 / 类型 / 异常类型 / 异常消息 | 四段（A/B 单元级 + C/D 调用面） |
@@ -226,6 +228,7 @@
 | 阶段5 | 刀31 | `18e72c0` | 对账器 **M3 口令真值换源到成员本机凭据**；中枢 conf 与镜像降级为被核对的产物 —— 阶段5 收口 |
 | 阶段6 收尾件 | 刀32 | `c5e6971` | 终态架构文档：模板 + 生成器 + 清单映射 ⇒ 内部完整版与对外脱敏版**同源同数字**（收尾 `44d3755`/`e24b17f`/`555aceb`） |
 | 阶段6 后收尾 | 刀33 | `3cc8b20` | 判据收口：`host_path_owner` 单值 → **列表（只 2 件）**、`PATH_RX` 3 处误判**实名登记 known-FP（检查保留）**、`L0` 持句柄**认现状不登记例外**、阶段归并（内容口径）与 29 撞号（A/B 并列）口径落定；随后清理两处旧版生成器裸副本 |
+| 阶段6 后收尾 | 刀34 | `d9cdaea` | **运行面纳管（解耦最后一公里）**：`session_ctx_archiver.py`（thinkbook 计划任务）+ `task_svc.py`（lobster systemd 9981）写进部署表（69 → **71** 件）；9984 静态面加「备份 / 临时件一律拦」判据（**只收紧**，106 格等价-增严矩阵自证）；`task_sys/task_svc.py` 裁定为无消费者的历史第一版、**物理件不动**；余 `ledger_patrol.py` / `cli_backend.py` 两件如实挂账、不擅自补条目 |
 
 > **阶段归并的既有分歧（如实记账）**：长跑规划里把**刀13 前端收官记作阶段2 全闭、阶段3 自刀14 起**；
 > 而刀14–刀20 的提交说明自称「阶段3」。本表按「前端拆三件套 + L1 公共面」这一**内容口径**
@@ -348,18 +351,53 @@ NATS 两台中枢 = lobster + top001；SSH 目标与私钥路径一律经部署�
    受制于 NATS 上游竞态。刀26 已把 M6 从 2 条收敛到 1 条，**这 1 条留红不消** —— 属上游观察项。
 2. **`test_message_id_shape` 既有 flaky**：根因是 `gen_message_id()` 的随机后缀长度不定，
    20 万样本里 **1.55%** 不合形状；**改前树也命中**，不是本轮工程引入。
-3. **发布面缺口（刀33 后收敛为 2 件）**：`agent-team/session_ctx_archiver.py` / `agent-team/cli_backend.py`
-   —— 运行目录里有、`tools/deploy_targets.json` 里没有；本机运行目录下与源码仓**逐字节不同**。
-   后果：这几件的线上态不受部署表管辖，改动对源码仓不可见。
-   （原在列的 `agent-team/gen_nats_conf.py` 两处**裸副本**已核实零引用后删除，见下条；**真源始终是源码仓**，部署表的缺口本身仍待拍板。）
+3. **发布面缺口 —— 刀34 起纳管 2 件，余 2 件如实挂账**：
+   - ✅ **已纳管（刀34 写进 `tools/deploy_targets.json`，69 件 → 71 件）**：
+     - `agent-team/session_ctx_archiver.py`（thinkbook）—— 计划任务 `AgentTeamCtxArchiver` 每 5 分钟拉起运行目录副本，
+       `services` 故意留空（周期任务，无长驻进程可重启，下次触发自然取新件）；
+     - `agent-team/task_svc.py`（lobster）—— systemd `task_svc` active+enabled，9981 在跑，
+       健康口 `via: ssh` + `curl http://127.0.0.1:9981/health`（实测 200 / `{"ok": true, "service": "task_svc"}`）。
+     两件**纳管当时线上仍是旧口径**（仍硬编码 `CHAT_BASE_DEFAULT` / DB / 日志路径，刀22 的 L0 收口没下去），
+     故 `deploy.py --status` 会报这 2 件漂移 —— 属**待主控部署**，不是门禁失败。
+   - ⏳ **仍未纳管（刀34 逐件取证扫描所得，如实列出、未擅自补条目）**：
+     - `agent-team/ledger_patrol.py`（thinkbook）—— 计划任务 `AgentTeamLedgerPatrol` 拉起
+       `<deploy-dir>\ledger_patrol.py --once`；运行副本 md5 `c62478b11691e60b` ≠ 仓内 `89e9198191d3e234`。
+       刀34 契约未授权纳管，留待主控拍板。
+     - `agent-team/cli_backend.py`（thinkbook）—— 计划任务 `AgentTeamCliBackend` 的实参是
+       **源码仓路径** `D:\Work\…\agent-team\cli_backend.py --port 9970`，即运行目录副本
+       （md5 `b9bd5452e85ffc5d` ≠ 仓内 `7f8371437d69924b`）**根本不被执行**，属陈旧裸副本 ——
+       与「活件未纳管」不同类，处置（删副本 / 改回运行目录 / 纳管）待拍板。
+   - 取证方法（可复跑，见 §9 末「复跑命令清单」）：thinkbook 取 `Get-ScheduledTask` 里 `AgentTeam*` 的
+     `Actions.Arguments` 中的 `.py`；三台 Linux 取 `/etc/systemd/system/*.service` 的 `ExecStart`
+     里的 `<deploy-dir>/*.py`；两边各与部署表比对。**top001 / quantum 扫描结果：零缺口**。
+   （原在列的 `agent-team/gen_nats_conf.py` 两处**裸副本**已核实零引用后删除，见下条；**真源始终是源码仓**。）
 4. **裸旧版生成器 —— 已清理（刀33 · 用户裁定「无用即删」）**：两份副本（top001 `<home>/gen_nats_conf.py`、
    本机运行目录 `/c/agent-team/gen_nats_conf.py`）的 md5 均为 `34a7b738bc9c` ≠ 仓内正件 `4bb1b6244e57`，
    且**零自动化引用**（`/etc/cron*`、`/etc/systemd/system`、`<home>/*.sh` 全无命中；本机无计划任务引用），
    手工误跑会退回刀30 前「从旧 conf 继承口令」口径 —— 正是刀30 要堵的洞。⇒ 判**无用即删**，两处均已删除并复验不存在；
    `lobster` 无副本；`quantum` 当时 SSH 不通（`<node-ip>:22` 超时），其扫描列为待补项。
-5. **9984 把 `*.bak-*` 当静态件 serve**：改判据事项，需拍板。
-6. **`agent-team/task_svc.py` 的仓外消费者未知**：另有 `agent-team/task_sys/task_svc.py` 一份实现，
-   是否同源未核；改判据事项，需拍板。
+5. **9984 把 `*.bak-*` 当静态件 serve —— 已落地（刀34）**：
+   根因不是手抖，是**系统性**的：`tools/deploy.py` 部署第 1 步会把被覆盖的件留一份 `<path>.bak-<ts>`
+   **就地**备份，而 `chat_svc.py` 的静态根 `ui/` 正是被部署的目录之一 ⇒ 历史版本原样躺在静态根里。
+   既有两道判据都拦不住：`STATIC_EXCLUDE` 是逐件名单（只有 `serve.py` / `mock.js`）、隐藏件判定只认 `.` 开头。
+   实测 `lobster:<deploy-dir>/ui/` 48 件里有 `group.html.bak-*` / `group.css.bak-*` /
+   `codeblock.js.bak-inline-` / `calc.html.bak-v1-*` 四类。
+   ⇒ 刀34 在 `_serve_static()` 与 `_serve_admin()` 的 `blocked` 判据里**各加一条**：任一路径段命中
+   `STATIC_BACKUP_RE = re.compile(r"(\.bak($|[-._])|~$|\.orig$|\.rej$|\.tmp$|\.swp$|\.pre-)")` 即拦（404，走既有 `not_found` 分支）。
+   **只收紧不放宽**，SPA fallback / MIME 钉死 / no-cache / 既有排除表与隐藏件判定**一字未动**。
+   证据：`tools/equivalence/chat_svc_static_filter_equiv.py`（冻结基线 `_old/chat_svc_old_k34.py`）
+   **106 格**矩阵 —— 40 格改前改后逐字节相同、21 格由「命中(200)」定向变「拦(404 `not_found`)」、
+   **0 格放宽**（装置内置反方向护栏：任一格「改前拦 / 改后命中」直接判负），另含 37 格判据逐名断言
+   （含 `backup.html` / `bak.html` / `a.bakery.js` / `a.pre.js` 等 8 个**形近但不该拦**的正控）。
+   ⚠️ **静态根里那些 `.bak-*` 物理件本身刀34 未删**（红线：不碰生产机文件）—— 判据已拦住外部可见性，
+   清理由主控执行。
+6. **`task_svc` 双实现 —— 已裁定口径（刀34，物理件不动）**：
+   **真源唯一 = `agent-team/task_svc.py`（lobster 9981 在跑）；`agent-team/task_sys/task_svc.py`
+   是历史第一版，无消费者、任何主机未安装、勿 `enable`；物理件不动。**
+   取证：`lobster` 上 `<deploy-dir>/task_sys` **不存在**；仓内无任何件 import 它。
+   为什么「物理件不动」而不是删：`tools/equivalence/host_truth_equiv.py:93-94` 以**行锚点**
+   （`old_line=35/36`，`DB_DEFAULT` / `LOG_DEFAULT`）引用该件，`tools/gen_ledger_doc.py:122` 登记其层归属 ——
+   动它会破坏行锚点、使该装置转红。刀34 起 `agent-team/task_svc.py` 已纳管进部署表（见第 3 条）。
 7. **`host_path_owner` 单值化与 `PATH_RX` 误判 —— 已落地（刀33）**，两条各有裁定：
    - ① **`host_path_owner` 改成列表，只含 2 件**：`agent-team/node_paths.py` + `agent-team/node_profile.py`
      （两件同属 L0、语义上共同构成「宿主字面量的唯一合法去处」；旧形态是单值字符串、按 `endswith` 只能写一个，
@@ -398,8 +436,11 @@ NATS 两台中枢 = lobster + top001；SSH 目标与私钥路径一律经部署�
 | `python tools/roster_creds_mirror.py --check` | 退出码 0；两中枢 `creds/` 全员在位、内容一致、mode/owner 相符 |
 | `python tools/equivalence/membership_audit_equiv.py --runs 2` | 不一致 0；两轮同 md5；`EQUIV_SENTINEL_OK` |
 | `python tools/equivalence/membership_audit_equiv.py --negative` | 退出码 0（注毒处处报红、还原全部转绿） |
-| `python tools/deploy.py --status` | 四台漂移 0 |
+| `python tools/equivalence/chat_svc_static_filter_equiv.py` | 退出码 0；106 格全按期望：40 格逐字节相同、21 格「命中(200) → 拦(404 `not_found`)」、**0 格放宽** |
+| `python tools/deploy.py --status` | 四台漂移 0 —— **刀34 起例外**：新纳管的 `session_ctx_archiver.py`(thinkbook) / `task_svc.py`(lobster) 在主控部署前会报漂移，其余 69 件仍应全一致 |
 | `python tools/deploy.py --health-only` | 健康检查全绿 |
+| `Get-ScheduledTask \| ? { $_.TaskName -like "AgentTeam*" } \| % { $t=$_; $_.Actions \| % { "$($t.TaskName)`t$($_.Arguments)" } }` | thinkbook 活件取证：逐条 `.py` 实参与 `tools/deploy_targets.json` 的 thinkbook 件表比对，缺口只应是 §9.3 挂账的那 2 件 |
+| `ssh <节点> "grep -H '^ExecStart' /etc/systemd/system/*.service \| grep agent-team"` | lobster / top001 / quantum 活件取证：`ExecStart` 里的 `<deploy-dir>/*.py` 与各自件表比对；刀34 实测 top001 / quantum **零缺口** |
 
 > 本文件由 `tools/gen_arch_doc.py` 从 `tools/arch_doc_template.md` 生成，请勿手改；改文案改模板，改层归属改 `tools/hacs_layers.json`。
 > 数字会随代码漂移，落地前用上文命令复核。
