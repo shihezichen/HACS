@@ -337,6 +337,31 @@
       "layer": "T",
       "port": null,
       "note": "刀31 前的**正件逐字节快照**（`git show f592498:tools/nats_membership_audit.py`，md5 3dbd30e5a05b842da4172bdd20577784 / 992 行 / 46997 字节）—— 装置 F 段的「改前」锚：同一份 artifacts 喂两侧，差异只在「口令真值从哪来」（改前 = 基准中枢 conf 的 `user → password`，改后 = 成员本机凭据文件）。只当装置锚，不参与运行；**不许被 `cp` 覆盖**（先冻后改的顺序物证）。"
+    },
+    "comm/a2a/restart_a2a.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面（裁定 ⑧）：Windows 侧 A2A 单元重启件 —— 按自身所在目录的 a2a.env 分离拉起 a2a_svc.py（9920），有现进程时读其原命令行原样重启、保持参数不变；零硬编码路径（解释器 / 脚本 / 配置 / 日志全来自 a2a.env），非 import 运行路径。**物理归位暂缓**（批③ 总控裁定）：ENV_FILE = dirname(__file__)/a2a.env，真值 a2a.env 部署在 Windows 主机、不在仓内，移件必须连 a2a.env 落位与部署脚本一并改并在主机实测，故本批只登记不动件。"
+    },
+    "tools/check_layers.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：分层门禁（阶段 0 产出）。五条检查（依赖方向 / L1 无业务词 / 宿主零硬编码 / 存储句柄 / 跨件私有面）+ 检查 6 相方向（裁定① / v3 E3，硬门禁）+ 自检 7 项（批① 门禁修复新增）。退出码 0 无硬违规 / 1 有硬违规或自检失败 / 2 当前目录非源码树。本件即门禁本体，读 tools/hacs_layers.json 做判据，兼作台账数字的机器可读源。"
+    },
+    "tools/scan_secrets.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：提交前密钥扫描（硬门禁）。两路并扫（已知凭证指纹 + 通用「赋值即口令」模式）；二进制/大文件按扩展名跳过但跳过即报、不算通过；只报文件名 + 行号 + 命中种类掩码，**不回显命中的原文**（扫描日志自身不得成为泄漏源）。退出码 0 干净可提交 / 1 命中、禁止提交。"
+    },
+    "tools/gen_ledger_doc.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：从 tools/hacs_layers.json + 实测数据**生成**《HACS 分层台账》单文件 HTML（docs/HACS-分层台账.html）—— 台账是长期参考件，表格必须与机器可读层归属表同源，人肉拷贝必然漂移。改层归属只改 json，再重跑本件同步文档（别手改 HTML）。"
+    },
+    "tools/post_incident_entry.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：按 append-only 口径把一次事故与修复作为**一条新条目**追加进黑板（不改旧条目）。一次性脚本（P4 事故记录投递：POST /entries），非 import 运行路径。"
     }
   },
   "rules": {
