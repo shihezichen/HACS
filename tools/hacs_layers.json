@@ -346,8 +346,25 @@
       "L3",
       "L2",
       "L1",
-      "L0"
+      "L0",
+      "shared"
     ],
+    "layer_order_readme": "档位表（rank 越小越靠上，判据 rank[src] <= rank[dst]）。**末档 `shared` 是相中立档**（v3 E3 新增，批① 门禁修复批写入）：凡登记路径落在顶层 `shared/` 下的件，在**方向判据**里一律按本档计（check_layers.phase_code），于是「相内件 → shared/」= 向下引用 ⇒ 放行，「shared/ → 任一相内件」= 反向引用 ⇒ 违规。注意 `shared` **故意不进 `layers`**：`layers` 是层轴（C/L0–L4/X/T），`shared/` 是相轴（顶层相 hub/node/shared）上的相中立凸起，两轴分开才不至于把「相」冒充成「层」。相与相内件的对应关系见 rules.phases。",
+    "phases": {
+      "_readme": "顶层相（裁定① 两相 + v3 E3 相中立）：判相只看**件部署到哪台机**，不看名字带不带 nats。hub/ = 中枢相（只装中枢机）；node/ = 节点相（四台对等节点）；shared/ = 相中立（两相都要用、但不得塞进任一侧的双相件，如 web_gateway.py）。phase_of_rel() 取登记路径首段查 top_level；phase_code() 把相中立件折算成 layer_order 末档 `shared`；phase_violation() 是判据本体，check_phases（检查 6，硬门禁）与自检项 ⑤ 的合成夹具共用。",
+      "top_level": {
+        "hub": "hub",
+        "node": "node",
+        "shared": "shared"
+      },
+      "in_phase_dirs": [
+        "hub",
+        "node"
+      ],
+      "neutral": "shared",
+      "rule": "相内件（hub/、node/）可向 shared/ 单向 import；shared/ 不得 import 任何相内件。跨相共享件今后一律走 shared/，不得塞进任一侧。",
+      "scope": "批① 门禁修复只落「shared 相」这一档与它的一条判据；相内件之间的 hub↔node 方向仍由层判据（检查 1）管，不在本批范围。"
+    },
     "allowed_import": {
       "_readme": "src 层依赖 dst 层是否允许：同层允许；X 横切可被任意层引用；工具面 T 不受限（不属运行路径）",
       "same": true,
