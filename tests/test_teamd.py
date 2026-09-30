@@ -24,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from nats_client import NatsClient  # noqa: E402
+from node.l1_transport.nats_client import NatsClient  # noqa: E402
 from teamd import Config, TeamDaemon  # noqa: E402
 
 TOKEN = "teamd-unit-test-token-xyz"

@@ -83,7 +83,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
 import node_profile as _npf  # L0 节点档案：宿主事实唯一真源（黑板基址 / NATS 中枢；env 优先）
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                os.path.dirname(os.path.abspath(__file__))):
+    sys.path.insert(0, _hacs_p)
 
 VERSION = "1.2"
 
@@ -1155,7 +1158,7 @@ class NatsTransport(object):
 
     def __init__(self, host: str, port: int, user: str, password_file: str,
                  ping_timeout: float = PING_TIMEOUT_S) -> None:
-        from nats_client import NatsClient  # 纯标准库，同目录
+        from node.l1_transport.nats_client import NatsClient  # 纯标准库（批① 已搬到 node/l1_transport/）
         self._host, self._port = host, int(port)
         self._user = user
         self._password = read_secret(password_file) if password_file else ""

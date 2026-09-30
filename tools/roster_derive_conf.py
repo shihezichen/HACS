@@ -74,8 +74,10 @@ PROJECT_ROOT = os.path.dirname(HERE)
 AGENT_TEAM = os.path.join(PROJECT_ROOT, "agent-team")
 TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
 
-if AGENT_TEAM not in sys.path:
-    sys.path.insert(0, AGENT_TEAM)
+# 批① 起被搬件按绝对包名 import，故仓根一并入路径。
+for _hacs_p in (PROJECT_ROOT, AGENT_TEAM):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
 
 import node_profile                                    # noqa: E402 —— L0 节点档案（宿主事实唯一真源）
 import member_roster                                   # noqa: E402 —— L0 名册档案（成员真源）
@@ -602,7 +604,7 @@ def main(argv=None):
                                  [tuple(r) for r in member_roster.ROSTER],
                                  load_targets(), timeout=args.timeout)
 
-    import gen_nats_conf                                # noqa: E402 —— L1 角色模板的唯一出处
+    import hub.l1_relay.gen_nats_conf as gen_nats_conf                                # noqa: E402 —— L1 角色模板的唯一出处
     report = analyze(collected, gen_nats_conf.perm_list)
     text = canonical(report)
 

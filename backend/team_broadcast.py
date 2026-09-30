@@ -35,9 +35,12 @@ import sys
 import threading
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                os.path.dirname(os.path.abspath(__file__))):
+    sys.path.insert(0, _hacs_p)
 
-from nats_client import NatsClient, read_secret_file  # noqa: E402
+from node.l1_transport.nats_client import NatsClient, read_secret_file  # noqa: E402
 import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（help 文本里的地址形态）
 
 MAX_TIMEOUT = 300.0

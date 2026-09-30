@@ -21,9 +21,12 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                os.path.dirname(os.path.abspath(__file__))):
+    sys.path.insert(0, _hacs_p)
 
-from nats_client import NatsConn, NatsError, read_secret_file  # noqa: E402
+from node.l1_transport.nats_client import NatsConn, NatsError, read_secret_file  # noqa: E402
 
 
 def main():

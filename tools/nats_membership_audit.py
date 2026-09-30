@@ -119,8 +119,10 @@ AGENT_TEAM = os.path.join(PROJECT_ROOT, "agent-team")
 TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
 BASELINE_PATH = os.path.join(HERE, "nats_membership_audit_baseline.json")
 
-if AGENT_TEAM not in sys.path:
-    sys.path.insert(0, AGENT_TEAM)
+# 批① 起被搬件按绝对包名 import，故仓根一并入路径。
+for _hacs_p in (PROJECT_ROOT, AGENT_TEAM):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
 
 import node_profile                                     # noqa: E402 —— L0 节点档案（宿主事实唯一真源）
 
@@ -1064,7 +1066,7 @@ def build_report(args):
         for h in missing:
             artifacts["errors"].append({"kind": "collect_error", "node": h, "what": "部署表",
                                         "why": "内部真值表里没有这个节点，拿不到 ssh 目标"})
-    import gen_nats_conf                                 # noqa: E402 —— L1 角色模板的唯一出处
+    import hub.l1_relay.gen_nats_conf as gen_nats_conf                                 # noqa: E402 —— L1 角色模板的唯一出处
     return analyze(artifacts, gen_nats_conf.perm_list)
 
 

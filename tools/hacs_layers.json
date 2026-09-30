@@ -18,7 +18,7 @@
     "T": "工具面（巡检 / 驱动 / 验收 / 一次性脚本；不属于运行路径）"
   },
   "files": {
-    "backend/nats_client.py": {
+    "node/l1_transport/nats_client.py": {
       "layer": "L1",
       "port": null,
       "note": "极简 NATS 客户端（纯标准库）"
@@ -78,7 +78,7 @@
       "port": 9930,
       "note": "NATS 连通性探针"
     },
-    "backend/gen_nats_conf.py": {
+    "hub/l1_relay/gen_nats_conf.py": {
       "layer": "L1",
       "port": 9930,
       "note": "服务端权限白名单生成 —— 入网动态化的现成「角色模板」来源；刀26 加成员退场通道（`--drop-user <名>` 可重复）+ `--dry-run`，位置参数老契约不变，不带开关时产物与旧版逐字节相同"

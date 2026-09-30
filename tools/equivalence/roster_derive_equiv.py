@@ -60,13 +60,13 @@ OLD_DIR = os.path.join(HERE, "_old")
 AGENT_TEAM = os.path.join(REPO, "agent-team")
 DERIVE_PY = os.path.join(TOOLS, "roster_derive_conf.py")
 
-for p in (TOOLS, OLD_DIR, AGENT_TEAM):
+for p in (REPO, TOOLS, OLD_DIR, AGENT_TEAM):
     if p not in sys.path:
         sys.path.insert(0, p)
 
 import roster_derive_conf as NEW                        # noqa: E402 —— 新侧（正件）
 import roster_derive_old_k27 as OLD                     # noqa: E402 —— 旧侧（独立第二实现）
-import gen_nats_conf                                    # noqa: E402 —— L1 角色模板唯一出处
+import hub.l1_relay.gen_nats_conf as gen_nats_conf                                    # noqa: E402 —— L1 角色模板唯一出处
 
 #: 夹具里的合成主机名（`.invalid` 是 RFC2606 保留后缀，永远不可能解析到真机）
 H_A, H_B = "hub-a.example.invalid", "hub-b.example.invalid"

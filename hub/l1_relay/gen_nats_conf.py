@@ -28,7 +28,14 @@ import shutil
 import sys
 import datetime
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HACS_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 批① 过渡：本件已搬到 hub/l1_relay/，L0 件（node_profile / member_roster）仍在旧目录；
+# 待它们各自归位（node/l0_host/，批⑤a/⑤h）后，本循环可收回成只留本目录。
+for _hacs_p in (os.path.dirname(os.path.abspath(__file__)),
+                os.path.join(_HACS_ROOT, 'backend'),
+                os.path.join(_HACS_ROOT, 'agent-team')):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
 import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（配置目录 / 路由凭据文件）
 import member_roster as _roster  # noqa: E402  L0 名册档案：成员集合与规范序的唯一真源
 

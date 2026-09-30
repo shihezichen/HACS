@@ -100,7 +100,7 @@ OLD_DIR = os.path.join(HERE, "_old")
 AGENT_TEAM = os.path.join(REPO, "agent-team")
 AUDIT_PY = os.path.join(TOOLS, "nats_membership_audit.py")
 
-for p in (TOOLS, OLD_DIR, AGENT_TEAM):
+for p in (REPO, TOOLS, OLD_DIR, AGENT_TEAM):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -109,7 +109,7 @@ import membership_audit_old_k25 as OLD                   # noqa: E402 —— 旧
 import membership_audit_old_k28 as OLDK28                 # noqa: E402 —— 刀28 前的正件（D 段「改前」锚）
 import membership_audit_old_k29 as OLDK29                 # noqa: E402 —— 刀29 前的正件（E 段「改前」锚）
 import nats_membership_audit_old_k31 as OLDK31            # noqa: E402 —— 刀31 前的正件（F 段「改前」锚）
-import gen_nats_conf                                     # noqa: E402 —— L1 角色模板唯一出处
+import hub.l1_relay.gen_nats_conf as gen_nats_conf                                     # noqa: E402 —— L1 角色模板唯一出处
 
 #: 夹具里的合成主机名（`.invalid` 是 RFC2606 保留后缀，永远不可能解析到真机）
 H_A, H_B = "hub-a.example.invalid", "hub-b.example.invalid"

@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from nats_client import NatsClient, NatsError, _parse_addrs  # noqa: E402
+from node.l1_transport.nats_client import NatsClient, NatsError, _parse_addrs  # noqa: E402
 
 RESULTS = []
 
