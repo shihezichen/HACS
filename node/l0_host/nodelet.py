@@ -64,7 +64,16 @@ import socket
 import sys
 import time
 
-import node_profile  # L0 同层：节点档案（本件全部内容的唯一推导来源）
+_HACS_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 批② 过渡：本件已归位 node/l0_host/，同层 L0 件（node_profile 及其惰性依赖 node_paths）
+# 仍留在旧目录 backend/，故旧目录一并入路径；待它们各自归位（node/l0_host/，批⑤a/⑤h）
+# 后，本循环可收回成只留本目录。
+for _hacs_p in (os.path.dirname(os.path.abspath(__file__)),
+                os.path.join(_HACS_ROOT, 'backend')):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
+
+import node_profile  # noqa: E402  L0 同层：节点档案（本件全部内容的唯一推导来源）
 
 __all__ = [
     # 绑定面

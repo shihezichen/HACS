@@ -46,11 +46,14 @@ PROJECT_ROOT = os.path.dirname(HERE)
 AGENT_TEAM = os.path.join(PROJECT_ROOT, "agent-team")
 TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
 
-if AGENT_TEAM not in sys.path:
-    sys.path.insert(0, AGENT_TEAM)
+# 批② 起被搬件按绝对包名 import（node.l0_host.nodelet），故仓根一并入路径；
+# L0 同层件 node_profile/node_paths 仍在旧目录 backend/，待其归位后本循环可收回。
+for _hacs_p in (PROJECT_ROOT, os.path.join(PROJECT_ROOT, "backend"), AGENT_TEAM):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
 
 import node_profile                                    # noqa: E402 —— L0 节点档案
-import nodelet                                         # noqa: E402 —— L0 轻量守护（取单元名与绑定默认值）
+import node.l0_host.nodelet as nodelet                 # noqa: E402 —— L0 轻量守护（取单元名与绑定默认值）
 
 EXIT_OK, EXIT_FAIL, EXIT_USAGE = 0, 1, 2
 

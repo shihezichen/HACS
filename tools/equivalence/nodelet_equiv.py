@@ -79,7 +79,7 @@ AGENT_TEAM = os.path.join(REPO, "agent-team")
 TOOLS = os.path.dirname(HERE)
 OLD_DIR = os.path.join(HERE, "_old")
 
-for _p in (AGENT_TEAM, OLD_DIR, TOOLS):
+for _p in (REPO, os.path.join(REPO, "backend"), AGENT_TEAM, OLD_DIR, TOOLS):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -784,7 +784,7 @@ def load_sides():
         sys.stderr.write("✗ 旧侧基线缺失：%s\n" % "、".join(missing))
         raise SystemExit(2)
     import node_profile as npf
-    import nodelet
+    import node.l0_host.nodelet as nodelet
     import nodelet_old_k23 as old
     return nodelet, old, npf
 
