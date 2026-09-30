@@ -33,7 +33,7 @@
 
 | 节点 | tailnet | 运行目录 | 通信层 | 业务层 | 监管 |
 |---|---|---|---|---|---|
-| **thinkbook**（本机） | <host> | `<home>\agent-team` | A2A:9920 / teamd / group_watch | — | Windows 计划任务 |
+| **thinkbook**（本机） | <host> | `<home>\agent-team` | A2A:9920 / teamd / group_watch（投递 group_watch_delivery + 账域 group_watch_pending） | — | Windows 计划任务 |
 | **lobster**（龙虾·中枢） | <host> | `<deploy-dir>` | a2a-svc / teamd / NATS | blackboard / view / chat-9984 / chat-pub / tunnel / calc / task_svc | systemd |
 | **quantum**（量子） | <host> | `<deploy-dir>` | a2a-svc / teamd / NATS | — | systemd |
 | **top001** | <host> | `<deploy-dir>` | a2a-svc / teamd / NATS | — | systemd |

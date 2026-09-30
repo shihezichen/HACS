@@ -151,9 +151,19 @@
       "note": "向量回填。刀16（阶段3）：pgvector 字面量**已收口到 L2 pg_literals.py** —— 删本地 _vector_literal，改 import 并留同名别名（175 行调用点走位置参数，未动）。原实现少 None 分支、形参名叫 values，两处差异都不可达（vec 来自 embedder 恒非 None，调用点非关键字），已在等价装置 A' 段登记"
     },
     "backend/group_watch.py": {
+      "layer": "C",
+      "port": null,
+      "note": "群守望器的**进程入口**（批④ 拆分后为薄组合根 C）：argv 解析 + 装配注入 + 分派 + 入口呈现；argv 与输出语义一字未改（Windows 计划任务 AgentTeamGroupWatch 的 <Arguments> 指向本文件名 group_watch.py，不可改名）。投递侧见 backend/group_watch_delivery.py(L1)，待回应账域侧见 backend/group_watch_pending.py(L3)。拆分前为 L3 单体（群→点名投递桥·轮询）—— ⚠️ 应改事件驱动。等价证据 tools/equivalence/group_watch_equiv.py（逐字节切片+导出面守恒）与 tools/equivalence/group_watch_round_equiv.py（投递意图对账）"
+    },
+    "backend/group_watch_delivery.py": {
+      "layer": "L1",
+      "port": null,
+      "note": "群守望器·**投递侧**（批④ 从 backend/group_watch.py 原地拆出）：口令探针 default_pass_file / 共享工具 log·http / 幂等·限流状态 State（done/last/chain 三键单文件格式一字未改）/ NATS 点名封装 deliver_ask（复用 L1 team_cli_core.call_one）/ 写回群 post_reply。不认识「群 / 待回应账」这类域概念。**待归位**：批⑤ 物理落 node/l1_transport/。析出源 backend/group_watch.py"
+    },
+    "backend/group_watch_pending.py": {
       "layer": "L3",
       "port": null,
-      "note": "群→点名投递桥（轮询）—— ⚠️ 应改事件驱动"
+      "note": "群守望器·**待回应账域侧**（批④ 从 backend/group_watch.py 原地拆出）：扫 open meet 群 / 以成员身份拉 my_pending 待回应账 / 域规则（人的 @ 优先 · Agent 链式回话上限）/ 提示词 build_prompt / 单轮编排 one_round（内部 = plan_round 纯决策 + 调投递侧原语 deliver_ask·post_reply）。依赖只向下：L3→L1（group_watch_delivery / team_cli_core）。**待归位**：批⑤ 物理落 node/l3_domain/（相归属见批④方案 §⑧.4：承载机 thinkbook 是节点相，方案建议落 node/、避免 hub→node 跨相边）"
     },
     "frontend/ui/serve.py": {
       "layer": "L4",
