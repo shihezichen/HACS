@@ -69,7 +69,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple  # noqa: F401
 import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
-import web_gateway  # L1 通行层：HTTP 入口（传输职责外置）
+import web_gateway  # L1 通信层：HTTP 入口（传输职责外置）
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

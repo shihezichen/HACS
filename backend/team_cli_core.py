@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""team_cli_core.py —— 成员侧 CLI 的**通行层管道**（L1）
+"""team_cli_core.py —— 成员侧 CLI 的**通信层管道**（L1）
 
 刀15（阶段3）从 team.py 摘出：team.py 改归组合根 C 之后，「C 不含业务与传输实现」
-这一条要求它手里不能再攥着 NATS 调用与身份/去重这类通行层实现。于是把下面这些
+这一条要求它手里不能再攥着 NATS 调用与身份/去重这类通信层实现。于是把下面这些
 **逐字节原样**搬到本件，team.py 与 L3 域件 team_group.py 共同 import 它：
 
   · 连接与扇出：discover_online（扫心跳取在线名单）/ call_one（单成员一条独立连接

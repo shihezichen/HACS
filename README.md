@@ -33,7 +33,7 @@ Human-Agent Communication System — 人机群聊前端 + 多 Agent 通信后端
 | [`docs/architecture.md`](docs/architecture.md) | 终态架构文档（分层 / 端口 / 门禁 / 刀序 / 决定 / 回滚 / 已知项），**入口** |
 | [`docs/HACS-分层规划-handoff.html`](docs/HACS-分层规划-handoff.html) | 分层规划（五层 + 三横切、七条判据、六期落地） |
 | [`docs/HACS-分层台账.html`](docs/HACS-分层台账.html) | 分层台账（件 → 层 → 端口 → 契约 → 门禁基线，唯一权威版本） |
-| [`docs/l1-contract.md`](docs/l1-contract.md) | L1 通行层公共面契约（9 条 + 出处行号 + 使用方 + 兼容规则） |
+| [`docs/l1-contract.md`](docs/l1-contract.md) | L1 通信层公共面契约（9 条 + 出处行号 + 使用方 + 兼容规则） |
 | [`agent-team/docs/l5-roster-archive.md`](agent-team/docs/l5-roster-archive.md) | L0 名册档案与「档案 + 凭据 ⇒ 用户区」自证契约 |
 | [`docs/l5-membership-audit.md`](docs/l5-membership-audit.md) | 成员入网只读对账器契约 |
 | [`docs/公网入口运维手册-认证与隧道.md`](docs/公网入口运维手册-认证与隧道.md) | 公网入口（认证 + 隧道）运维手册 |
@@ -54,7 +54,7 @@ Human-Agent Communication System — 人机群聊前端 + 多 Agent 通信后端
 - **公网入口与隧道**：`tunnel.py`（命名隧道）、`deploy_auth.py`（入口认证部署，9942）、`repair_gateway.py`（网关修复）、`snap_portal.py`（门户快照）。
 - **入口验收**：`accept_auth.py`、`verify_portal_public.py`。
 
-### `L1` 通行层 Transport（投信封 / 保投到 / 不重复 / 可观测 / 成员入网控制面）
+### `L1` 通信层 Transport（投信封 / 保投到 / 不重复 / 可观测 / 成员入网控制面）
 
 解决「消息怎么送到对方手里」—— 只管传输，不含任何群聊 / 会议语义。
 

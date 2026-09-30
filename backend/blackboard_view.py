@@ -103,7 +103,7 @@ from http.server import ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
 import view_auth                        # 账号 / 会话 / 角色 / 审计，纯标准库
-import web_gateway                      # L1 通行层：HTTP 应答出口与路由分发
+import web_gateway                      # L1 通信层：HTTP 应答出口与路由分发
 
 VERSION = "1.5"
 

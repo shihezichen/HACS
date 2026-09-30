@@ -105,7 +105,7 @@ from http.server import ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import embedder  # 同目录模块；导入只读环境变量，不会加载模型
-import web_gateway  # L1 通行层：HTTP 应答出口与非 GET 方法的路由分发
+import web_gateway  # L1 通信层：HTTP 应答出口与非 GET 方法的路由分发
 # L2 适配层：pgvector 文本字面量与时间归一的**单一出处**（刀16 从本件收口，实现未改一字）
 from pg_literals import to_utc, vector_literal
 

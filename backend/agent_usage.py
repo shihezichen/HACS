@@ -17,11 +17,11 @@
         分母。**唯一口径链**：Hermes 生效配置 → Hermes 模型目录 → 本模块兜底表。
     backend_kind(agent_cfg) -> "hermes" | "openclaw" | "other"
     hermes_session_headers(agent_cfg, caller, session_id) -> dict
-        Hermes OpenAI 兼容路由认的会话头（适配细节，不该长在通行层里）。
+        Hermes OpenAI 兼容路由认的会话头（适配细节，不该长在通信层里）。
 
 为什么这一层单独存在
 --------------------
-2026-09-25 实测：同一套读法原先在 `a2a_svc.py`（L1 通行层）与 `ctx_watermark.py`
+2026-09-25 实测：同一套读法原先在 `a2a_svc.py`（L1 通信层）与 `ctx_watermark.py`
 （渲染器）里各长一份，且**兜底窗口表互相矛盾**（1,000,000 vs 200,000）。分母差 5 倍，
 水位就差 5 倍 —— 自愈行为取决于你在哪台机器、走哪条路径，这是"口径分裂"而非"重复代码"。
 现在只有这里一份；两份调用方都改成薄委托，调用面不变。

@@ -3,7 +3,7 @@
 """
 a2a_svc.py —— A2A 服务的**组合根**（层 C：进程入口装配）
 
-为什么有这个文件：A2A 边缘端点属 L1 通行层，而「上下文用量」属 L2 适配层。
+为什么有这个文件：A2A 边缘端点属 L1 通信层，而「上下文用量」属 L2 适配层。
 原先 L1 的 a2a_svc 直接 import L2 的 agent_usage，是一条**反向依赖**（下层引用上层），
 在 tools/hacs_layers.json 里登记为例外。本件把这条边翻转过来：
 
@@ -14,7 +14,7 @@ a2a_svc.py —— A2A 服务的**组合根**（层 C：进程入口装配）
 
 层 C 的语义：C 可 import 任意层；任何层不得 import C。本件因此**只做装配与注入**，
 不含业务逻辑、不含传输实现 —— 唯一的例外是 `/ctx-usage` 的响应构造，它本就是
-L2 能力的对外表述，放在装配侧而不是通行层，才不会把适配语义漏回 L1。
+L2 能力的对外表述，放在装配侧而不是通信层，才不会把适配语义漏回 L1。
 
 文件名与命令行参数保持不变（systemd 单元与 Windows 计划任务都指向本文件）：
     python a2a_svc.py --host <tailnet-ip> --port 9920 \
@@ -26,7 +26,7 @@ import sys
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
-import a2a_edge                     # L1 通行层：A2A 边缘端点实现（传输，不含 Agent 差异）
+import a2a_edge                     # L1 通信层：A2A 边缘端点实现（传输，不含 Agent 差异）
 import agent_usage                  # L2 适配层：水位/窗口/后端判定/会话头单一实现
 
 # 对外可见的版本号仍由 L1 实现件持有（Server 头 / healthz / Agent Card 同一份）。
