@@ -64,8 +64,14 @@ import urllib.parse
 import uuid
 from http.server import ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
-import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
-import node_profile as _npf  # L0 节点档案：宿主事实唯一真源（codex 工作目录；env 优先）
+
+# 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                os.path.dirname(os.path.abspath(__file__))):
+    sys.path.insert(0, _hacs_p)
+
+from node.l0_host import node_paths as _np  # noqa: E402  L0 平台层：宿主默认值唯一出处（env 优先）
+from node.l0_host import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（codex 工作目录；env 优先）
 import web_gateway  # L1 通信层：HTTP 入口（传输职责外置）
 
 VERSION = "1.0"

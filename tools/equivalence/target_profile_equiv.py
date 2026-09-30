@@ -41,8 +41,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 AG = os.path.join(REPO, "agent-team")
-if AG not in sys.path:
-    sys.path.insert(0, AG)
+for _p in (REPO, AG):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 #: 参与组合的主机值（含 user@host / 裸 host / 未登记 / 空串）
 HOSTS = ["<user>@<node>", "thinkbook", "lobster", "quantum", "top001",
@@ -108,7 +109,7 @@ def _wipe(extra=None):
 
 def _cell(host):
     """在当前 env 下量一格。模块级常量随 env 求值，所以两个模块都必须重载。"""
-    import node_paths
+    from node.l0_host import node_paths
     importlib.reload(node_paths)
     os.environ["CHAT_ENRICH_SSH"] = host        # 空串时 ssh_argv 会退回 SSH_TARGET，见下
     import agent_model
@@ -141,7 +142,7 @@ def check_ssh_argv():
     for host, must, kind in [("<user>@<node>", "<home>/AppData/Local/hermes/scripts/claude_exec.py", "Windows 路径"),
                              ("root@lobster", "<home>/.local/share/hermes/scripts/claude_exec.py", "posix 路径")]:
         _wipe({"CHAT_ENRICH_SSH": host})
-        importlib.reload(importlib.import_module("node_paths"))
+        importlib.reload(importlib.import_module("node.l0_host.node_paths"))
         importlib.reload(agent_model)
         argv = agent_model.ssh_argv()
         ok = must in argv[-1]

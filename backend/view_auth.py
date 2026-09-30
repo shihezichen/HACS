@@ -60,7 +60,13 @@ import threading
 import time
 import unicodedata
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-import node_paths as _np  # L0 平台层：宿主默认值唯一出处（env 优先）
+
+# 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                os.path.dirname(os.path.abspath(__file__))):
+    sys.path.insert(0, _hacs_p)
+
+from node.l0_host import node_paths as _np  # noqa: E402  L0 平台层：宿主默认值唯一出处（env 优先）
 
 VERSION = "1.0"
 

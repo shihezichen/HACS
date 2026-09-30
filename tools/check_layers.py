@@ -487,7 +487,9 @@ def self_checks(files, pkg_idx, edges, layers, phases):
     # ② 已搬迁两件（批① 回归锚）：绝对包路径可解析 **且** 入边被统计到。
     #    「边数恢复」不再靠总数拍胸脯：这里逐件断言，并给出行正则（不经 ast）的独立口径交叉核对。
     pins = [('node.l1_transport.nats_client', 'node/l1_transport/nats_client.py'),
-            ('hub.l1_relay.gen_nats_conf', 'hub/l1_relay/gen_nats_conf.py')]
+            ('hub.l1_relay.gen_nats_conf', 'hub/l1_relay/gen_nats_conf.py'),
+            ('node.l0_host.node_paths', 'node/l0_host/node_paths.py'),
+            ('node.l0_host.node_profile', 'node/l0_host/node_profile.py')]
     ok2, det2 = True, []
     for dotted, want in pins:
         hit = _lookup_pkg(pkg_idx, dotted)

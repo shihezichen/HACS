@@ -783,7 +783,7 @@ def load_sides():
     if missing:
         sys.stderr.write("✗ 旧侧基线缺失：%s\n" % "、".join(missing))
         raise SystemExit(2)
-    import node_profile as npf
+    from node.l0_host import node_profile as npf
     import node.l0_host.nodelet as nodelet
     import nodelet_old_k23 as old
     return nodelet, old, npf

@@ -124,7 +124,7 @@ for _hacs_p in (PROJECT_ROOT, AGENT_TEAM):
     if _hacs_p not in sys.path:
         sys.path.insert(0, _hacs_p)
 
-import node_profile                                     # noqa: E402 —— L0 节点档案（宿主事实唯一真源）
+from node.l0_host import node_profile                  # noqa: E402 —— L0 节点档案（宿主事实唯一真源）
 
 EXIT_OK, EXIT_DRIFT, EXIT_COLLECT = 0, 1, 2
 

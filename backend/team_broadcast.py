@@ -41,7 +41,7 @@ for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     sys.path.insert(0, _hacs_p)
 
 from node.l1_transport.nats_client import NatsClient, read_secret_file  # noqa: E402
-import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（help 文本里的地址形态）
+from node.l0_host import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（help 文本里的地址形态）
 
 MAX_TIMEOUT = 300.0
 DEFAULT_TIMEOUT = 120.0

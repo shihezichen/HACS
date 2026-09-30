@@ -63,7 +63,7 @@ OLD_MOD = os.path.join(OLD_DIR, "host_truth_old_k22.py")
 #: 改前树（契约 §1 的行号都是这棵树上的）
 BASE_REV = "c529b32"
 
-for p in (AG, OLD_DIR):
+for p in (REPO, AG, OLD_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -309,7 +309,7 @@ def check_baseline(old):
 
 # ============================================================ 主流程
 def run(negative=False):
-    import node_profile as npf
+    from node.l0_host import node_profile as npf
     import host_truth_old_k22 as old
 
     if negative:

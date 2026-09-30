@@ -235,17 +235,17 @@
       "port": null,
       "note": "群页面验收"
     },
-    "backend/node_paths.py": {
+    "node/l0_host/node_paths.py": {
       "layer": "L0",
       "port": null,
       "duty": "平台层：**本机**宿主默认值唯一出处（运行/配置/日志目录、node、claude/codex/pi 可执行路径）。env 优先 > 平台惯例，只读纯函数。host_path_owner 仍是本件",
-      "note": "L0 平台层：宿主默认值唯一出处（刀 3 新增）；env 优先 > 平台惯例。刀 4 曾在本件加「目标主机档案」雏形；**刀21（阶段4）把那一整段搬到同层 L0 node_profile.py 正式化**（规划原话：阶段4 正式化、并入节点档案、不另立第二处真值）。本件末尾只剩委托与别名 —— ENV_TARGET_PROFILE_JSON / NT_TARGET_HOME / POSIX_TARGET_HOME / TARGET_FALLBACK_FLAVOUR / _TARGET_CLAUDE_SUB / _TARGET_PROFILES / _target_host / _target_table / _target_profile / target_known / target_flavour / target_home / target_claude_exec 逐名保留，且**指向 node_profile 里的同一个对象**（不是拷贝），调用面与属性面一字未改。唯一属性面差异：`import json` 随实现搬走后成为死 import，已删（stdlib 泄漏名，全仓零 node_paths.json 引用；先例＝刀15）"
+      "note": "L0 平台层：宿主默认值唯一出处（刀 3 新增）；env 优先 > 平台惯例。刀 4 曾在本件加「目标主机档案」雏形；**刀21（阶段4）把那一整段搬到同层 L0 node_profile.py 正式化**（规划原话：阶段4 正式化、并入节点档案、不另立第二处真值）。本件末尾只剩委托与别名 —— ENV_TARGET_PROFILE_JSON / NT_TARGET_HOME / POSIX_TARGET_HOME / TARGET_FALLBACK_FLAVOUR / _TARGET_CLAUDE_SUB / _TARGET_PROFILES / _target_host / _target_table / _target_profile / target_known / target_flavour / target_home / target_claude_exec 逐名保留，且**指向 node_profile 里的同一个对象**（不是拷贝），调用面与属性面一字未改。唯一属性面差异：`import json` 随实现搬走后成为死 import，已删（stdlib 泄漏名，全仓零 node_paths.json 引用；先例＝刀15）。批⑤a：本件已归位 node/l0_host/（L0 节点侧宿主），引用方按批① 惯例改绝对包名"
     },
-    "backend/node_profile.py": {
+    "node/l0_host/node_profile.py": {
       "layer": "L0",
       "port": null,
       "duty": "平台层：**节点档案**（nodelet 的静态那一半）。一句话职责＝让上层对操作系统零感知 —— ①节点身份（flavour/home）②运行与配置目录（薄委托 node_paths）③执行器路径 claude/codex/pi/node（薄委托）④**目标主机档案**（target_known/target_flavour/target_home/target_claude_exec，刀4 雏形在此正式化）⑤宿主真源路径（Hermes state.db / config.yaml / agent 包目录、OpenClaw sessions.json 的候选来源）⑥**只读探针**（open_hermes_state_ro / hermes_session_usage_row / hermes_active_messages / openclaw_session_entry / hermes_config_model_window）⑦日志与探针口（log_dir / a2a_probe_base / a2a_probe_token）",
-      "note": "L0 平台层：节点档案（刀21 阶段4 新增）。两条铁律：**只读**（SQLite 一律 mode=ro URI 打开、用完即 close，不建目录不写状态）；**不编造**（没配置/文件不在/记录不在 → None 或空；真出错 → **原样抛**，由调用方按自己口径降级记日志 —— 不把「打不开」偷偷变成「没有数据」）。未登记目标主机沿用 posix 兜底 + target_known()=False。①②③ 是对同层 node_paths 的薄委托，且**惰性 import**（函数体内 import node_paths），所以 node_paths → node_profile 的模块级 import 不成环。本件承接 storage_handle_exceptions 里那条例外的下沉终点：sqlite3 句柄从 L2 搬到这里。等价证据 tools/equivalence/node_profile_equiv.py（26 格冻结矩阵 + agent_usage 行为面 13 例样本）"
+      "note": "L0 平台层：节点档案（刀21 阶段4 新增）。两条铁律：**只读**（SQLite 一律 mode=ro URI 打开、用完即 close，不建目录不写状态）；**不编造**（没配置/文件不在/记录不在 → None 或空；真出错 → **原样抛**，由调用方按自己口径降级记日志 —— 不把「打不开」偷偷变成「没有数据」）。未登记目标主机沿用 posix 兜底 + target_known()=False。①②③ 是对同层 node_paths 的薄委托，且**惰性 import**（函数体内 import node_paths），所以 node_paths → node_profile 的模块级 import 不成环。本件承接 storage_handle_exceptions 里那条例外的下沉终点：sqlite3 句柄从 L2 搬到这里。等价证据 tools/equivalence/node_profile_equiv.py（26 格冻结矩阵 + agent_usage 行为面 13 例样本）。批⑤a：本件已归位 node/l0_host/（L0 节点侧宿主），引用方按批① 惯例改绝对包名"
     },
     "agent-team/member_roster.py": {
       "layer": "L0",
@@ -450,10 +450,10 @@
       }
     ],
     "host_path_owner": [
-      "backend/node_paths.py",
-      "backend/node_profile.py"
+      "node/l0_host/node_paths.py",
+      "node/l0_host/node_profile.py"
     ],
-    "host_path_owner_readme": "口径（刀33 阶段6 后收尾更新；原刀22 口径见下段）：**宿主字面量的唯一合法去处 = L0 这两件**，故本键自刀33 起是**列表**，check_hardcode 逐项 endswith 匹配（兼容旧形态：写成字符串时视为单元素列表）。只许这两件，不许再添第三件 —— 任何**非**列表内件持宿主路径字面量，检查3 仍报「要收」，判据一条未放宽。两件的分工：backend/node_profile.py 是**宿主事实的真源**（节点档案），同层 backend/node_paths.py 是**本机路径默认值的委托面**（它持有的 runtime/etc/log/node/claude/codex/pi 那组字面量仍是合法去处）。刀33 前本键是单值字符串、只能写一个，只好写真源那一件，另一件靠「检查3 只扫 L1–L4、L0 不在扫描面内」侥幸不报 —— 那是巧合不是判据，本刀把它写成明文。刀22 把散在 13 个非 L0 件里的 15 处非环回宿主事实（协作域节点地址 ×12、绝对路径常量 ×3）收进 node_profile.py 的 ⑧⑨ 两组，调用方 env 变量名与覆盖优先级一字未改。收口后检查3 在 L1–L4 的**非环回**命中 = 0；余下命中全是 127.0.0.1 等本地环回默认（合法，不收）与 2 处 PATH_RX 误判（见 path_known_false_positives；原第三条随件退役已撤登，见下）。**2026-09-30 台账修复批**：本键与 path_known_false_positives 的件路径原先仍写 `agent-team/` 前缀，而两件早已随批① 前移位落在 `backend/` —— endswith 匹配因此全线失效，豁免空转、检查3 把 2 处正则语法误判当成「要收」的真硬编码。本次**只把路径改真**（判据、检查、扫描面一条未动），第三条 `session_ctx_archiver.py` 因件已不在仓内（git ls-files 无此件）**一并撤登** —— 保留一条没有生效对象的登记只会误导；若该件回归，检查3 照常报「要收」，不被旧登记背书。",
+    "host_path_owner_readme": "口径（刀33 阶段6 后收尾更新；原刀22 口径见下段）：**宿主字面量的唯一合法去处 = L0 这两件**，故本键自刀33 起是**列表**，check_hardcode 逐项 endswith 匹配（兼容旧形态：写成字符串时视为单元素列表）。只许这两件，不许再添第三件 —— 任何**非**列表内件持宿主路径字面量，检查3 仍报「要收」，判据一条未放宽。两件的分工：node/l0_host/node_profile.py 是**宿主事实的真源**（节点档案），同层 node/l0_host/node_paths.py 是**本机路径默认值的委托面**（它持有的 runtime/etc/log/node/claude/codex/pi 那组字面量仍是合法去处）。刀33 前本键是单值字符串、只能写一个，只好写真源那一件，另一件靠「检查3 只扫 L1–L4、L0 不在扫描面内」侥幸不报 —— 那是巧合不是判据，本刀把它写成明文。刀22 把散在 13 个非 L0 件里的 15 处非环回宿主事实（协作域节点地址 ×12、绝对路径常量 ×3）收进 node_profile.py 的 ⑧⑨ 两组，调用方 env 变量名与覆盖优先级一字未改。收口后检查3 在 L1–L4 的**非环回**命中 = 0；余下命中全是 127.0.0.1 等本地环回默认（合法，不收）与 2 处 PATH_RX 误判（见 path_known_false_positives；原第三条随件退役已撤登，见下）。**2026-09-30 台账修复批**：本键与 path_known_false_positives 的件路径原先仍写 `agent-team/` 前缀，而两件早已随批① 前移位落在 `backend/` —— endswith 匹配因此全线失效，豁免空转、检查3 把 2 处正则语法误判当成「要收」的真硬编码。本次**只把路径改真**（判据、检查、扫描面一条未动），第三条 `session_ctx_archiver.py` 因件已不在仓内（git ls-files 无此件）**一并撤登** —— 保留一条没有生效对象的登记只会误导；若该件回归，检查3 照常报「要收」，不被旧登记背书。",
     "path_known_false_positives": [
       {
         "file": "backend/blackboard_svc.py",

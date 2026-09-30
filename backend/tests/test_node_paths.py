@@ -15,9 +15,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.dirname(ROOT))  # 仓根：node.l0_host 绝对包名 import 需要
 sys.path.insert(0, ROOT)
 
-import node_paths as np  # noqa: E402
+from node.l0_host import node_paths as np  # noqa: E402
 
 ENVS = [np.ENV_RUNTIME_DIR, np.ENV_ETC_DIR, np.ENV_LOG_DIR, np.ENV_NODE_EXE]
 

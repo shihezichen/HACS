@@ -19,10 +19,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.dirname(ROOT))  # 仓根：node.l0_host 绝对包名 import 需要
 sys.path.insert(0, ROOT)
 
 import agent_model as am      # noqa: E402
-import node_paths as np       # noqa: E402
+from node.l0_host import node_paths as np  # noqa: E402
 
 WIPE = ["CHAT_ENRICH_ENABLE", "CHAT_ENRICH_SSH", "CHAT_ENRICH_SSH_BIN", "CHAT_ENRICH_CMD",
         "CHAT_ENRICH_KEY", "CHAT_ENRICH_KNOWN_HOSTS", "CHAT_ENRICH_TIMEOUT_S",

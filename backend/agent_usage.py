@@ -42,10 +42,18 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 import urllib.parse
 import urllib.request
+from os.path import abspath, dirname
 from typing import Any, Dict, Optional, Tuple
-import node_profile as _npf  # L0 平台层：节点档案（宿主路径 / 凭据 / 真源只读探针）
+
+# 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
+for _hacs_p in (dirname(dirname(abspath(__file__))), dirname(abspath(__file__))):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
+
+from node.l0_host import node_profile as _npf  # noqa: E402  L0 平台层：节点档案（宿主路径 / 凭据 / 真源只读探针）
 
 LOG = logging.getLogger("agent_usage")
 

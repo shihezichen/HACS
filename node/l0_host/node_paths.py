@@ -40,8 +40,18 @@ lobster（Linux）把本机的 `/root/.local/.../claude_exec.py` 当成 ssh 目�
 """
 
 import os
+import sys
 
-import node_profile  # L0 同层：节点档案（目标主机档案的唯一真值；本文件只做委托）
+# 批⑤a 归位：本件已搬入 node/l0_host/。仓根 + 本目录一并入路径（批① 惯例），
+# 同层件按**绝对包名** import —— 与全仓引用口径一致，并保证
+# `node.l0_host.node_profile` 全进程**唯一实例**（裸名 import 会另起一个顶层副本，
+# 值虽相同但对象不同一，破坏「同一个对象不是拷贝」这条不变量）。
+_HACS_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+for _hacs_p in (_HACS_ROOT, os.path.dirname(os.path.abspath(__file__))):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
+
+from node.l0_host import node_profile  # noqa: E402  L0 同层：节点档案（目标主机档案的唯一真值；本文件只做委托）
 
 __all__ = ["runtime_dir", "etc_dirs", "etc_dir", "log_dir", "node_exe",
            "pi_cli_js", "pi_workdir", "claude_exec", "claude_workdir",

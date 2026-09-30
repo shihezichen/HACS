@@ -65,7 +65,7 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 AGENT_TEAM = os.path.join(REPO, "agent-team")
 OLD_DIR = os.path.join(HERE, "_old")
 
-for _p in (AGENT_TEAM, OLD_DIR):
+for _p in (REPO, AGENT_TEAM, OLD_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -148,8 +148,8 @@ def load_sides():
         raise SystemExit(2)
     import node_paths_old_k21 as old_np
     import agent_usage_old_k21 as old_au
-    import node_paths as new_np
-    import node_profile as npf
+    from node.l0_host import node_paths as new_np
+    from node.l0_host import node_profile as npf
     import agent_usage as new_au
     return old_np, old_au, new_np, npf, new_au
 

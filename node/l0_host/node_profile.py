@@ -58,6 +58,14 @@
 
 import os
 import sqlite3
+import sys
+
+# 批⑤a 归位：本件已搬入 node/l0_host/。仓根 + 本目录一并入路径（批① 惯例），
+# `_paths()` 里按**绝对包名**惰性 import 同层件（保证全进程唯一实例，不开裸名副本）。
+_HACS_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+for _hacs_p in (_HACS_ROOT, os.path.dirname(os.path.abspath(__file__))):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
 
 __all__ = [
     # ① 节点身份
@@ -110,8 +118,12 @@ def _first_env(*names):
 
 
 def _paths():
-    """同层 `node_paths`（宿主字面量的唯一合法去处）。惰性 import：两件谁先加载都不成环。"""
-    import node_paths
+    """同层 `node_paths`（宿主字面量的唯一合法去处）。惰性 import：两件谁先加载都不成环。
+
+    按**绝对包名**取（批⑤a）：裸名会另起一个顶层副本，值相同却不是同一个对象，
+    `node_paths` 文档串声明的「同一对象不是拷贝」不变量会被打破。
+    """
+    from node.l0_host import node_paths
     return node_paths
 
 
