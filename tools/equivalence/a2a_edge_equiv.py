@@ -39,6 +39,8 @@ import sys
 import threading
 import time
 
+from _frozen import write_frozen
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 #: 旧侧基线的**来源仓**：`agent-team/` 时期的提交（改造前的源码）在**源码仓**里，
@@ -72,8 +74,7 @@ def materialize_old(ref):
     if b"ctx-usage" not in raw or b"import agent_usage" not in raw:
         print("警告：%s 的 a2a_svc.py 里没有 /ctx-usage 或没有 import agent_usage，"
               "那它就不是「旧实现」" % ref)
-    open(target, "wb").write(raw)
-    return target
+    return write_frozen(target, raw, "a2a_svc.py")
 
 
 def make_agents():

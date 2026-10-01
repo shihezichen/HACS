@@ -60,6 +60,8 @@ import subprocess
 import sys
 import threading
 
+from _frozen import write_frozen
+
 # 本机的**系统代理**会把 `_calc_proxy()` 的 urllib 请求劫走 —— 见 `_DeadUpstream`：
 # 不绕开的话，「上游不可用」那几例的 502 正文里写的是**代理进程**的报错，而代理对一个
 # 连不上的目标时而回 RST、时而回 FIN，旧侧新侧各掷一次骰子就成了假不一致。
@@ -136,7 +138,7 @@ def materialize_old(ref):
     raw = raw.replace(b"\r\n", b"\n")        # 工作区若是 CRLF 检出，快照仍存 LF
     if b"class ChatHandler" not in raw:
         print("警告：%s 的 chat_svc.py 里没有 ChatHandler，那它就不是「旧实现」" % ref)
-    io.open(OLD_FILE, "wb").write(raw)
+    write_frozen(OLD_FILE, raw, "chat_svc.py")
 
 
 # ------------------------------------------------------------------ 假件（无状态）

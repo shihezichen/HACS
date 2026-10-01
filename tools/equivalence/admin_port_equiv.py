@@ -20,6 +20,8 @@ import sys
 import threading
 import time
 
+from _frozen import write_frozen
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 #: 旧侧基线的**来源仓**：`agent-team/` 时期的提交（改造前的源码）在**源码仓**里，
@@ -44,8 +46,7 @@ def materialize_old(ref):
         sys.exit(2)
     if b"class AdminHandler" not in raw:
         print("警告：%s 的 teamd.py 里已经没有 AdminHandler，那它就不是「旧实现」" % ref)
-    open(target, "wb").write(raw)
-    return target
+    return write_frozen(target, raw, "teamd.py")
 
 
 def main():

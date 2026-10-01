@@ -45,6 +45,8 @@ import subprocess
 import sys
 import threading
 
+from _frozen import write_frozen
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 #: 保留注入：`_old/` 冻结快照按裁定一字不动，它内部是**裸名** import
@@ -96,7 +98,7 @@ def materialize_old(ref):
     raw = raw.replace(b"\r\n", b"\n")        # 工作区若是 CRLF 检出，快照仍存 LF
     if b"class BlackboardHandler" not in raw:
         print("警告：%s 的 blackboard_svc.py 里没有 BlackboardHandler，那它就不是「旧实现」" % ref)
-    io.open(OLD_FILE, "wb").write(raw)
+    write_frozen(OLD_FILE, raw, "blackboard_svc.py")
 
 
 # ------------------------------------------------------------------ 假数据库

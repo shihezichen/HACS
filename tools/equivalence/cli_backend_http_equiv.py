@@ -53,6 +53,8 @@ BUSY_WAIT_S = 0.3        # 同成员排队等待；503 用例靠它快速超时
 # 假 CLI：argv = [tag, pidfile, donefile, 任务文本]（与 tests/test_cli_backend.py 同款）
 FAKE_CLI = r'''# -*- coding: utf-8 -*-
 import os, sys, time
+
+from _frozen import write_frozen
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 tag, pidfile, donefile = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -103,7 +105,7 @@ def materialize_old(ref):
         sys.exit(2)
     if b"class CLIBackendHandler" not in raw:
         print("警告：%s 的 cli_backend.py 里没有 CLIBackendHandler，那它就不是「旧实现」" % ref)
-    io.open(OLD_FILE, "wb").write(raw)
+    write_frozen(OLD_FILE, raw, "cli_backend.py")
 
 
 # ------------------------------------------------------------------ 起服务
