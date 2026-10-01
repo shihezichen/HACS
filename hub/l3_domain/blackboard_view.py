@@ -108,7 +108,7 @@ for _hacs_p in (os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from node.l0_host import node_paths as _np  # noqa: E402  L0 平台层：宿主默认值唯一出处（env 优先）
 from node.l0_host import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（协作域基址；env 优先）
 
-from backend import view_auth  # 账号 / 会话 / 角色 / 审计，纯标准库；批⑤f 过渡（⑤i 搬 hub/x/ 后再改）
+from hub.x import view_auth  # 账号 / 会话 / 角色 / 审计，纯标准库
 from node.l1_transport import web_gateway                      # L1 通信层：HTTP 应答出口与路由分发
 
 VERSION = "1.5"

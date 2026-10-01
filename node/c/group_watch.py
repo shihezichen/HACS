@@ -33,8 +33,8 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# 批⑤b：L1 投递侧已归位 node/l1_transport/，故仓根也要入搜索路径（HERE 仍是本目录、语义不变）。
-for _hacs_p in (os.path.dirname(HERE), HERE):
+# 批⑤g：本件已归位 node/c/，仓根为 dirname(dirname(HERE))（HERE 仍是本目录、语义不变）。
+for _hacs_p in (os.path.dirname(os.path.dirname(HERE)), HERE):
     if _hacs_p not in sys.path:
         sys.path.insert(0, _hacs_p)
 

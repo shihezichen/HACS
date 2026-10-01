@@ -1124,7 +1124,7 @@ def main():
     sys.path[:0] = [OLD, AG]
     import chat_svc_old                                        # noqa: E402
     from hub.l3_domain import chat_svc                                            # noqa: E402
-    import view_auth                                           # noqa: E402
+    from hub.x import view_auth                                # noqa: E402
 
     global COOKIE_NAME
     COOKIE_NAME = view_auth.SESSION_COOKIE

@@ -38,7 +38,7 @@ for _hacs_p in (_HACS_ROOT,
     if _hacs_p not in sys.path:
         sys.path.insert(0, _hacs_p)
 from node.l0_host import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（配置目录 / 路由凭据文件）
-import member_roster as _roster  # noqa: E402  L0 名册档案：成员集合与规范序的唯一真源
+from node.l0_host import member_roster as _roster  # noqa: E402  L0 名册档案：成员集合与规范序的唯一真源
 
 # PHASE2_TODO: 待节点注入 env 后删除
 AGENT_TEAM_NATS_DIR = os.environ.get("AGENT_TEAM_NATS_DIR") or _npf.nats_conf_dir_posix()

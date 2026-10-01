@@ -50,7 +50,7 @@ OLD_SNAPSHOT = os.path.join(HERE, "_old", "blackboard_view_old.py")
 
 sys.path.insert(0, AGENT_TEAM)
 
-import view_auth  # noqa: E402  —— 两个实例共用同一份认证实现
+from hub.x import view_auth  # noqa: E402  —— 两个实例共用同一份认证实现
 
 
 # --- 装载两个被测模块 -------------------------------------------------

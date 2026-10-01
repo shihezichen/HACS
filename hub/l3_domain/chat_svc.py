@@ -48,7 +48,7 @@ for _hacs_p in (os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
     sys.path.insert(0, _hacs_p)
 
 from node.l0_host import node_paths as _np  # noqa: E402  L0 平台层：宿主默认值唯一出处（env 优先）
-from backend import view_auth  # noqa: E402  —— 账号 / 会话 / 角色 / 密级，与看板同一套口径；批⑤f 过渡（⑤i 搬 hub/x/ 后再改）
+from hub.x import view_auth  # noqa: E402  —— 账号 / 会话 / 角色 / 密级，与看板同一套口径
 #: L2 适配层：模型执行器「怎么调」+ Agent 展示名。本件只留薄委托，调用点不变。
 from hub.l2_adapter import agent_model  # noqa: E402
 #: L1 通信层：HTTP 应答出口（写 socket 那一段）与**非 GET 方法**的路由分发。

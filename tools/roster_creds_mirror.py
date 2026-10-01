@@ -67,10 +67,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+ROOT = os.path.dirname(HERE)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 import roster_derive_conf as rdc                       # noqa: E402 —— 采集面的唯一出处（不另写一套）
 
-import member_roster                                   # noqa: E402 —— L0 名册档案（成员真源；rdc 已把 agent-team 注入 path）
+from node.l0_host import member_roster                 # noqa: E402 —— L0 名册档案（成员真源）
 
 EXIT_OK, EXIT_DRIFT, EXIT_COLLECT = 0, 1, 2
 

@@ -48,7 +48,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 from hub.l3_domain import blackboard_view as bv  # noqa: E402
-import view_auth  # noqa: E402
+from hub.x import view_auth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 测试夹具真值（硬编码清零 Phase 1.5）

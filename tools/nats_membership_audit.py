@@ -115,7 +115,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
-AGENT_TEAM = os.path.join(PROJECT_ROOT, "agent-team")
+AGENT_TEAM = os.path.join(PROJECT_ROOT, "node", "l0_host")
 TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
 BASELINE_PATH = os.path.join(HERE, "nats_membership_audit_baseline.json")
 
@@ -777,7 +777,7 @@ def node_dirs(name, target):
 
 def collect_live(hubs, targets, timeout=40.0):
     """只读采真机 → `artifacts`。远端只发 `cat` / `ls` / `curl -s`，一个写操作都没有。"""
-    import member_roster                                 # noqa: E402 —— L0 名册档案（期望侧唯一真源）
+    from node.l0_host import member_roster               # noqa: E402 —— L0 名册档案（期望侧唯一真源）
     nodes = sorted(targets)
     art = {"hubs": sorted(hubs), "nodes": nodes,
            "conf": {}, "connz": {}, "routez": {}, "creds": {},

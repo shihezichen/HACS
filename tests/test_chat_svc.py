@@ -43,7 +43,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from hub.l3_domain import chat_svc as cs  # noqa: E402
-import view_auth  # noqa: E402
+from hub.x import view_auth  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 测试夹具真值（硬编码清零 Phase 1.5）

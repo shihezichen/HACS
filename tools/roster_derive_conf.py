@@ -71,7 +71,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
-AGENT_TEAM = os.path.join(PROJECT_ROOT, "agent-team")
+AGENT_TEAM = os.path.join(PROJECT_ROOT, "node", "l0_host")
 TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
 
 # 批① 起被搬件按绝对包名 import，故仓根一并入路径。
@@ -80,7 +80,7 @@ for _hacs_p in (PROJECT_ROOT, AGENT_TEAM):
         sys.path.insert(0, _hacs_p)
 
 from node.l0_host import node_profile                  # noqa: E402 —— L0 节点档案（宿主事实唯一真源）
-import member_roster                                   # noqa: E402 —— L0 名册档案（成员真源）
+from node.l0_host import member_roster                 # noqa: E402 —— L0 名册档案（成员真源）
 
 EXIT_OK, EXIT_DIFF, EXIT_COLLECT = 0, 1, 2
 

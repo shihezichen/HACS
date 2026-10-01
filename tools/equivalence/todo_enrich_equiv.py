@@ -74,7 +74,7 @@ import subprocess
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import node_paths as _np
-import view_auth
+from hub.x import view_auth
 """
 
 

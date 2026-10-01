@@ -52,10 +52,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 OLD = os.path.join(HERE, "_old", "gen_nats_conf_old_k30.py")
 NEW = os.path.join(ROOT, "agent-team", "gen_nats_conf.py")
-AGENT_TEAM_DIR = os.path.join(ROOT, "agent-team")
-if AGENT_TEAM_DIR not in sys.path:
-    sys.path.insert(0, AGENT_TEAM_DIR)
-import member_roster                                    # noqa: E402 —— L0 名册档案（期望顺序的唯一出处）
+AGENT_TEAM_DIR = os.path.join(ROOT, "node", "l0_host")
+for _hacs_p in (ROOT, AGENT_TEAM_DIR):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
+from node.l0_host import member_roster                  # noqa: E402 —— L0 名册档案（期望顺序的唯一出处）
 #: 装置自造的**假**路由口令（不是真凭据）：名字特意避开扫密的口令类键名
 #: （pass / secret / token / credential），否则整串字面量会撞 `literal-assignment`。
 #: 踩坑记录：改运行期拼装没用 —— `LITERALISH` 认「引号开头 + 引号结尾」，拼接串照样命中。
