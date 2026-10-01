@@ -165,30 +165,30 @@
       "port": null,
       "note": "群守望器·**待回应账域侧**（批④ 从 backend/group_watch.py 原地拆出）：扫 open meet 群 / 以成员身份拉 my_pending 待回应账 / 域规则（人的 @ 优先 · Agent 链式回话上限）/ 提示词 build_prompt / 单轮编排 one_round（内部 = plan_round 纯决策 + 调投递侧原语 deliver_ask·post_reply）。依赖只向下：L3→L1（group_watch_delivery / team_cli_core）。**待归位**：批⑤ 物理落 node/l3_domain/（相归属见批④方案 §⑧.4：承载机 thinkbook 是节点相，方案建议落 node/、避免 hub→node 跨相边）；批⑤f：本件已归位 hub/l3_domain/，引用方改绝对包名"
     },
-    "frontend/ui/serve.py": {
+    "hub/l4_experience/serve.py": {
       "layer": "L4",
       "port": 8080,
-      "note": "前端开发服务器（生产不用）"
+      "note": "前端开发服务器（生产不用）；批⑤h"
     },
-    "frontend/ui/group.html": {
+    "hub/l4_experience/group.html": {
       "layer": "L4",
       "port": null,
-      "note": "群聊前端·渲染壳 —— 拆三件套已收官，本件只剩壳（4942 B）：HTML 骨架 + 1 个样式外链（group.css）+ 6 个脚本外链（md.js / tex.js / hl.js / codeblock.js / group_transport.js / group_view.js），零内联 <style>、零内联 <script>"
+      "note": "群聊前端·渲染壳 —— 拆三件套已收官，本件只剩壳（4942 B）：HTML 骨架 + 1 个样式外链（group.css）+ 6 个脚本外链（md.js / tex.js / hl.js / codeblock.js / group_transport.js / group_view.js），零内联 <style>、零内联 <script>；批⑤h"
     },
-    "frontend/ui/group_view.js": {
+    "hub/l4_experience/group_view.js": {
       "layer": "L4",
       "port": null,
-      "note": "群聊前端·业务视图（渲染 / 状态 / 事件）—— 刀13 从 group.html 的唯一内联 <script> 块逐字节原样搬出，零行为改变"
+      "note": "群聊前端·业务视图（渲染 / 状态 / 事件）—— 刀13 从 group.html 的唯一内联 <script> 块逐字节原样搬出，零行为改变；批⑤h"
     },
-    "frontend/ui/group.css": {
+    "hub/l4_experience/group.css": {
       "layer": "L4",
       "port": null,
-      "note": "群聊前端·渲染壳之样式表（刀12 从 group.html 的 <style> 逐字节抽出，零行为改变；刀19 删掉只服务「任务清单面板」的死规则——刀18 已把该面板子树整棵下线——31078 B → 27996 B，活规则集合逐字节原样保留）"
+      "note": "群聊前端·渲染壳之样式表（刀12 从 group.html 的 <style> 逐字节抽出，零行为改变；刀19 删掉只服务「任务清单面板」的死规则——刀18 已把该面板子树整棵下线——31078 B → 27996 B，活规则集合逐字节原样保留）；批⑤h"
     },
-    "frontend/ui/group_transport.js": {
+    "hub/l4_experience/group_transport.js": {
       "layer": "L4",
       "port": null,
-      "note": "群聊前端·传输客户端（同源 /api 客户端 + 任务服务客户端 + 端点常量）—— 刀11 从 group.html 抽出，零行为改变"
+      "note": "群聊前端·传输客户端（同源 /api 客户端 + 任务服务客户端 + 端点常量）—— 刀11 从 group.html 抽出，零行为改变；批⑤h"
     },
     "hub/x/view_auth.py": {
       "layer": "X",
@@ -268,7 +268,7 @@
       "port": null,
       "note": "终态架构文档生成器（模板 + 实时取数 → agent-team/docs/architecture-final.md）"
     },
-    "backend/tests/test_agent_model.py": {
+    "tests/test_agent_model.py": {
       "layer": "T",
       "port": null,
       "note": "agent_model 自检与回归：probe() 结构/降级路径（subprocess 桩，不真打模型）+ 「远端执行器路径跟着目标主机走」的缺陷回归钉子 + 对外名字面守卫"
@@ -283,7 +283,7 @@
       "port": null,
       "note": "HTTP 入口件（传输不含语义）：路由 / JSON 信封 / 前置与鉴权钩子。批⑤b：本件已归位 node/l1_transport/（L1 通信层），引用方按批① 惯例改绝对包名"
     },
-    "backend/tests/test_web_gateway.py": {
+    "tests/test_web_gateway.py": {
       "layer": "T",
       "port": null,
       "note": "网关行为测试（真 socket）"
