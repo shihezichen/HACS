@@ -41,6 +41,7 @@
     python deploy/build_deploy_tree.py --out <目录>            # 生成
     python deploy/build_deploy_tree.py --out <目录> --clean    # 先清空目标再生成
     python deploy/build_deploy_tree.py --check                 # 只校验不写（源件是否齐全）
+    python deploy/build_deploy_tree.py --verify <目录>         # 比对镜像是否等于仓内源件（不写）
 
 退出码：0 = 全部搬到且逐件 md5 复验一致；1 = 有缺源件 / 有 md5 不一致；
         2 = 跑不起来（清单不可读、参数不合法、目标目录不可用）。
@@ -173,6 +174,56 @@ def build(items, out_abs, clean):
     return 1 if (missing or mismatch) else 0
 
 
+def verify(items, out_abs):
+    """--verify：比对镜像与仓内源件，**一个字节都不写**。
+
+    为什么需要它：部署源指向的是**派生的镜像目录**，而 `deploy.py` 只照着相对路径搬，
+    从不去问「镜像是不是最新」。镜像一旦过期（改完仓忘了重建），线上部署的就是旧件，
+    而且**全绿** —— 这是「线上线下一致」最隐蔽的破口。所以判据必须机械：
+    逐件 md5，外加**清单外的多余件**（旧布局残留会被一路部署下去、并长期无人察觉）。
+    """
+    if not os.path.isdir(out_abs):
+        raise die("镜像目录不存在：%s（先跑 --out 生成）" % out_abs)
+
+    missing, mismatch = [], []
+    for rel, src in items:
+        src_abs = os.path.join(REPO_ROOT, src)
+        dst_abs = os.path.join(out_abs, rel.replace("/", os.sep))
+        if not os.path.isfile(src_abs):
+            missing.append("%s  ←  仓内源件也没有：%s" % (rel, src))
+            continue
+        if not os.path.isfile(dst_abs):
+            missing.append("%s  ←  镜像里没有（源：%s）" % (rel, src))
+            continue
+        want, got = md5_of(src_abs), md5_of(dst_abs)
+        if want != got:
+            mismatch.append("%s  src=%s  img=%s" % (rel, want, got))
+
+    # 清单外的多余件：镜像里躺着、清单没登记的（旧布局残留 / 手工扔进去的）。
+    # `__pycache__` 不算 —— 那是跑出来的，不是搬进去的。
+    known = set(rel.replace("/", os.sep) for rel, _ in items)
+    extra = []
+    for dirpath, dirnames, filenames in os.walk(out_abs):
+        if "__pycache__" in dirnames:
+            dirnames.remove("__pycache__")
+        for fn in filenames:
+            rel = os.path.relpath(os.path.join(dirpath, fn), out_abs)
+            if rel not in known:
+                extra.append(rel.replace(os.sep, "/"))
+    extra.sort()
+
+    print("模式          : --verify（只比对，不写任何文件）")
+    print("镜像目录      : %s" % out_abs)
+    print("清单件数      : %d" % len(items))
+    print("逐件一致      : %d / %d" % (len(items) - len(missing) - len(mismatch), len(items)))
+    report_list("缺失清单", missing)
+    report_list("不一致清单", mismatch)
+    report_list("多余清单", extra)
+    if not (missing or mismatch or extra):
+        print("结论          : 镜像 == 仓内源件（部署源可安全使用）")
+    return 1 if (missing or mismatch or extra) else 0
+
+
 def report_list(title, rows):
     # 上面几行的标签都是全角字符，按「一个全角占两列」补到 14 列才对得齐。
     label = title + " " * max(1, 14 - 2 * len(title))
@@ -190,16 +241,22 @@ def main(argv=None):
     ap.add_argument("--out", default=None, help="镜像目录（生成模式必填）")
     ap.add_argument("--clean", action="store_true", help="先清空 --out 再生成")
     ap.add_argument("--check", action="store_true", help="只校验源件是否齐全，不写文件")
+    ap.add_argument("--verify", default=None, metavar="目录",
+                    help="比对该镜像目录是否逐件等于仓内源件（只读，不写文件）")
     ap.add_argument("--manifest", default=MANIFEST_DEFAULT,
                     help="部署视图清单（默认 deploy/deploy_manifest.json）")
     args = ap.parse_args(argv)
 
     if args.check and args.out:
         ap.error("--check 与 --out 互斥：--check 不写文件")
-    if not args.check and not args.out:
-        ap.error("要么给 --out <目录> 生成，要么给 --check 只校验")
-    if args.clean and args.check:
-        ap.error("--clean 与 --check 互斥：--check 不写文件")
+    if args.verify and args.out:
+        ap.error("--verify 与 --out 互斥：--verify 只比对，不写文件")
+    if args.verify and args.check:
+        ap.error("--verify 与 --check 互斥：前者比镜像，后者比仓内源件")
+    if not (args.check or args.verify) and not args.out:
+        ap.error("要么给 --out <目录> 生成，要么给 --check / --verify 只校验")
+    if args.clean and (args.check or args.verify):
+        ap.error("--clean 只在生成模式有意义")
 
     items = load_manifest(args.manifest)
     print("清单          : %s" % os.path.abspath(args.manifest))
@@ -207,6 +264,8 @@ def main(argv=None):
 
     if args.check:
         return check_only(items)
+    if args.verify:
+        return verify(items, guard_out_dir(args.verify))
     return build(items, guard_out_dir(args.out), args.clean)
 
 

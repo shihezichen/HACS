@@ -99,6 +99,13 @@
 `<runtime_dir>/_unitbak/<unit>.service.<时间戳>`；回滚 = `cp` 回去 + `daemon-reload` + `restart`。
 `*.service.d/` drop-in 只放 `Environment=` 时不受影响，但若它含 `ExecStart=` 就会覆盖主单元 —— 动手前先看。
 
+## 部署源新鲜度闸
+
+部署源是**派生镜像**、不是本仓：改完本仓必须重建镜像，否则部署照样逐件成功、健康检查全绿，
+而线上装的是旧件。部署器现在会**自己拦** —— 配置里的 `source_repo` → 调
+`deploy/build_deploy_tree.py --verify`，不过即中止。判据与重建命令见
+[`deploy/README.md`](../README.md) §六点五。
+
 ## 部署面收录状态（批⑫ 后）
 
 - ✅ **A2A 启动壳已入仓**：`deploy/windows/a2a_launch.pyw`（与 `_boot.py` 同源同形），

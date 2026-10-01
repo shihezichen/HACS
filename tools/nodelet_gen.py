@@ -43,7 +43,16 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
-TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
+
+#: 部署表是**内部真值表**（含内网地址与密钥路径），按裁定**不入对外发布仓** ⇒ 它住在**源码仓**里。
+#: 取表定式与 `tools/equivalence/a2a_edge_equiv.py` 一致：env 可覆盖 → 同级目录兜底 → 退回本仓。
+#: 退回本仓是**不静默**的兜底：表真找不到时 `load_targets()` 会打印缺表路径（见下），
+#: 而不是返回空表让人误以为「一台机都没配」。
+SRC_REPO = os.environ.get("HACS_SOURCE_REPO") or os.path.join(
+    os.path.dirname(PROJECT_ROOT), "多Agent相互协作")
+TARGETS_PATH = os.path.join(SRC_REPO, "tools", "deploy_targets.json")
+if not os.path.isfile(TARGETS_PATH):
+    TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
 
 # 批② 起被搬件按绝对包名 import（node.l0_host.nodelet / node.l0_host.node_profile），故仓根一并入路径。
 for _hacs_p in (PROJECT_ROOT,):
@@ -84,7 +93,12 @@ def _expand(value):
 
 
 def load_targets():
+    """读部署表。**表不存在就大声说** —— 返回空表会被误读成「一台机都没配」。"""
     if not os.path.isfile(TARGETS_PATH):
+        sys.stderr.write(
+            "✗ 找不到部署表：%s\n"
+            "  它是内部真值表（含内网地址与密钥路径），按裁定不入对外发布仓，应住在源码仓的 tools/ 下；\n"
+            "  可用环境变量 HACS_SOURCE_REPO 指向源码仓。\n" % TARGETS_PATH)
         return []
     with io.open(TARGETS_PATH, encoding="utf-8") as fh:
         return (json.load(fh) or {}).get("targets") or []
