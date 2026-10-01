@@ -50,6 +50,7 @@
 """
 
 import argparse
+import ast
 import hashlib
 import io
 import json
@@ -360,6 +361,65 @@ IDENTITY_PAIRS = [("ENV_TARGET_PROFILE_JSON", "ENV_TARGET_PROFILE_JSON"),
                   ("target_claude_exec", "target_claude_exec")]
 
 
+#: `agent_usage` 允许的 `os` 用途 —— **只允许读环境变量 + 纯字符串路径运算**。
+#:
+#: 刀 21 把「宿主上长什么样」（路径 / 句柄 / 文件格式）整套下沉到 L0 节点档案，本件只留适配
+#: 口径。之后因 `CTX_A2A_TIMEOUT_S` 需可配而把 `import os` 恢复了，另有一行
+#: `from os.path import abspath, dirname` —— 但用途严格限定在 `os.environ`（只读 env）与
+#: `os.path` 的**纯字符串**成员（不落盘、不读盘）。
+#:
+#: **原判据是「源码里没有 `import os` 语句」—— 那是拿「有没有 import」代理「碰不碰文件系统」；
+#: import 一恢复，代理就失效（判据红而事实无碍）。** 现改为**直判用途**：不禁止 import，
+#: 但 `os` 的任何一个成员只要不在下面两张名单里，一律判红 —— 强度不降反升，因为
+#: 「不 import」只挡住了整包导入，而这里连 `from os import path` / `os.path.join` 这类
+#: 绕法也一并挡住。
+#:
+#: 名单是**精确列名**而非「碰不碰 fs 的模糊判断」：`os.path.exists` / `os.path.getsize` /
+#: `os.listdir` / `os.open` 这些真碰盘的成员一个都不在里面，写进去即红。
+AU_OS_ALLOWED_PREFIXES = ("environ",)
+AU_OS_ALLOWED_EXACT = ("sep", "linesep", "pathsep", "curdir", "pardir", "altsep",
+                       "name", "devnull", "fspath", "PathLike",
+                       "path.abspath", "path.dirname", "path.basename", "path.join",
+                       "path.normpath", "path.splitext", "path.split", "path.isabs",
+                       "path.relpath", "path.commonprefix", "path.sep", "path.curdir",
+                       "path.pardir", "path.linesep", "path.defpath", "path.devnull")
+
+
+def _au_os_allowed(member):
+    return (member.startswith(AU_OS_ALLOWED_PREFIXES)
+            or member in AU_OS_ALLOWED_EXACT)
+
+
+def _au_os_and_sqlite_uses(src):
+    """AST 扫出本件对 `os` / `sqlite3` 的**实际用途**，返回 (os 成员全名集合, sqlite3 引用数)。
+
+    用 AST 而不是文本匹配：`import os` 只是一行声明，说明不了「拿它干了什么」；
+    而 `os.path.join(...)`（成员链）与 `from os.path import abspath`（绕开 `os.` 前缀）
+    都会骗过朴素的正则/子串比对。
+    """
+    os_members, sqlite_refs = set(), 0
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Attribute):
+            parts, cur = [], node
+            while isinstance(cur, ast.Attribute):
+                parts.append(cur.attr)
+                cur = cur.value
+            if isinstance(cur, ast.Name) and cur.id == "os":
+                os_members.add(".".join(reversed(parts)))
+        elif isinstance(node, ast.ImportFrom) and node.module in ("os", "os.path"):
+            # `from os import X` / `from os.path import X` —— 绕开 `os.` 前缀的写法，
+            # 必须同样纳入台账，否则 `from os import remove` 就能大摇大摆进来。
+            for a in node.names:
+                os_members.add(a.name if node.module == "os" else "path." + a.name)
+        if isinstance(node, ast.Name) and node.id == "sqlite3":
+            sqlite_refs += 1
+        if isinstance(node, ast.Import):
+            sqlite_refs += sum(1 for a in node.names if a.name == "sqlite3")
+        if isinstance(node, ast.ImportFrom) and node.module == "sqlite3":
+            sqlite_refs += 1
+    return os_members, sqlite_refs
+
+
 def _src(rel):
     return io.open(os.path.join(REPO, rel), encoding="utf-8").read()
 
@@ -394,14 +454,52 @@ def section_c(out, old_np, new_np, npf, old_au, new_au):
     checks.append(("agent_usage 对外名字面只少了登记在案的实现细节名（少：%s）"
                    % ("、".join(sorted(lost)) or "无"), not unexpected))
 
-    checks.append(("agent_usage 源码里没有 sqlite3 的 import 语句",
-                   not any(ln.strip().startswith(("import sqlite3", "from sqlite3"))
-                           for ln in au_src.splitlines())))
-    checks.append(("agent_usage 源码里没有 os 的 import 语句",
-                   not any(ln.strip() in ("import os", "import os, sys")
-                           for ln in au_src.splitlines())))
-    checks.append(("agent_usage 运行期没有 os / sqlite3 属性（不碰文件系统与存储）",
-                   not hasattr(new_au, "os") and not hasattr(new_au, "sqlite3")))
+    # —— 原两条判据：`agent_usage` 源码里没有 os 的 import 语句 · 运行期没有 os/sqlite3 属性。
+    #    它们是拿「有没有 import os」**代理**「碰不碰文件系统与存储」。import 因
+    #    `CTX_A2A_TIMEOUT_S` 恢复后代理失效（见 AU_OS_ALLOWED_PREFIXES 处注释）。
+    #    现改为**直判用途**：不禁止 import，但用途越界即红；强度不降。
+    au_os_uses, au_sqlite_refs = _au_os_and_sqlite_uses(au_src)
+    au_os_bad = sorted(u for u in au_os_uses if not _au_os_allowed(u))
+    checks.append(("agent_usage 对 os 的用途只限读环境变量 / 纯路径运算（实见：%s；越界：%s）"
+                   % ("、".join(sorted(au_os_uses)) or "无",
+                      "、".join(au_os_bad) or "无"), not au_os_bad))
+    checks.append(("agent_usage 源码里没有任何 sqlite3 引用（不碰存储；实见 %d 处）"
+                   % au_sqlite_refs, au_sqlite_refs == 0))
+    checks.append(("agent_usage 运行期不持 sqlite3 属性（不碰存储）",
+                   not hasattr(new_au, "sqlite3")))
+    # 负控：判据必须**可见地会红**，否则「全绿」什么都说明不了。往拷贝文本里注入两种越界
+    # 用法（文件系统 / 存储），断言各自命中；注入的是**内存里的字符串**，不落盘、不动真件。
+    #
+    # 锚点必须按**整行**取，不能拿 `src.find("import os")` —— 文档字符串里就有
+    # 「当时连 import os 一起去掉了」这句说明文字，裸 find 会命中它，注入进字符串字面量
+    # 内部（AST 看不见），负控变成静默假绿。（本行注释即为该坑的现场记录。）
+    au_lines = au_src.splitlines(True)
+    au_os_line = next((i for i, ln in enumerate(au_lines) if ln.strip() == "import os"), None)
+    checks.append(("负控锚点：真件里确实有一行独立的 `import os`（行号 %s）"
+                   % (au_os_line + 1 if au_os_line is not None else "未找到"),
+                   au_os_line is not None))
+    if au_os_line is not None:
+        _poison = "".join(au_lines[:au_os_line + 1] + ["_ALSO = os.listdir('.')\n"]
+                          + au_lines[au_os_line + 1:])
+        _p_os_bad = sorted(u for u in _au_os_and_sqlite_uses(_poison)[0]
+                           if not _au_os_allowed(u))
+        checks.append(("负控：注入 `os.listdir` 后本判据判红（实见越界成员：%s）"
+                       % ("、".join(_p_os_bad) or "无"), bool(_p_os_bad)))
+        # 第二种越界：绕开 `os.` 前缀的 `from os import X` 形式，必须同样被抓住。
+        _poison2 = "".join(au_lines[:au_os_line + 1]
+                           + ["from os import listdir  # noqa\n"] + au_lines[au_os_line + 1:])
+        _p2_bad = sorted(u for u in _au_os_and_sqlite_uses(_poison2)[0]
+                         if not _au_os_allowed(u))
+        checks.append(("负控：`from os import listdir` 这种绕法也判红（实见越界成员：%s）"
+                       % ("、".join(_p2_bad) or "无"), bool(_p2_bad)))
+        # 第三种越界：存储面。锚点同样不能落在文件头 —— **第 1 行是模块 docstring 的起始行**
+        # （`"""L2 · ...`），插在它前面会让新语句并进 docstring，AST 看不见，负控又成静默假绿。
+        # 与上一条同坑同因，所以这里复用「必在 docstring 之后」的 `import os` 行做锚点。
+        _p_refs = _au_os_and_sqlite_uses(
+            "".join(au_lines[:au_os_line + 1] + ["import sqlite3\n"]
+                    + au_lines[au_os_line + 1:]))[1]
+        checks.append(("负控：注入 `import sqlite3` 后引用数 > 0（实见 %d 处）" % _p_refs,
+                       _p_refs > 0))
     checks.append(("agent_usage 拿到的是 L0 节点档案（_npf is node_profile）",
                    getattr(new_au, "_npf", None) is npf))
     checks.append(("改前 agent_usage 确实持 sqlite3（负向对照：旧侧有该属性）",
