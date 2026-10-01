@@ -71,6 +71,12 @@
 其中 `node_profile.py:584` 的 `NODE_ADDR_PRIMARY = "<host>"` 会让**探活类装置**失真
 （`node_profile_equiv` 剩 1 处红即与此相关），留待**部署件批**一并处理。
 
+**明确「不收口」的一类（判据，防后来人误改）**：`tests/e2e_blackboard_crossmachine.py:14/18` 与
+`tests/e2e_semantic_search.py:19/22` 里的 `"<host>"` / `r"<home>\agent-team\client-token"` —— 这两个是
+**跨机 e2e**（要真节点 + 真 token），占位符站的是**真值前置条件**，不是「开发兜底缺口」。
+**不许**按方案 a 给它们塞默认值：塞了就把「前置缺失」伪装成「跑通了」，e2e 直接失去意义。
+本机跑不起来属**预期**（无 token 文件、无可达节点）；要跑就在节点机上按部署面真值跑。
+
 > ⚠️ **脱敏纪律**：本文档与仓内任何文件**都不许写出真实的 tailnet 网段 / 主机名 / IP / 凭据**，
 > 一律用 `<tailnet-cidr>` `<host>` `<node-ip>` 这类占位符。本条债是**既有状态**（批⑤e 已用
 > `git stash` 对照证明：撤掉本刀全部改动后同一条命令崩在同一行），非任何一刀引入。
