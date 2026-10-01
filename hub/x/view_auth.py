@@ -113,7 +113,14 @@ LOCK_S = 900                     # 锁 15 分钟
 # --- tailnet 免登录段 -----------------------------------------------
 # 只认这一段。**127.0.0.1 不在里面** —— cloudflared 就在本机以 127.0.0.1 回连本服务，
 # 放行本机等于给公网开后门。
-TAILNET_CIDR = "<tailnet-cidr>"
+#
+# 脱敏口径（本仓）：源码树里是占位符 `<tailnet-cidr>`，**线上副本是真值**。
+# 占位符语义 = 「未配置」⇒ 退到 Tailscale/CGNAT 默认段（100.64.0.0/10），
+# 好让源码树能 import 本件、等价装置与测试才跑得起来；也可用环境变量
+# HACS_TAILNET_CIDR 显式覆盖。**线上走的是真值分支，行为零变化。**
+TAILNET_CIDR = os.environ.get("HACS_TAILNET_CIDR") or "<tailnet-cidr>"
+if TAILNET_CIDR.startswith("<"):
+    TAILNET_CIDR = "100.64.0.0/10"
 _TAILNET_NET = ipaddress.ip_network(TAILNET_CIDR)
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,31}$")

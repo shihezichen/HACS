@@ -24,9 +24,10 @@ Human-Agent Communication System — 人机群聊前端 + 多 Agent 通信后端
 
 > 文件数 = `git ls-files <目录> | wc -l` 实测值（改目录结构时请同步本表）；`__init__.py` 包标记计入。
 >
-> **四个旧顶层目录已退役**：`backend/` · `comm/` · `frontend/` · `agent-team/` —— 其中的件已按分层归入
-> `hub/` 与 `node/`（对照关系见 `docs/HACS-分层台账.html`）。唯一例外：`comm/a2a/restart_a2a.py` 属
-> **部署件批**（要与 `node/l1_transport/a2a/a2a.env.example` 一起在节点机上实跑验证），暂留原位。
+> **四个旧顶层目录已全部退役**：`backend/` · `comm/` · `frontend/` · `agent-team/` —— 其中的件已按分层归入
+> `hub/` 与 `node/`（对照关系见 `docs/HACS-分层台账.html`）。原 `comm/a2a/restart_a2a.py` 已归位
+> `node/l1_transport/a2a/`（与同目录 `a2a.env.example` 口径对齐，内容零改动）。
+> **部署同步单列**：真值 `a2a.env` 在各节点机本机、不在仓内，件搬家后该文件须落到新目录并在节点机实跑一次。
 
 ## 关键文档
 

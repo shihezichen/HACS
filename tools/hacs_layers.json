@@ -348,10 +348,10 @@
       "port": null,
       "note": "刀31 前的**正件逐字节快照**（`git show f592498:tools/nats_membership_audit.py`，md5 3dbd30e5a05b842da4172bdd20577784 / 992 行 / 46997 字节）—— 装置 F 段的「改前」锚：同一份 artifacts 喂两侧，差异只在「口令真值从哪来」（改前 = 基准中枢 conf 的 `user → password`，改后 = 成员本机凭据文件）。只当装置锚，不参与运行；**不许被 `cp` 覆盖**（先冻后改的顺序物证）。"
     },
-    "comm/a2a/restart_a2a.py": {
+    "node/l1_transport/a2a/restart_a2a.py": {
       "layer": "T",
       "port": null,
-      "note": "T 工具面（裁定 ⑧）：Windows 侧 A2A 单元重启件 —— 按自身所在目录的 a2a.env 分离拉起 a2a_svc.py（9920），有现进程时读其原命令行原样重启、保持参数不变；零硬编码路径（解释器 / 脚本 / 配置 / 日志全来自 a2a.env），非 import 运行路径。**物理归位暂缓**（批③ 总控裁定）：ENV_FILE = dirname(__file__)/a2a.env，真值 a2a.env 部署在 Windows 主机、不在仓内，移件必须连 a2a.env 落位与部署脚本一并改并在主机实测，故本批只登记不动件。"
+      "note": "T 工具面（裁定 ⑧）：Windows 侧 A2A 单元重启件 —— 按自身所在目录的 a2a.env 分离拉起 a2a_svc.py（9920），有现进程时读其原命令行原样重启、保持参数不变；零硬编码路径（解释器 / 脚本 / 配置 / 日志全来自 a2a.env），非 import 运行路径。**已归位**（批⑦ 部署件批 · 仓内定位）：`comm/a2a/` → `node/l1_transport/a2a/`，与同目录 `a2a.env.example`/`README.md` 的既有口径对齐（README 早已按「同目录」写）；**内容零改动**（仍 `HERE = dirname(__file__)` + `HERE/a2a.env`）。搬前已核：本机计划任务零指向该件、部署表无该件 ⇒ 无活调用方、零运维风险。**遗留（部署同步，单列）**：真值 `a2a.env` 部署在节点机（thinkbook）本机、不在仓内，件搬家后该文件须落到新目录并在主机实跑一次 —— 属部署件批的实跑项，仓内无法验证。"
     },
     "tools/check_layers.py": {
       "layer": "T",

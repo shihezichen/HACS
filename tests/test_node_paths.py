@@ -47,13 +47,26 @@ def t_platform_semantics():
     """两个平台各拿自己的惯例位置，互不串台。"""
     s = _clear_env()
     try:
-        assert np.runtime_dir("nt") == r"<deploy-dir>", np.runtime_dir("nt")
-        assert np.runtime_dir("posix") == "<deploy-dir>", np.runtime_dir("posix")
-        assert np.etc_dirs("nt") == [r"<deploy-dir>"], np.etc_dirs("nt")
-        assert np.etc_dirs("posix") == ["<deploy-dir>"], np.etc_dirs("posix")
+        # 方案 a（2026-10-01）：源码树里部署面字面量是**脱敏占位符**（真值在部署面）⇒ 退到开发兜底。
+        # 两面都测，守卫价值不降：① 占位符状态 ⇒ 已退（不停在占位符本身）、nt 落点是已存在目录
+        #                        ② 注入真值 ⇒ 两平台**逐字透传**（线上口径）
+        assert not np.runtime_dir("nt").startswith("<"), np.runtime_dir("nt")
+        assert not np.runtime_dir("posix").startswith("<"), np.runtime_dir("posix")
+        assert os.path.isdir(np.runtime_dir("nt")), np.runtime_dir("nt")
+        assert np.etc_dirs("nt") == [np.runtime_dir("nt")], np.etc_dirs("nt")
+        assert np.etc_dirs("posix") == [np.runtime_dir("posix")], np.etc_dirs("posix")
+        # log_dir 必须在**注入 env 之前**比：它取 runtime_dir(plat)（env 优先），
+        # 注入后两边口径就不一致了（一边走 env、一边是模块级默认）。
+        assert np.log_dir("posix") == os.path.join(np.POSIX_RUNTIME_DIR, "logs"), np.log_dir("posix")
+        os.environ["AGENT_TEAM_RUNTIME_DIR"] = r"C:\hacs-probe-rt"
+        os.environ["AGENT_TEAM_ETC_DIR"] = r"C:\hacs-probe-etc"
+        assert np.log_dir("posix") == os.path.join(r"C:\hacs-probe-rt", "logs"), np.log_dir("posix")
+        assert np.runtime_dir("nt") == r"C:\hacs-probe-rt", np.runtime_dir("nt")
+        assert np.runtime_dir("posix") == r"C:\hacs-probe-rt", np.runtime_dir("posix")
+        assert np.etc_dirs("nt") == [r"C:\hacs-probe-etc"], np.etc_dirs("nt")
+        assert np.etc_dirs("posix") == [r"C:\hacs-probe-etc"], np.etc_dirs("posix")
         assert np.node_exe("nt").endswith("node.exe"), np.node_exe("nt")
         assert np.node_exe("posix") == "node", np.node_exe("posix")
-        assert np.log_dir("posix") == os.path.join("<deploy-dir>", "logs"), np.log_dir("posix")
         assert np.nats_dir("posix") == "/etc/nats", np.nats_dir("posix")
     finally:
         _restore(s)
@@ -83,8 +96,19 @@ def t_local_equivalence():
     s = _clear_env()
     try:
         if os.name == "nt":
-            assert np.runtime_dir() == r"<deploy-dir>", np.runtime_dir()
-            assert np.etc_dirs("nt") == [r"<deploy-dir>"], np.etc_dirs()
+            # 方案 a（2026-10-01）：源码树里部署面字面量是**脱敏占位符**（真值在部署面），
+            # 占位符语义 = 「未配置」⇒ 源码件自身退到开发兜底目录（必须**已存在**，因本件「不建目录」）。
+            # 锚点两面都测，守卫价值不降：
+            #   ① 占位符状态 ⇒ 必须已退（不得停在占位符本身），且落点是**已存在**的目录
+            #   ② 注入真值 ⇒ **逐字透传**（这条才是「零行为改变」那句的本体：线上走真值分支）
+            assert not np.WIN_RUNTIME_DIR.startswith("<"), np.WIN_RUNTIME_DIR
+            assert os.path.isdir(np.WIN_RUNTIME_DIR), np.WIN_RUNTIME_DIR
+            assert np.runtime_dir() == np.WIN_RUNTIME_DIR, np.runtime_dir()
+            assert np.etc_dirs("nt") == [np.WIN_RUNTIME_DIR], np.etc_dirs()
+            os.environ["AGENT_TEAM_RUNTIME_DIR"] = r"C:\hacs-probe-rt"
+            os.environ["AGENT_TEAM_ETC_DIR"] = r"C:\hacs-probe-etc"
+            assert np.runtime_dir() == r"C:\hacs-probe-rt", np.runtime_dir()
+            assert np.etc_dirs("nt") == [r"C:\hacs-probe-etc"], np.etc_dirs()
             assert np.node_exe().endswith(r"node-v22.23.2-win-x64\node.exe"), np.node_exe()
             # 下面四条是「每用户工具」的改造锚点：默认值必须与改造前字面量逐字相同
             assert np.claude_exec() == os.path.join(os.path.expanduser("~"), "AppData", "Local",

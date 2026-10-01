@@ -4,7 +4,13 @@
 为什么用脚本生成：台账是长期参考件，表格必须与机器可读的层归属表同源，
 人肉拷贝必然漂移。改层归属 → 改 json → 重跑本脚本 → 文档同步。
 """
+import argparse
 import io, json, os, re, subprocess, sys
+
+_ap = argparse.ArgumentParser(description="从层归属表生成台账 HTML（tools/hacs_layers.json → docs/HACS-分层台账.html）")
+_ap.add_argument("--dry-run", action="store_true",
+                 help="只生成不写盘（写盘前的一切校验照跑，打印统计后退出）")
+_ARGS = _ap.parse_args()
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -743,8 +749,9 @@ html = head + '\n'.join(secs[:6]) + '\n' + SVG + '\n' + '\n'.join(secs[6:]) + HT
 if '{{NK_' in html:
     sys.stderr.write('✗ gen_ledger_doc：产物里仍有未替换的 {{NK_*}} 占位符，不许静默留坑\n')
     raise SystemExit(2)
-io.open(OUT, 'w', encoding='utf-8', newline='\n').write(html)
+if not _ARGS.dry_run:
+    io.open(OUT, 'w', encoding='utf-8', newline='\n').write(html)
 n = html.count('<h2>')
-print('已生成:', OUT)
+print('（dry-run，未写盘）' if _ARGS.dry_run else '已生成:', OUT)
 print('字节:', len(html.encode('utf-8')), '| 行数:', html.count('\n') + 1)
 print('h2 章节数:', n, '| table 数:', html.count('<table>'), '| svg 数:', html.count('<svg'))

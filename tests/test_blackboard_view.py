@@ -63,7 +63,10 @@ NASTY = '<script>alert(1)</script> & "引号" \'单引号\' <img src=x onerror=a
 FIX_MEMBER_CLOUD = os.environ.get("AGENT_TEAM_TEST_MEMBER_CLOUD") or "lobster"
 FIX_MEMBER_TOP001 = os.environ.get("AGENT_TEAM_TEST_MEMBER_TOP001") or "top001"
 FIX_NODE_CLOUD_IP = os.environ.get("AGENT_TEAM_TEST_NODE_CLOUD_IP") or "<host>"
-FIX_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or "<deploy-dir>"
+# 配置目录真值**跟着源码走**（方案 a，2026-10-01）：源码树里 node_paths 的部署面字面量是
+# 脱敏占位符，占位符语义 = 「未配置」⇒ 源码件自身退到开发兜底目录；夹具必须取**同一个源**，
+# 不能硬编码那个已被替换掉的占位符（否则服务端解析值与夹具期望值必然不一致）。
+FIX_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or bv.AGENT_TEAM_ETC_DIR
 
 HEALTH = {
     "ok": True, "version": "1.1", "node": FIX_MEMBER_CLOUD,
@@ -682,7 +685,7 @@ class TestTokenNeverLeaks(BaseCase):
 class TestSourceIsReadOnly(BaseCase):
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(os.path.dirname(HERE), "blackboard_view.py")
+        path = os.path.join(os.path.dirname(HERE), "hub", "l3_domain", "blackboard_view.py")
         with open(path, "r", encoding="utf-8") as fh:
             cls.src = fh.read()
 
@@ -707,6 +710,9 @@ class TestSourceIsReadOnly(BaseCase):
             "urllib", "http", "typing",
             "ipaddress",     # 标准库；--trust-proxy 的 CIDR 判断用它，不引第三方
             "view_auth",     # 本仓自己的模块（账号/会话/角色/审计），不是第三方依赖
+            "node", "hub",   # 本仓分层包名：批⑤ 归位后件内按绝对包名 import
+                             # （如 `from node.l0_host import node_paths`）—— 不是第三方。
+                             # 真第三方（psycopg2 / fastembed …）仍会被本判据拦下。
         }
         for line in self.src.splitlines():
             stripped = line.strip()

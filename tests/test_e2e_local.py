@@ -89,7 +89,7 @@ def main():
         open(stub_path, "w", encoding="utf-8").write(STUB)
         procs.append(subprocess.Popen([PY, stub_path], stdout=subprocess.DEVNULL,
                                       stderr=subprocess.DEVNULL))
-        svc = subprocess.Popen([PY, os.path.join(ROOT, "a2a_svc.py"), "--host", "127.0.0.1",
+        svc = subprocess.Popen([PY, os.path.join(ROOT, "node", "c", "a2a_svc.py"), "--host", "127.0.0.1",
                                 "--port", str(SVC_PORT), "--config", cfg_path,
                                 "--peers", os.path.join(SECRETS, "peers.json")],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -103,7 +103,7 @@ def main():
             except Exception:
                 time.sleep(0.25)
 
-        call = [PY, os.path.join(ROOT, "a2a_call.py"), "--base", base]
+        call = [PY, os.path.join(ROOT, "node", "l1_transport", "a2a", "a2a_call.py"), "--base", base]
 
         # 1 健康检查
         c, t = http("GET", base + "/healthz")

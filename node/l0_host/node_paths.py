@@ -41,6 +41,7 @@ lobster（Linux）把本机的 `/root/.local/.../claude_exec.py` 当成 ssh 目�
 
 import os
 import sys
+import tempfile
 
 # 批⑤a 归位：本件已搬入 node/l0_host/。仓根 + 本目录一并入路径（批① 惯例），
 # 同层件按**绝对包名** import —— 与全仓引用口径一致，并保证
@@ -64,9 +65,15 @@ ENV_NODE_EXE = "AGENT_TEAM_NODE_EXE"
 ENV_LOG_DIR = "AGENT_TEAM_LOG_DIR"
 
 # 各平台的惯例位置（字面量只许出现在本文件内）
-WIN_RUNTIME_DIR = r"<deploy-dir>"
-POSIX_RUNTIME_DIR = "<deploy-dir>"
-POSIX_ETC_DIR = "<deploy-dir>"
+# 脱敏口径：源码树里是占位符（真值在部署侧 / 线上副本；本文件 docstring 记着惯例值）。
+# 占位符语义 = 「未配置」⇒ 退到系统临时目录下的开发位置 —— 本件约束「纯函数、只读、
+# **不建目录**」，故默认值必须是一个**已存在**的目录，`tempfile.gettempdir()` 正合。
+# 真值一律由 env 注入：`runtime_dir()` / `etc_dirs()` 已优先读 AGENT_TEAM_RUNTIME_DIR /
+# AGENT_TEAM_ETC_DIR。**线上副本走真值分支，行为零变化。**
+_DEV_DEPLOY_DIR = tempfile.gettempdir()   # 必须**已存在**（本件不建目录），故用 temp 根
+WIN_RUNTIME_DIR = _DEV_DEPLOY_DIR
+POSIX_RUNTIME_DIR = _DEV_DEPLOY_DIR
+POSIX_ETC_DIR = _DEV_DEPLOY_DIR
 # PI/Codex 用的 node：刻意钉住 node22 那份（自动更新已关 + 哨兵），不走 PATH 里的 node。
 WIN_NODE_EXE = r"<home>\node22\node-v22.23.2-win-x64\node.exe"
 POSIX_NODE_EXE = "node"

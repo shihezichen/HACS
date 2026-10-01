@@ -54,7 +54,9 @@ from hub.x import view_auth  # noqa: E402
 # 测试夹具真值（硬编码清零 Phase 1.5）
 # PHASE2_TODO: 待节点注入 env 后删除
 # 默认值逐字等于改动前的真值；未注入 env 时测试行为与改动前完全等价。
-FIX_NODE_CLOUD_IP = os.environ.get("AGENT_TEAM_TEST_NODE_CLOUD_IP") or "<host>"
+# 脱敏口径同 hub/x/view_auth.py：占位符语义 = 「未配置」⇒ 退到 tailnet 默认段内地址
+# （夹具允许假值：本文件是 hacs-test-fixtures）。真值可用该环境变量注入。
+FIX_NODE_CLOUD_IP = os.environ.get("AGENT_TEAM_TEST_NODE_CLOUD_IP") or "100.64.0.7"
 
 UPSTREAM_TOKEN = "view-auth-test-token-DO-NOT-LEAK-91af"
 PASSWORD = "GoodPass2026!"
@@ -167,7 +169,7 @@ class ViewServer(object):
         finally:
             store.close()
 
-        cmd = [sys.executable, os.path.join(ROOT, "blackboard_view.py"),
+        cmd = [sys.executable, os.path.join(ROOT, "hub", "l3_domain", "blackboard_view.py"),
                "--host", "127.0.0.1", "--port", str(self.port),
                "--mode", mode,
                "--upstream", "http://127.0.0.1:%d" % UPSTREAM_PORT,

@@ -450,7 +450,7 @@ BIND_CASES = [
     ("127.0.0.5:1", ("127.0.0.5", 1), "整个 127.0.0.0/8 都算环回"),
     ("localhost:9971", ("localhost", 9971), "localhost"),
     ("[::1]:9971", ("::1", 9971), "IPv6 环回"),
-    ("<tailnet-cidr>:9971", ("<tailnet-cidr>", 9971), "尾网下界"),
+    ("100." + "64.0.0:9971", ("100." + "64.0.0", 9971), "尾网下界"),
     ("100." + "127.255.254:9971", ("100." + "127.255.254", 9971), "尾网上界"),
     ("0.0.0.0:9971", ValueError, "通配地址 —— 拒"),
     ("100." + "63.255.255:9971", ValueError, "差一位就不是尾网 —— 拒"),
@@ -462,6 +462,28 @@ BIND_CASES = [
     ("127.0.0.1:0", ValueError, "端口越界 —— 拒"),
     ("127.0.0.1:65536", ValueError, "端口越界 —— 拒"),
 ]
+
+def _import_names(src):
+    """抽 import 的「模块路径」与「被导入名」两段。
+
+    只抽首个标识符会漏 `from node.l0_host import node_profile` 里的 `node_profile`
+    （实测后果：那条「确实 import 了节点档案」恒假红，而「只许 import 同层」
+    这条守卫**恒真空转** —— 守卫失明比报红危险得多）。故两段都抽，口径唯一。
+    """
+    mods, names = set(), set()
+    for m in re.finditer(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)", src, re.M):
+        mods.add(m.group(1))
+        mods.add(m.group(1).split(".")[0])
+    for m in re.finditer(r"^\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+([^\n#]+)", src, re.M):
+        mods.add(m.group(1))
+        mods.add(m.group(1).split(".")[0])
+        mods.add(m.group(1).split(".")[-1])      # 末段也是件名：from node.l2_adapter.agent_usage import x
+        for part in m.group(2).split(","):
+            name = part.strip().split(" as ")[0].strip().strip("()")
+            if name and name != "*":
+                names.add(name)
+    return mods | names
+
 
 #: 不许出现在 L0 守护里的上层件名（L0 只许 import 同层）
 UPPER_MODULES = ("web_gateway", "a2a_edge", "agent_usage", "agent_model", "chat_svc",
@@ -565,15 +587,21 @@ def section_c(out, nodelet, old, npf):
     # —— 源码守卫
     src = _src("node/l0_host/nodelet.py")
     old_src = _src("tools/equivalence/_old/nodelet_old_k23.py")
-    imports = re.findall(r"^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)", src, re.M)
+    imports = _import_names(src)
     checks.append(("L0 守护只 import 同层 node_profile（上层件一个没有）",
                    not any(m in imports for m in UPPER_MODULES)))
     checks.append(("L0 守护确实 import 了节点档案", "node_profile" in imports))
+    # 判据非空转自证（合成夹具）：抽取器必须同时认出「点分模块路径」与「被导入名」，
+    # 否则上面两条守卫会一起失明（一条恒真、一条恒假）——这是本装置自己的元判据。
+    _probe = _import_names("import os\nfrom node.l0_host import node_profile as np\n"
+                           "from node.l2_adapter.agent_usage import x\n")
+    checks.append(("import 抽取器非空转（点分路径 + 被导入名 + as 别名都认）",
+                   {"node", "node.l0_host", "node_profile", "agent_usage"} <= _probe))
     checks.append(("只读：源码里没有任何写/启停调用（%d 个判词全不命中）" % len(WRITE_CALLS),
                    not [w for w in WRITE_CALLS if w in src]))
     checks.append(("只读：源码里没有以写模式 open 文件",
                    not re.search(r"open\([^)]*[\"'][rax]?w", src)))
-    old_imports = re.findall(r"^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)", old_src, re.M)
+    old_imports = _import_names(old_src)
     checks.append(("旧侧是独立实现：`_old/nodelet_old_k23.py` 的 import 里没有 nodelet",
                    "nodelet" not in old_imports))
     checks.append(("旧侧自带常量：源码里有自己那份规范单元名字面量",
@@ -707,8 +735,7 @@ def section_e(out, nodelet):
     checks.append(("生成器不另抄单元名（只从 nodelet 取）",
                    ('"%s"' % nodelet.UNIT_NAME_POSIX) not in gen_src
                    and ('"%s"' % nodelet.UNIT_NAME_NT) not in gen_src))
-    checks.append(("生成器不碰 deploy.py（契约 §4）", "deploy" not in
-                   re.findall(r"^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_.]*)", gen_src, re.M)))
+    checks.append(("生成器不碰 deploy.py（契约 §4）", "deploy" not in _import_names(gen_src)))
 
     bad = 0
     for label, ok in checks:
