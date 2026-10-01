@@ -63,7 +63,7 @@ for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 
 from node.l1_transport.nats_client import NatsClient  # noqa: E402
 # 刀15（阶段3）：本件改归组合根 C（进程入口装配），实现按层拆走，这里只做 import 装配。
-from team_cli_core import (  # noqa: E402  L1 通信层：连接扇出 / 身份口令 / 去重节流；cmd_who/cmd_say/cmd_broadcast 亦为 L1 实现，C 侧只 re-export（属性面不变）
+from node.l1_transport.team_cli_core import (  # noqa: E402  L1 通信层：连接扇出 / 身份口令 / 去重节流；cmd_who/cmd_say/cmd_broadcast 亦为 L1 实现，C 侧只 re-export（属性面不变）
     AGENT_TEAM_NATS_HOST,
     AGENT_TEAM_RUNTIME_DIR,
     DEDUP_WINDOW_SECONDS,

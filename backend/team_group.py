@@ -37,7 +37,7 @@ for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 
 from node.l0_host import node_profile as _npf  # noqa: E402  L0 节点档案：宿主事实唯一真源（对话台基址；env 优先）
 
-from team_cli_core import (  # noqa: E402
+from node.l1_transport.team_cli_core import (  # noqa: E402
     TeamCliError,
     call_one,
     check_and_mark_dedup,

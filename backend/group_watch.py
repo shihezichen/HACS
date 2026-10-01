@@ -33,10 +33,12 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
+# 批⑤b：L1 投递侧已归位 node/l1_transport/，故仓根也要入搜索路径（HERE 仍是本目录、语义不变）。
+for _hacs_p in (os.path.dirname(HERE), HERE):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
 
-import group_watch_delivery as _delivery  # noqa: E402  L1 投递侧：argv 默认值 / 口令探针 / 状态 / 日志
+from node.l1_transport import group_watch_delivery as _delivery  # noqa: E402  L1 投递侧：argv 默认值 / 口令探针 / 状态 / 日志
 from group_watch_pending import one_round  # noqa: E402  L3 待回应账域侧：单轮编排（C→L3→L1，方向合法）
 
 

@@ -46,10 +46,10 @@ def main():
     ap.add_argument("--ref", default="HEAD", help="迁移前的 commit/ref")
     args = ap.parse_args()
     materialize_old(args.ref)
-    sys.path[:0] = [OLD, AG]
+    sys.path[:0] = [OLD, AG, REPO]
 
     import teamd_old                                            # noqa: E402
-    import teamd                                                # noqa: E402
+    from node.l1_transport import teamd                                                # noqa: E402
 
     class FakeDaemon(object):
         """只替掉 daemon 的两个只读方法；路由/鉴权/信封全走真实实现。"""

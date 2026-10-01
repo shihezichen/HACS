@@ -6,9 +6,9 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from web_gateway import Gateway, HttpError  # noqa: E402
+from node.l1_transport.web_gateway import Gateway, HttpError  # noqa: E402
 
 FAILS = []
 

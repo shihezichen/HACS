@@ -25,7 +25,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 from node.l1_transport.nats_client import NatsClient  # noqa: E402
-from teamd import Config, TeamDaemon  # noqa: E402
+from node.l1_transport.teamd import Config, TeamDaemon  # noqa: E402
 
 TOKEN = "teamd-unit-test-token-xyz"
 STUB_REPLY = "你好，我是 stub a2a_svc 的固定回复。"

@@ -24,7 +24,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-import teamd  # noqa: E402
+from node.l1_transport import teamd  # noqa: E402
 
 BB = "http://127.0.0.1:19940"
 TOKEN = "unit-test-token-hermes"

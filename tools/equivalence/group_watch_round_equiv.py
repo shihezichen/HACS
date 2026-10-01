@@ -31,7 +31,11 @@ TMP = os.environ.get("TMPDIR") or tempfile.gettempdir()
 HUMAN = "human1"
 T0 = 1700000000.0
 
-for _p in (BACKEND, ROOT):
+# 批⑤b：L0 两件已归位 node/l0_host/、L1 七件（含 team_cli_core / group_watch_delivery）
+# 归位 node/l1_transport/ —— 基线快照与活件都会裸名 import 这两处的件，故一并入搜索路径。
+L0_HOST = os.path.join(ROOT, "node", "l0_host")
+L1_TRANSPORT = os.path.join(ROOT, "node", "l1_transport")
+for _p in (BACKEND, L0_HOST, L1_TRANSPORT, ROOT):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 os.environ["AGENT_TEAM_HUMAN_IDS"] = HUMAN
@@ -219,7 +223,7 @@ def main() -> int:
     a = ap.parse_args()
 
     base = load_base()
-    import group_watch_delivery as D
+    from node.l1_transport import group_watch_delivery as D
     import group_watch_pending as P
     mod = {"pending": P, "delivery": D}
     if a.negative:

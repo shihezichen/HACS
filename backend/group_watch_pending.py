@@ -20,10 +20,12 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
+# group_watch_delivery 已归位 node/l1_transport/，本件改绝对包名 import，故把仓根一并放进搜索路径。
+for _hacs_p in (os.path.dirname(HERE), HERE):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
 
-from group_watch_delivery import deliver_ask, http, log, post_reply  # noqa: E402  L3 → L1（向下）
+from node.l1_transport.group_watch_delivery import deliver_ask, http, log, post_reply  # noqa: E402  L3 → L1（向下）
 
 CTX_LIMIT = 12          # 喂给 Agent 的上下文条数
 MAX_PER_ROUND = 1       # 每轮每个 (群,成员) 最多回几条

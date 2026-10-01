@@ -37,7 +37,12 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
-import web_gateway                 # L1 同层：HTTP 入口件（应答出口 + 路由分派，传输不含语义）
+# 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                os.path.dirname(os.path.abspath(__file__))):
+    sys.path.insert(0, _hacs_p)
+
+from node.l1_transport import web_gateway                 # L1 同层：HTTP 入口件（应答出口 + 路由分派，传输不含语义）
 
 # ---- 本仓版本说明（HACS 仓内为脱敏版，勿直接覆盖生产文件）-------------------
 # 来源：thinkbook 节点生产版 a2a_svc.py，VERSION 2.2。
