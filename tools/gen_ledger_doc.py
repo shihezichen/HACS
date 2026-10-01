@@ -171,7 +171,11 @@ BIG = [('chat_svc.py', 'L3', 4588), ('blackboard_svc.py', 'L3', 4362),
        ('blackboard_view.py', 'L3', 3824), ('roundtable.py', 'L3', 2425),
        ('teamd.py', 'L1', 1504), ('shared_content.py', 'L3', 1431),
        ('view_auth.py', 'X', 1396), ('team.py', 'L1', 1040),
-       ('task_svc.py', 'L3', 1016), ('ledger_patrol.py', 'T', 944),
+       # 批⑪ 过账：本行原登记 944 行，与实件对不上 —— 运行面/旧仓副本实测 **943** 行
+       # （差额是既有登记偏差，不是本批造成）；本批把该件归位到 tools/ledger_patrol.py 并做
+       # 真值收口（import 形态 + 两处基址收进 L0 + 真人 id/昵称 env 化），仓内实件现为 953 行。
+       # 这里登记的是**仓内实件**的行数，故取 953。
+       ('task_svc.py', 'L3', 1016), ('ledger_patrol.py', 'T', 953),
        ('a2a_svc.py', 'L1', 894), ('cli_backend.py', 'L2', 869)]
 
 # ---------- 组装 ----------

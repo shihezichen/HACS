@@ -32,8 +32,21 @@
 3. `_boot.py` 负责在启动目标脚本前注入 `AGENT_TEAM_*` 运行面真值，再以 `__main__`
    原地执行目标脚本（`runpy`，不另起子进程）。它只注入、不干预业务参数。
 
-4. 有对应分层件的入口件才切；本仓**没有**对应件的入口（例如若干采集/运维脚本、
-   A2A 启动壳）保持原路径不动，避免用未搬迁的件顶替。
+4. 有对应分层件的入口件才切；本仓**没有**对应件的入口保持原路径不动，避免用未搬迁的件顶替。
+   批⑪ 之后，运行面上原本「本仓未收录」的三个入口件已全部归位入仓：
+   `deploy/windows/a2a_launch.pyw`、`hub/l3_domain/session_ctx_archiver.py`、
+   `tools/ledger_patrol.py`（依赖件 `node/l1_transport/post_group.py` 同时入仓）。
+
+5. **真值注入清单（切运行面前必须逐项核对）**：分层件把宿主真值集中到 L0 读口后，
+   下列环境变量若**不注入**，该件会拿到占位符（例如 `http://<host>:9984`）而不是真值，
+   **线上行为会变** —— 这就是「归位本身不改行为，但归位新增了一条部署面义务」：
+
+   | 环境变量 | 承接的读口 | 不注入的后果 |
+   | --- | --- | --- |
+   | `AGENT_TEAM_RUNTIME_DIR` | `node_paths.runtime_dir()` | 数据面静默落到 `%TEMP%` |
+   | `AGENT_TEAM_CHAT_BASE` | `node_profile.chat_base_default()` | 群 / 对话台基址退成占位符 |
+   | `AGENT_TEAM_TASK_BASE`（用到才需） | `node_profile.task_base_default()` | 任务服务基址退成占位符 |
+   | `AGENT_TEAM_NODE_EXE` / `_PI_CLI_JS` / `_PI_WORKDIR` | `node_paths` 同名读口 | 执行器拿到未展开的 `<home>` 占位符 |
 
 ## 切换与回滚
 
@@ -59,8 +72,19 @@
    注入会污染其后所有前台命令，造成「同一台装置单独跑绿、后台跑红」的假串扰。
 5. 切换到分层件时，**先确认该件在本仓确实存在**；本仓没有的入口件保持原样。
 
-## 已知的部署面缺口（待补）
+## 部署面收录状态（批⑪ 后）
 
-- A2A 服务的启动壳（把 `stdout/stderr` 落到日志 + 等尾网地址就绪再 `import`）目前只在运行面
-  存在，仓内没有等价件；补齐后 A2A 任务才可一并切到分层结构。
-- 运行面上还有若干本仓未收录的入口脚本（采集、巡检、任务系统等），它们仍指向旧位置。
+- ✅ **A2A 启动壳已入仓**：`deploy/windows/a2a_launch.pyw`（与 `_boot.py` 同源同形）。
+  两者**本批并存、尚未合并**，因此 A2A 任务暂仍走原路径。
+- ✅ **运行面专有入口件已全部归位**：`session_ctx_archiver.py` → `hub/l3_domain/`、
+  `ledger_patrol.py` → `tools/`（依赖 `post_group.py` → `node/l1_transport/`）。
+- ⚠️ 仍只在运行面、且**不宜直接入仓**的件：外部系统的一次性脚本；以及运行期文案要求持
+  真值的件（须先按本仓脱敏口径把真值收进 env，再从部署面注入）。
+- 📌 待办：① `a2a_launch.pyw` 与 `_boot.py` 的**能力合并**（统一成一个通用启动壳）；
+  ② `session_ctx_archiver` 的水位扫描委托 `node/l2_adapter/agent_usage.py`（消除两份水位实现）。
+
+### 部署件为何不登记进 `hacs_layers.json`
+
+`deploy/` 不在分层扫描面内。例如 `a2a_launch.pyw` 会 import C 层 `a2a_svc`，若按代码件
+登记，会被 `check_layers` 检查1 判**方向违规**；`_boot.py` 同理。**部署件的层归属由本目录承接**，
+不进入「件数 / 层间边」台账。新增部署件时不要顺手登记层表。

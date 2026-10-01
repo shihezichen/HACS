@@ -160,6 +160,11 @@
       "port": null,
       "note": "群守望器·**投递侧**（批④ 从 backend/group_watch.py 原地拆出）：口令探针 default_pass_file / 共享工具 log·http / 幂等·限流状态 State（done/last/chain 三键单文件格式一字未改）/ NATS 点名封装 deliver_ask（复用 L1 team_cli_core.call_one）/ 写回群 post_reply。不认识「群 / 待回应账」这类域概念。**待归位**：批⑤ 物理落 node/l1_transport/。析出源 backend/group_watch.py。批⑤b：本件已归位 node/l1_transport/（L1 通信层），引用方按批① 惯例改绝对包名"
     },
+    "hub/l3_domain/session_ctx_archiver.py": {
+      "layer": "L3",
+      "port": null,
+      "note": "L3 协作域：会话上下文存档器（批⑪ 从运行面扁平残留归位入仓；此前只在运行面与旧仓有副本，HACS 内缺席）。扫 Hermes agent.log 找出上下文超阈值（默认 90000 tok）的会话 → 从 state.db 取最近消息 → **机械提取**（只认显式标记词，不调 LLM）出未完成/已完成/关键决定/下一步 → 落本机 JSON+MD 存档 + PATCH 进 chat_svc 群记忆 memo + 发一条 @all 群消息，好让会话被压缩/重启后能照着恢复现场。层归属沿用本仓既有口径（gen_ledger_doc.py STORAGE_ROWS 与 deploy_targets.json 的 note 都已写死 L3），不是本批新判的。**本批只做归位**：改动仅限「裸名 `import node_profile` → 绝对包名 `from node.l0_host import node_profile`」+ 仓根 sys.path 注入（照同目录 group_watch_pending.py 的写法），**业务逻辑一行未改**（md5 入仓前 D4E252AA2D5E80FA，与运行面/旧仓副本一致）。配套：检查3 的 PATH_RX 误判随件回归，已按 host_path_owner_readme 的明文要求**重新登记** known-FP（旧登记已随件退役撤销，不被背书）。**下一批待办**（取证 §五.④，本批不做）：L140–L171 自己扫 agent.log 的 `in=` 水位，与 node/l2_adapter/agent_usage.py 的「水位单一真源」重复，应委托 L2；另 HERE 派生的 ctx_archive/ 与 state/ 落点仍挂在件所在目录，入仓后会写进代码树，须改走 node_paths.runtime_dir()。"
+    },
     "hub/l3_domain/group_watch_pending.py": {
       "layer": "L3",
       "port": null,
@@ -278,6 +283,11 @@
       "port": null,
       "note": "模型通道自检探针：真打一次最小 prompt，把「enrich worker 活着但 submitted 恒为 0」这类静默失效变成可判死的退出码；--node 读 deploy_targets.json 经 ssh 在该节点上跑"
     },
+    "node/l1_transport/post_group.py": {
+      "layer": "L1",
+      "port": 9984,
+      "note": "L1 通信层：往群里发消息的裸库件 + CLI（批⑪ 从运行面扁平残留归位入仓；此前只在运行面与旧仓有副本，HACS 内缺席）。chat_svc 的 HTTP 客户端 —— 选群 pick_session / 统一 http()（X-Agent-Id 鉴权）/ 发送后回读校验。**落点裁定⑦ = node/l1_transport/ 而不是 tools/**：它既是 CLI 又是库，唯一在仓调用方 tools/ledger_patrol.py 是 T 面，若两件同放 tools/ 则将来 hub/ 侧复用会变成「运行路径件反向 import 工具面」的跨层死结；按它的本质（chat_svc HTTP 客户端 = 传输）下沉 L1，T→L1 正向、hub/node→L1 也正向。**本批只做归位 + 真值收口**：裸名 import 改绝对包名 + 仓根 sys.path 注入；CHAT_BASE_DEFAULT 的内网地址字面量收进 L0 node_profile.chat_base_default()（env 变量名与 `or` 短路顺序一字未改，口径同 group_watch_delivery.py）；业务逻辑一行未改（md5 入仓前 647BCDD8ED5794E6，与运行面/旧仓副本一致）。注：检查2（L1 不含业务词，提示级）会命中本件 docstring 里的「群聊/会话」—— 那是「发回人机对话群」这件事的自述，不是 L1 实现里的域语义，如实记、不改文案。"
+    },
     "node/l1_transport/web_gateway.py": {
       "layer": "L1",
       "port": null,
@@ -367,6 +377,11 @@
       "layer": "T",
       "port": null,
       "note": "T 工具面：从 tools/hacs_layers.json + 实测数据**生成**《HACS 分层台账》单文件 HTML（docs/HACS-分层台账.html）—— 台账是长期参考件，表格必须与机器可读层归属表同源，人肉拷贝必然漂移。改层归属只改 json，再重跑本件同步文档（别手改 HTML）。"
+    },
+    "tools/ledger_patrol.py": {
+      "layer": "T",
+      "port": null,
+      "note": "T 工具面：台账巡检器 LedgerPatrol（批⑪ 从运行面扁平残留归位入仓；此前只在运行面与旧仓有副本，HACS 内缺席）。「完成＝自动汇报」三层机制的第三层（cron 巡检点名）—— 每轮拉群消息 + 台账（/todos 真源优先，退化读 memo.open_tasks），跑四条检查（A 漏报 / B 欠账 / C 自盖章无落点 / D 逾期），发现先经任务服务（9981）POST /tasks **入队**、入队成功才在群里 @ 点名，带幂等 + 升级提醒 + 限流 + 自身心跳告警。层归属沿用本仓既有口径（gen_ledger_doc.py BIG 表与 deploy_targets.json 的 note 都已写 T），**巡检器不该住进被巡检的层** —— 故不落 hub/l3_domain/。依赖 node/l1_transport/post_group.py（T→L1 正向；缺它一触发就 ModuleNotFoundError，部署表里 post_group 必须排在本件之前落盘）。**本批只做归位 + 真值收口**：① 模块级把**自身目录**插进 sys.path[0] 的裸名遗留改成只注入仓根（照 tools/nodelet_gen.py 的写法）② 裸名 `from post_group import ...` 改绝对包名 ③ CHAT_BASE_DEFAULT / TASK_BASE_DEFAULT 两处内网地址字面量收进 L0（后者即裁定⑤ 新增的 node_profile.task_base_default()）④ HUMAN_IDS 的真人账号 id 退成 `<human-id>`（口径同 hub/l3_domain/group_watch_pending.py）⑤ 运行期文案里的真人昵称 2 处（群汇报正文 + argparse --help）按裁定⑥ 改 env 化 + `<human-nick>` 兜底，线上文案由部署面注入 AGENT_TEAM_HUMAN_NICK 保持不变。业务逻辑一行未改（md5 入仓前 5DC63FD56F8F8295，与运行面/旧仓副本一致）。**遗留（本批未做，取证 §三.6）**：STATE_DEFAULT / LOG_DEFAULT 仍挂在件所在目录（HERE），入仓后 --state 不显式传就会把幂等账写进代码树 —— 须改走 node_paths.runtime_dir()/log_dir()，另批。"
     },
     "tools/post_incident_entry.py": {
       "layer": "T",
@@ -464,6 +479,11 @@
         "file": "node/l2_adapter/cli_backend.py",
         "match": "d:\\s*([0-9a-fA-F]{8}-[0-9a-fA-F-]{27}",
         "reason": "`CODEX_SESSION_RE = re.compile(r\"session id:\\s*(...)\")` 里 `id:` 的 `d:` 后跟 `\\s` 被 PATH_RX 当成盘符路径；是正则语法不是宿主事实。"
+      },
+      {
+        "file": "hub/l3_domain/session_ctx_archiver.py",
+        "match": "n:\\n((?:[",
+        "reason": "`re.search(r\"^compression:\\n((?:[ \\t]+.*\\n|\\n)+)\", txt, re.M)` 里 `compression:` 的 `n:` 后跟 `\\n` 被 PATH_RX 当成盘符路径；是正则语法不是宿主事实（读 Hermes config.yaml 的 compression 段）。**批⑪ 重新登记**：本条的前身随件退役于 2026-09-30 台账修复批被撤登，readme 原话「若该件回归，检查3 照常报要收，不被旧登记背书」—— 本批件回归 hub/l3_domain/，故按新路径与新命中串重新实名登记，不是沿用旧登记。"
       }
     ],
     "path_known_false_positives_readme": "口径（刀33 新增）：PATH_RX 的盘符分支 `[A-Za-z]:(?!//)[\\\\/]...` 会把源码里的**正则串**（`id:\\s*`、`:\\n`、字符类 `[...Z:\\-+.]`）误判成绝对路径，使检查3 的路径指标恒卡在 3、永远到不了 0，真出现新的硬编码也淹没在噪声里。裁定（主控 2026-09-28）：**标 known-FP，但保留该检查** —— 本表只做「逐条实名登记」，键 =（件, PATH_RX 命中的原串）严格全等才生效（不是按件豁免、不是按行号豁免、不是改正则），命中后仍**逐条打印**文件:行号 + 原文 + 理由，只是不计进「要收」的路径指标。三条红线：① 不许删检查（删了就是放宽判据）② 不许往本表里塞真的宿主路径（登记的是「PATH_RX 认错了」，不是「这条硬编码我认了」）③ 命中原串一个字节都变了本条即失效、该处立刻重新计进「要收」 —— 源码一改就自动失效，不会悄悄替新硬编码背书。"

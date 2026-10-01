@@ -38,7 +38,7 @@
                    hermes_config_model_window()
   ⑦ 日志与探针口   log_dir() / a2a_probe_base() / a2a_probe_token_paths() / a2a_probe_token()
   ⑧ 协作域地址     nats_host_default() / nats_hosts_default() / blackboard_base_default() /
-                   chat_base_default() / nats_host_shape()
+                   chat_base_default() / task_base_default() / nats_host_shape()
   ⑨ 服务落盘位置   nats_conf_dir_posix() / nats_route_pass_file() /
                    task_svc_db_default() / task_svc_log_default() / codex_workdir_default()
 
@@ -100,6 +100,11 @@ __all__ = [
     "PORT_NATS", "PORT_BLACKBOARD", "PORT_CHAT",
     "nats_host_default", "nats_hosts_default",
     "blackboard_base_default", "chat_base_default", "nats_host_shape",
+    # 批⑪ 新增的 PORT_TASK / task_base_default 暂**不**进本表：
+    # tools/equivalence/l0_host_relocate_equiv.py 以 863ffd3 的冻结快照逐项比 `__all__` 的
+    # 公开面，表里多一个名字旧侧必记 `<无>` ⇒ 装置判红。两者只能二选一，本批按「不动装置
+    # 判据」的红线留在表外（函数本身照常可 import、可调用，口径与 chat_base_default 同形）。
+    # 待裁定：扩装置的登记面，还是维持现状 —— 见本批简报「剩余待办」。
     # ⑨ 服务落盘默认位置
     "POSIX_ROOT_HOME", "NATS_ROUTE_CRED_NAME",
     "TASK_SVC_DB_NAME", "TASK_SVC_LOG_SUB", "WIN_CODEX_WORKDIR",
@@ -588,6 +593,7 @@ NODE_ADDR_SECONDARY = "<node-ip>"
 PORT_NATS = 9930
 PORT_BLACKBOARD = 9940
 PORT_CHAT = 9984
+PORT_TASK = 9981
 
 #: 只给人看的地址**形态**（CLI help 文本里的示例），**不是真地址，不许拿去连**。
 NODE_ADDR_SHAPE = "100.x.y.z"
@@ -612,6 +618,11 @@ def blackboard_base_default():
 def chat_base_default():
     """人机对话台（群的家）基址 —— 群消息走 HTTP 落库。"""
     return "http://%s:%d" % (NODE_ADDR_PRIMARY, PORT_CHAT)
+
+
+def task_base_default():
+    """任务服务（群任务清单）基址 —— 催办一律先在这里入队，再在群里点名。"""
+    return "http://%s:%d" % (NODE_ADDR_PRIMARY, PORT_TASK)
 
 
 def nats_host_shape():

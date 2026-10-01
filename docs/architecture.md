@@ -361,10 +361,17 @@ NATS 两台中枢 = lobster + top001；SSH 目标与私钥路径一律经部署�
        健康口 `via: ssh` + `curl http://127.0.0.1:9981/health`（实测 200 / `{"ok": true, "service": "task_svc"}`）。
      两件**纳管当时线上仍是旧口径**（仍硬编码 `CHAT_BASE_DEFAULT` / DB / 日志路径，刀22 的 L0 收口没下去），
      故 `deploy.py --status` 会报这 2 件漂移 —— 属**待主控部署**，不是门禁失败。
-   - ⏳ **仍未纳管（刀34 逐件取证扫描所得，如实列出、未擅自补条目）**：
+   - ✅ **已纳管（刀36 补登，本条原记「仍未纳管 + 运行副本 md5 ≠ 仓内」，批⑪ 实测已不成立，按实改写）**：
      - `agent-team/ledger_patrol.py`（thinkbook）—— 计划任务 `AgentTeamLedgerPatrol` 拉起
-       `<deploy-dir>\ledger_patrol.py --once`；运行副本 md5 `c62478b11691e60b` ≠ 仓内 `89e9198191d3e234`。
-       刀34 契约未授权纳管，留待主控拍板。
+       `<deploy-dir>\ledger_patrol.py --once`。刀34 当时运行副本与仓内 md5 不一致（原文记 `c62478b11691e60b`
+       ≠ `89e9198191d3e234`），那是**刀34 时点的快照**；刀36 纳管并主控部署后两者已对齐
+       （批⑪ 实测运行副本与旧仓副本 md5 前16 同为 `5DC63FD56F8F8295`，依赖件 `post_group.py` 同批登记、
+       同为 `647BCDD8ED5794E6`）。
+       **批⑪ ① 已把本件归位入本仓** `tools/ledger_patrol.py`（T 工具面）与 `node/l1_transport/post_group.py`（L1）；
+       归位时做了真值收口（import 改绝对包名、两处基址收进 L0、真人 id 与昵称 env 化），故仓内副本
+       **与运行副本不再逐字节相同**，这是预期内的 —— 部署表 `path` 重指（② ）与运行面切换（③ ）由架构侧另做，
+       在此之前 `deploy.py --status` 对这两件报漂移属**待部署**，不是门禁失败。
+   - ⏳ **仍未纳管（刀34 逐件取证扫描所得，如实列出、未擅自补条目）**：
      - `agent-team/cli_backend.py`（thinkbook）—— 计划任务 `AgentTeamCliBackend` 的实参是
        **源码仓路径** `D:\Work\…\agent-team\cli_backend.py --port 9970`，即运行目录副本
        （md5 `b9bd5452e85ffc5d` ≠ 仓内 `7f8371437d69924b`）**根本不被执行**，属陈旧裸副本 ——
