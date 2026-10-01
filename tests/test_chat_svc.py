@@ -68,15 +68,17 @@ NOW = datetime.datetime(2026, 9, 20, 10, 30, 0, tzinfo=UTC)
 def _session_row(sid="dm_20260920_k7f3qa", kind="dm", title="与 龙虾 的对话 · 9月20日 18:20",
                  sensitivity="internal", members=None, created_by=FIX_HUMAN_ID,
                  created_at=NOW, updated_at=NOW, state="open",
-                 ref_table=None, ref_id=None):
+                 ref_table=None, ref_id=None, note=""):
+    """列数与顺序必须逐字对上 cs.SESSION_COLUMNS（末列 note 是 #90 加的群备注）。"""
     return (sid, kind, title, sensitivity, members if members is not None else [FIX_MEMBER_CLOUD],
-            created_by, created_at, updated_at, state, ref_table, ref_id)
+            created_by, created_at, updated_at, state, ref_table, ref_id, note)
 
 
 def _message_row(mid="msg_20260920183000_abc123", sid="dm_20260920_k7f3qa", seq=1,
                  author_type="agent", author_id=FIX_MEMBER_CLOUD, kind="text",
                  text="连上了。", ref_table=None, ref_id=None, status="done",
                  reply_to=None, run=None, meta=None, created_at=NOW):
+    """列数与顺序必须逐字对上 cs.MESSAGE_COLUMNS。"""
     return (mid, sid, seq, author_type, author_id, kind, text, ref_table, ref_id,
             status, reply_to, run, meta, created_at)
 
@@ -150,6 +152,35 @@ class FakeDB(object):
 
     def close(self):
         pass
+
+    # -- 真 ChatDB 的内部协作方法（_row_to_* 会回调）-----------------
+    def _context_watermark(self, member_id, session_id):
+        """真实现去 agents.json / state.db 读上下文水位；假件一律"读不到"（返回 None）。
+
+        口径与真实现一致：读不到就不往 meta 里挂 context，绝不编造。
+        """
+        return None
+
+    # -- 任务队列（#448/#478/#541）：假件一律空账 --------------------
+    # 发言路径会顺带翻队列；这里给全空实现，让「发言」这条主路径可测，
+    # 队列本身的真 SQL 由 verify_chat_e2e.py 打真库验证。
+    def todos_list(self, session_id, owner=None, status=None):
+        return []
+
+    def todo_create(self, session_id, text, owner, kind, deadline, actor, **kwargs):
+        return None
+
+    def todo_skip_create(self, session_id, message, author_id, owner, cls, text):
+        return None
+
+    def todo_bump_followup(self, todo_id):
+        return None
+
+    def todo_mark_done(self, todo_id, actor, evidences, landing=()):
+        return None
+
+    def todo_mark_doing(self, todo_id, actor):
+        return None
 
 
 class FakeRoster(object):
@@ -736,12 +767,14 @@ class StaticCase(RawCallMixin, ChatServiceCase):
     @classmethod
     def setUpClass(cls):
         cls.ui = tempfile.mkdtemp(prefix="chui_")
-        cls._mk("index.html", "<!doctype html><title>team_chat</title><div id=app></div>")
+        # 入口文件名以实现为准（cs.DEFAULT_DOC，现为 group.html）——
+        # 写死 index.html 的话静态根与 SPA 兜底全部命不中。
+        cls._mk(cs.DEFAULT_DOC, "<!doctype html><title>team_chat</title><div id=app></div>")
         cls._mk("assets/app.js", "console.log(1)")
         cls._mk("assets/app.css", "body{color:#111}")
         cls._mk("serve.py", "# 开发辅助，对外不得可见")
         cls._mk("mock.js", "// mock 数据，对外不得可见")
-        cls._mk("sub/index.html", "SUBINDEX")
+        cls._mk("sub/" + cs.DEFAULT_DOC, "SUBINDEX")
         super(StaticCase, cls).setUpClass()          # 起服务（内部会 Runtime.reset）
         cs.Runtime.ui_dir = cls.ui
 
@@ -887,6 +920,30 @@ class GroupFakeDB(FakeDB):
         row[8] = state
         self.sessions[session_id] = tuple(row)
         return cs.ChatDB._row_to_session(self, tuple(row))
+
+    def set_session_meta(self, session_id, fields, actor, state=None):
+        """#90：改群名 / 备注，可顺带改 state —— PATCH 走的就是这一条。
+
+        返回体多一个 `changed`（本次真改动的字段名），与真实现同口径：
+        同值重复 PATCH 不算改动。
+        """
+        row = self.sessions.get(session_id)
+        if row is None:
+            return None
+        row = list(row)
+        changed = []
+        for col, idx in (("title", 2), ("note", 11)):
+            if col not in fields:
+                continue
+            if str(row[idx] or "") != fields[col]:
+                changed.append(col)
+            row[idx] = fields[col]
+        if state is not None:
+            row[8] = state
+        self.sessions[session_id] = tuple(row)
+        out = cs.ChatDB._row_to_session(self, tuple(row))
+        out["changed"] = changed
+        return out
 
     def add_message(self, session_id, author_type, author_id, text,
                     mentions=None, audience=None, needs_response=None,
