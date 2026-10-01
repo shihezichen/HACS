@@ -40,6 +40,13 @@ import os
 import subprocess
 import sys
 
+#: 「冻结快照只读」共用件 —— **必须在模块顶层导入**。
+#: 早先这一行被误加进了下面 `_SNIPPET_HEADER` 的字符串里（那段是喂给 `exec()` 的
+#: **被测旧实现源码**的头）：一来本模块作用域里根本没有它（跑起来就
+#: `NameError: write_frozen is not defined`），二来它随 `exec()` 注入了**被测对象**，
+#: 等于悄悄改了被测量的那份代码 —— 后者比前者严重得多。
+from _frozen import write_frozen
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 #: 旧侧基线的**来源仓**：`agent-team/` 时期的提交（改造前的源码）在**源码仓**里，
@@ -87,7 +94,6 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from node.l0_host import node_paths as _np
 from hub.x import view_auth
-from _frozen import write_frozen
 """
 
 
