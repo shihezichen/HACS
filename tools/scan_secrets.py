@@ -4,7 +4,7 @@
 
 用法：
     python tools/scan_secrets.py .              # 扫全仓
-    python tools/scan_secrets.py frontend/ui/   # 扫指定目录（ui/ 一视同仁，不享豁免）
+    python tools/scan_secrets.py hub/l4_experience/  # 扫指定目录（一视同仁，不享豁免）
 
 退出码：0 = 干净可提交；1 = 命中，禁止提交。
 

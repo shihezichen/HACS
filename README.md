@@ -14,17 +14,19 @@ Human-Agent Communication System — 人机群聊前端 + 多 Agent 通信后端
 
 | 目录 | 放什么 | 文件数 |
 |---|---|---|
-| `docs/` | 架构文档、分层规划 / 台账、API 与设计契约、验收记录、运维手册 | 25 |
-| `backend/` | 对话台后端 `chat_svc.py`、L1 网关 `web_gateway.py`、L0 节点档案 `node_profile.py`，以及群聊 / 任务 / 会议 / 黑板 / 共享内容等域件 | 49 |
-| `comm/` | 通信层：A2A 组合根 `a2a_svc.py` + 边缘端点 `a2a_edge.py` + 拓扑说明 | 7 |
-| `deploy/` | 各节点要装的东西：部署脚本、计划任务 / 单元件、跑起来的 README | 18 |
-| `frontend/ui/` | 聊天前端三件套：渲染壳 `group.html` / `group.css`、业务视图 `group_view.js`、传输客户端 `group_transport.js` | 12 |
-| `tools/` | 门禁与工具面：`scan_secrets.py`（凭据扫描）、`check_layers.py`（分层门禁）、`gen_arch_doc.py`（架构文档生成器）、`push_hacs.py` + `sanitizers/`（脱敏入库）、`equivalence/`（等价装置与冻结快照） | 53 |
-| `tests/` | 回归测试（`chat_svc` 套件改前即有 27F+8E 的**既有红**，只要求红点集合不变） | 19 |
-| `agent-team/` | 通信 / MCP 侧补充件与契约文档（如 `docs/l5-roster-archive.md`） | 2 |
+| `hub/` | **相① 中枢**（只装中枢机）：`l1_relay/` 中转配置生成 · `l2_adapter/` 中枢侧适配（`pg_literals` · `agent_model`）· `l3_domain/` 协作域业务件（`chat_svc` · `blackboard_svc` / `blackboard_view` · `roundtable` · `rt_remind` · `shared_content` · `team_group` · `embedder` · `backfill_embeddings` · `group_watch_pending`）＋ `l3_domain/sql/`（建表脚本 14 份）· `l4_experience/` L4 呈现（静态壳 `group.html` / `group.css` + 视图 / 传输件 + 开发用 `serve.py`）· `x/` 横切（`view_auth`：账号 / 会话 / 角色 / 密级） | 46 |
+| `node/` | **相② 节点**（四台对等）：`l0_host/` 宿主事实（`node_paths` · `node_profile` · `nodelet` · `member_roster`）· `l1_transport/` L1 通信层（`nats_client` · `teamd` · `team_broadcast` · `team_call` · `team_cli_core` · `team_roster` · `web_gateway` · `group_watch` 投递侧，＋ `a2a/` 边缘端点与调用客户端）· `l2_adapter/` 节点侧适配（`agent_usage` · `cli_backend` · `ctx_watermark`）· `c/` 组合根入口（`team.py` · `a2a_svc.py` · `group_watch.py`） | 28 |
+| `deploy/` | 各节点要装的东西：部署脚本、计划任务 / 单元件、环境变量样例（`chat.env.example`）、跑起来的 README | 19 |
+| `tools/` | 门禁与工具面：`check_layers.py`（分层门禁）+ `hacs_layers.json`（层归属真源）、`scan_secrets.py`（凭据扫描）、`gen_arch_doc.py`（架构文档生成器）、`equivalence/`（等价装置 + `_old/` 冻结快照） | 57 |
+| `tests/` | 跨件回归测试（含原 `backend/tests/*`） | 22 |
+| `docs/` | 契约与规划文档：`architecture.md`（入口）· 分层规划 / 台账 · API 与设计契约 · 运维手册 · `l0-nodelet.md` / `l5-nats-ops.md` / `l5-roster-archive.md` / `l5-membership-audit.md`；**过程件**（`P1`–`P7` 验收记录、工作简报）已下移 **`docs/archive/`** | 19（+ `archive/` 9） |
 | `seed/` | 初始数据种子 | 1 |
 
-> 文件数 = `git ls-files <目录> | wc -l` 实测值（改目录结构时请同步本表）。
+> 文件数 = `git ls-files <目录> | wc -l` 实测值（改目录结构时请同步本表）；`__init__.py` 包标记计入。
+>
+> **四个旧顶层目录已退役**：`backend/` · `comm/` · `frontend/` · `agent-team/` —— 其中的件已按分层归入
+> `hub/` 与 `node/`（对照关系见 `docs/HACS-分层台账.html`）。唯一例外：`comm/a2a/restart_a2a.py` 属
+> **部署件批**（要与 `node/l1_transport/a2a/a2a.env.example` 一起在节点机上实跑验证），暂留原位。
 
 ## 关键文档
 
@@ -34,8 +36,11 @@ Human-Agent Communication System — 人机群聊前端 + 多 Agent 通信后端
 | [`docs/HACS-分层规划-handoff.html`](docs/HACS-分层规划-handoff.html) | 分层规划（五层 + 三横切、七条判据、六期落地） |
 | [`docs/HACS-分层台账.html`](docs/HACS-分层台账.html) | 分层台账（件 → 层 → 端口 → 契约 → 门禁基线，唯一权威版本） |
 | [`docs/l1-contract.md`](docs/l1-contract.md) | L1 通信层公共面契约（9 条 + 出处行号 + 使用方 + 兼容规则） |
-| [`agent-team/docs/l5-roster-archive.md`](agent-team/docs/l5-roster-archive.md) | L0 名册档案与「档案 + 凭据 ⇒ 用户区」自证契约 |
+| [`docs/l5-roster-archive.md`](docs/l5-roster-archive.md) | L0 名册档案与「档案 + 凭据 ⇒ 用户区」自证契约 |
 | [`docs/l5-membership-audit.md`](docs/l5-membership-audit.md) | 成员入网只读对账器契约 |
+| [`docs/l5-nats-ops.md`](docs/l5-nats-ops.md) | 成员入网「退场 / 收敛」运维契约（动作侧） |
+| [`docs/l0-nodelet.md`](docs/l0-nodelet.md) | L0 轻量节点守护 · 只读探针口契约 |
+| [`docs/sys-path-debt.md`](docs/sys-path-debt.md) | `sys.path` 老债记账表（靠注入才能解析的裸名 import 待收口清单） |
 | [`docs/公网入口运维手册-认证与隧道.md`](docs/公网入口运维手册-认证与隧道.md) | 公网入口（认证 + 隧道）运维手册 |
 | [`docs/README-deploy.md`](docs/README-deploy.md) | 部署说明 |
 
@@ -159,6 +164,24 @@ Human-Agent Communication System — 人机群聊前端 + 多 Agent 通信后端
 
 细节（各件一句话职责、端口绑定面、四道硬门禁、六阶段刀序历史、关键架构决定与已知项）见
 **[`docs/architecture.md`](docs/architecture.md)**。
+
+## 跑法
+
+均在**仓根**执行，用 Python 3（命令名 `python`）：
+
+```bash
+# 1) 分层门禁 —— 依赖方向是硬门禁，rc=0 才能提交（件数 / 层间边数也会一并打印）
+python tools/check_layers.py
+
+# 2) 跨件回归测试 —— 各自独立可跑，退出码即结果
+python tests/test_cli_backend.py ; python tests/test_a2a_edge_caps.py ; python tests/test_web_gateway.py
+
+# 3) 前端开发用静态服务器（仅本机开发；生产由对话台 chat_svc 同源托管）
+python hub/l4_experience/serve.py --help
+```
+
+> `docs/archive/` 是**过程件**（阶段性验收记录与工作简报），不是上手必读；上手先读
+> `architecture.md` → `docs/HACS-分层规划-handoff.html` → 本 README。
 
 ## 入库纪律（硬规矩）
 

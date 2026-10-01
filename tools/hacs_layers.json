@@ -250,7 +250,7 @@
     "node/l0_host/member_roster.py": {
       "layer": "L0",
       "port": null,
-      "note": "L0 平台层：**成员名册档案**（刀27 阶段5 第三刀新增）。一句话职责＝回答「这个协作域有哪些成员、各自什么角色、它的口令真值落在哪台机的哪个文件」，仅此三样 —— 从本刀起它是名册的**唯一真源**，`nats.conf` 的用户区降级为它的产物（刀25 把名册真源定义为「中枢 conf 的规范形」并写明「提升为独立档案件是后续刀的事」，本件就是那个落点）。有序表，**顺序 == conf 里 users 的规范序（字典序）**，这是逐字节对照成立的前提；条目形态冻结为 (member, role, cred_node, cred_kind) 四元组，cred_kind ∈ {runtime → <runtime_dir>/nats-<m>.pass, conf → <conf_dir>/<m>.pass}。**三条铁律**：① 口令绝不进档案（只记「真值在哪台机的哪个文件」，读它是探针的事）② 不写路径 / 不写 IP（cred_kind 是位置的**种类**不是路径；拼路径由 L0 node_profile + 部署表负责）③ 不存权限串（角色模板唯一出处仍是 L1 gen_nats_conf.perm_list，档案只记角色名）—— 故本件**不许 import gen_nats_conf**（L0 → L1 是方向硬违规）。纯数据 + 纯查询：零 import、零 IO、零环境依赖。等价证据 tools/equivalence/roster_derive_equiv.py；契约 agent-team/docs/l5-roster-archive.md；批⑤g：本件已归位 node/l0_host/，引用方改绝对包名"
+      "note": "L0 平台层：**成员名册档案**（刀27 阶段5 第三刀新增）。一句话职责＝回答「这个协作域有哪些成员、各自什么角色、它的口令真值落在哪台机的哪个文件」，仅此三样 —— 从本刀起它是名册的**唯一真源**，`nats.conf` 的用户区降级为它的产物（刀25 把名册真源定义为「中枢 conf 的规范形」并写明「提升为独立档案件是后续刀的事」，本件就是那个落点）。有序表，**顺序 == conf 里 users 的规范序（字典序）**，这是逐字节对照成立的前提；条目形态冻结为 (member, role, cred_node, cred_kind) 四元组，cred_kind ∈ {runtime → <runtime_dir>/nats-<m>.pass, conf → <conf_dir>/<m>.pass}。**三条铁律**：① 口令绝不进档案（只记「真值在哪台机的哪个文件」，读它是探针的事）② 不写路径 / 不写 IP（cred_kind 是位置的**种类**不是路径；拼路径由 L0 node_profile + 部署表负责）③ 不存权限串（角色模板唯一出处仍是 L1 gen_nats_conf.perm_list，档案只记角色名）—— 故本件**不许 import gen_nats_conf**（L0 → L1 是方向硬违规）。纯数据 + 纯查询：零 import、零 IO、零环境依赖。等价证据 tools/equivalence/roster_derive_equiv.py；契约 docs/l5-roster-archive.md；批⑤g：本件已归位 node/l0_host/，引用方改绝对包名"
     },
     "node/l0_host/nodelet.py": {
       "layer": "L0",
@@ -301,7 +301,7 @@
     "tools/roster_derive_conf.py": {
       "layer": "T",
       "port": null,
-      "note": "T 工具面：**「档案 + 凭据探针 ⇒ 中枢用户区」的逐字节自证**（刀27 · 阶段5 第三刀）。判据＝「L0 名册档案的有序成员表 + 各成员凭据文件内容 → 按 gen_nats_conf 行格式渲染出的用户区」与「两台中枢 nats.conf 里原样抽出的用户区」**归一化后逐字节相等**。用户区定义冻结：从含 `users = [` 的那个 `authorization {` 行起到配对的 `}` 行止（含首尾、不重排不 strip）—— cluster 块里那条单行 authorization 没有 users，故**集群路由凭据天然落在区外**。归一化**只许两处**：口令换 sha256 前 12、生成时间戳行换固定形态（后者在用户区上永不命中，写进契约是为将来扩面）。**三个铁律**：① 只读（远端只发 cat 一条形态，K27RC= 回传内层退出码；不写远端文件、不重启单元、不改 nats.conf）② 口令只在内存里走一趟 —— analyze() 把两侧文本先过归一化器再放进报告，出口只可能是 sha256:<前12>③ analyze()/derive 是纯函数，角色模板由参数注入（正件 main() 传 L1 perm_list，装置传自己那份独立实现，两路互证）。中枢按节点名 ('lobster','top001') 声明、ssh 目标读内部 deploy_targets.json → 本件零宿主字面量。--live / --fixtures；退出码 0 逐字节一致 / 1 有差异（逐行打印）/ 2 采集失败（**绝不退化成 0 或 1**）。契约见 agent-team/docs/l5-roster-archive.md"
+      "note": "T 工具面：**「档案 + 凭据探针 ⇒ 中枢用户区」的逐字节自证**（刀27 · 阶段5 第三刀）。判据＝「L0 名册档案的有序成员表 + 各成员凭据文件内容 → 按 gen_nats_conf 行格式渲染出的用户区」与「两台中枢 nats.conf 里原样抽出的用户区」**归一化后逐字节相等**。用户区定义冻结：从含 `users = [` 的那个 `authorization {` 行起到配对的 `}` 行止（含首尾、不重排不 strip）—— cluster 块里那条单行 authorization 没有 users，故**集群路由凭据天然落在区外**。归一化**只许两处**：口令换 sha256 前 12、生成时间戳行换固定形态（后者在用户区上永不命中，写进契约是为将来扩面）。**三个铁律**：① 只读（远端只发 cat 一条形态，K27RC= 回传内层退出码；不写远端文件、不重启单元、不改 nats.conf）② 口令只在内存里走一趟 —— analyze() 把两侧文本先过归一化器再放进报告，出口只可能是 sha256:<前12>③ analyze()/derive 是纯函数，角色模板由参数注入（正件 main() 传 L1 perm_list，装置传自己那份独立实现，两路互证）。中枢按节点名 ('lobster','top001') 声明、ssh 目标读内部 deploy_targets.json → 本件零宿主字面量。--live / --fixtures；退出码 0 逐字节一致 / 1 有差异（逐行打印）/ 2 采集失败（**绝不退化成 0 或 1**）。契约见 docs/l5-roster-archive.md"
     },
     "tools/equivalence/membership_audit_equiv.py": {
       "layer": "T",
