@@ -128,16 +128,17 @@ python -c "import sys;sys.path.insert(0,'.');import <可疑件>;print('OK')"
 
 ## 八、装置面现状（批⑧ 后 · 全盘 22 台）
 
-**绿 13 台**：`a2a_edge_equiv` · `admin_port_equiv` · `blackboard_svc_http_equiv` ·
+**绿 15 台（批⑨ 后）**：`a2a_edge_equiv` · `admin_port_equiv` · `blackboard_svc_http_equiv` ·
 `blackboard_view_http_equiv` · `chat_svc_static_filter_equiv` · `cli_backend_http_equiv` ·
-`gen_nats_conf_equiv` · `group_watch_equiv` · `group_watch_round_equiv` ·
-`membership_audit_equiv` · `pg_literals_equiv` · `roster_creds_mirror_equiv` · `roster_derive_equiv`
+`gen_nats_conf_equiv` · `group_watch_equiv` · `group_watch_round_equiv` · `l0_host_relocate_equiv` ·
+`membership_audit_equiv` · `node_profile_equiv` · `pg_literals_equiv` ·
+`roster_creds_mirror_equiv` · `roster_derive_equiv`
 
-**红 9 台（四类）**：
+**红 7 台（四类）**：
 
 | 类 | 台（括号 = 实测红量） | 根因 / 处置方向 |
 |---|---|---|
-| 方案 a 连带 | `host_truth_equiv`(45/190) · `l0_host_relocate_equiv`(13) · `node_profile_equiv` · `todo_enrich_equiv`(6 项配置覆盖) | 装置拿改造前源码树的**占位符默认值**比新侧的**开发兜底值** ⇒ 两侧应在**同一套部署面真值 env** 下比（装置本意是比行为，不是比占位符状态）。**不许改判据迁就** |
+| 方案 a 连带（**批⑨ 已收口 2 台**） | `host_truth_equiv`(45/190 ⇒ 去重 9 条) · `todo_enrich_equiv`(10 项) | 收口定式 = **谓词式登记**（旧值匹配占位符正则 **且** 新值位于 `tempfile.gettempdir()` 之下，两条同时成立才免；免判格一律打印并计入上限元判据）。余下两台：`host_truth` 主要是**契约行字节**（L33/L67/L68/L35/L36）+ help 文案示例 IP 误报 + posix 默认家；`todo_enrich` 是**平台探测口径**（未配置态下旧侧探测成 Windows、新侧成 posix，且新侧目标家目录为空）。**不许改判据迁就** |
 | 待细查 | `chat_svc_http_equiv`(34/311) · `target_profile_equiv`(19/21) | `/login` 302 一类；`<user>@<node>` 占位符 + 目标档案口径 |
 | 两仓分叉 · 待拍板 | `group_frontend_equiv` · `team_cli_equiv` | 冻结快照在两仓字节不同（k13：`b4da609f…` vs `58497402…`；team_old_k15：`2c487e78…` vs `8d584d71…`）⇒ 装置**自保护停手**，以谁为准需拍板 |
 | 部署面缺件 | `nodelet_equiv`(1/258) | `tools/deploy_targets.json` 未入仓（部署件批） |
@@ -150,5 +151,11 @@ env `HACS_SOURCE_REPO` → 同级目录兜底 → 退回本仓（不静默）。
 **两条硬纪律（批⑧ 换来的）**：
 1. **从源码仓补冻结快照前必须先扫真值** —— 源码仓的件带真值 IP，而本仓**要对外发布**；
    快照的契约是「一字不改」⇒ 不可能脱敏 ⇒ 带真值的**一律不收**。
-2. **装置有写副作用** —— `materialize_old()` 会**覆盖式写入** `_old/*.py`：跑一次装置就把
-   仓内冻结快照改了。**跑完装置必须 `git status` 核一遍**，被改的 `_old/` 一律还原。
+2. **装置有写副作用（含真值风险，待修）** —— `materialize_old()` 会**覆盖式写入** `_old/*.py`：
+   跑一次装置就把仓内冻结快照改了，**且写进去的是源码仓那版**（实测含真域名、真值 IP 一类
+   **真值**，具体值见源码仓，不入本仓）—— 本仓是要**对外发布**的仓，这等于把真值搬进发布件。**跑完装置必须
+   `git status` 核一遍**，被改的 `_old/` 一律 `git checkout --` 还原。正解（待批⑩）：内容与仓内
+   不一致时**写临时目录并如实报告**，冻结快照保持只读。
+3. **验证装置前后必须核对本会话 env**：Hermes 的 terminal 环境变量**跨调用持久** ⇒ 一轮
+   `export AGENT_TEAM_*` 注入实验会污染其后所有前台跑，造成「同一台装置单独跑绿、后台跑红」的
+   **假串扰**。跑装置前先 `unset AGENT_TEAM_*` 并确认 `env | grep -c AGENT_TEAM` 归零。

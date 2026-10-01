@@ -26,6 +26,7 @@ import argparse
 import ast
 import inspect
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,60 @@ def materialize_old(poison: bool) -> str:
         with open(os.path.join(TMP, name), "w", encoding="utf-8") as f:
             f.write(base_src(rel, poison))
     return TMP
+
+
+
+#: 批⑦「方案 a」占位符的形态：`<deploy-dir>` 一类（**必须**是这种带尖括号的小写短标识，
+#: 否则负控注毒值 `'<poisoned for negative control>'` 也会被误免判 ⇒ 负控失效）。
+_PLACEHOLDER_RE = re.compile(r"^<[a-z][a-z0-9_-]*>")
+MAX_GRANTED = 16         #: 免判上限：防「已授权面」被悄悄扩大，超限即判红
+
+
+def _cell_value(text):
+    """`cell_str` 形态（`KIND/tname/text`）取第三段；已是纯值则原样返回。"""
+    s = str(text)
+    head, sep, rest = s.partition("/")
+    if sep and head in ("VALUE", "RAISE"):
+        return rest.partition("/")[2]
+    return s
+
+
+def _scalars(text):
+    """把值拆成「标量片段」表：先剥 `cell_str` 壳，再剥 list/tuple 壳，**取全部非空片段**。
+
+    只取标量会漏掉 `['<deploy-dir>']` 这类 list 形态的格（谓词会静默失效）；只取首个元素
+    又会漏掉 `['', '', '', '<deploy-dir>\\client-token']` 这类前导空元素的格。
+    标量输入返回单元素表。
+    """
+    s = _cell_value(text).strip()
+    if s[:1] in "[(" and s[-1:] in ")]":
+        parts = [p.strip() for p in s[1:-1].split(",")]
+    else:
+        parts = [s]
+    return [p for p in parts if p.strip().strip("'\"")]
+
+
+def plan_a_granted(old_v, new_v) -> bool:
+    """批⑦「方案 a」已授权变更的**谓词式**登记（不写死本机路径、不放宽其它格）。
+
+    占位符语义 = 未配置 ⇒ 退本地开发默认值（线上走真值分支、行为零变化）。因此改造前的
+    冻结侧给占位符（`'<deploy-dir>'`），改造后的新侧给 `tempfile.gettempdir()` 派生的绝对
+    路径 —— 两侧**同时**满足这两个形态才算「已授权」，其余一律照常判红。免判格**必须打印/计数**
+    并计入 `MAX_GRANTED`。
+    """
+    olds, news = _scalars(old_v), _scalars(new_v)
+    if not olds or len(olds) != len(news):
+        return False
+    tmp = re.sub(r"[\\/]+", "/", tempfile.gettempdir()).rstrip("/")
+    home = re.sub(r"[\\/]+", "/", os.path.expanduser("~"))
+    for o, n in zip(olds, news):
+        o, n = o.strip().strip("'\""), n.strip().strip("'\"")
+        if not _PLACEHOLDER_RE.match(o):
+            return False                       # 旧侧不是占位符 ⇒ 不适用本登记
+        cand = re.sub(r"[\\/]+", "/", n).replace("<HOME>", home)
+        if not (cand == tmp or cand.startswith(tmp + "/")):
+            return False                       # 新侧不是本机开发兜底 ⇒ 照常判红
+    return True
 
 
 def collect(mod) -> dict:
@@ -131,7 +186,7 @@ def main() -> int:
     import node_paths as np_old            # noqa: E402  顶层旧版（另一实例，专供对账）
     import node_profile as npf_old         # noqa: E402
 
-    diffs, skipped = [], []
+    diffs, skipped, granted = [], [], []
     for label, om, nm in (("node_paths", np_old, np_new), ("node_profile", npf_old, npf_new)):
         co, cn = collect(om), collect(nm)
         for k in sorted(set(co) | set(cn)):
@@ -140,23 +195,31 @@ def main() -> int:
                 skipped.append("%s.%s" % (label, k))
                 continue
             if vo != vn:
-                diffs.append("%s.%s: 旧=%s 新=%s" % (label, k, vo[:70], vn[:70]))
+                line = "%s.%s: 旧=%s 新=%s" % (label, k, vo[:70], vn[:70])
+                if plan_a_granted(vo, vn):
+                    granted.append(line)
+                else:
+                    diffs.append(line)
         if a.verbose:
             print("  %s：公开项 %d（无参取值 %d）" % (label, len(co), len(co) - sum(1 for v in co.values() if v.startswith("<"))))
 
     ok, suspect = check_reference_sites()
 
     print("基线 %s · 旧侧复刻于 %s · 新侧 node/l0_host/" % (REV, old_dir))
-    print("① 值对账：不一致 %d 处（跳过「需参/不支持无参调用」%d 项）" % (len(diffs), len(skipped)))
+    print("① 值对账：不一致 %d 处（跳过「需参/不支持无参调用」%d 项 · 方案 a 已授权 %d 处，上限 %d）"
+          % (len(diffs), len(skipped), len(granted), MAX_GRANTED))
     for d in diffs[:12]:
         print("     × %s" % d)
+    for d in granted[:12]:
+        print("     ○ [方案 a 已授权] %s" % d)
     print("② 单实例：node_paths is node_profile._paths() → %s · 加载旧侧前顶层副本 → %s"
           % ("是" if same_obj else "**否**", "无" if not dup else "**有 %s**" % dup))
     print("③ 引用面：合规 %d 件 · 可疑 %d 件（凡用绝对包名者须自注入仓根）" % (len(ok), len(suspect)))
     for rel, why in suspect[:12]:
         print("     ? %s —— %s" % (rel, why))
 
-    bad = bool(diffs) or (not same_obj) or bool(dup) or bool(suspect)
+    bad = (bool(diffs) or (not same_obj) or bool(dup) or bool(suspect)
+           or len(granted) > MAX_GRANTED)
     print("")
     if a.negative:
         if bad:

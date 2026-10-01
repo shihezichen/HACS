@@ -54,6 +54,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -239,12 +240,67 @@ B_SCENARIOS = [
 B_FLAVOURS = [None, "nt", "posix"]
 
 
+
+#: 批⑦「方案 a」占位符的形态：`<deploy-dir>` 一类（**必须**是这种带尖括号的小写短标识，
+#: 否则负控注毒值 `'<poisoned for negative control>'` 也会被误免判 ⇒ 负控失效）。
+_PLACEHOLDER_RE = re.compile(r"^<[a-z][a-z0-9_-]*>")
+MAX_GRANTED = 20          #: 免判上限：防「已授权面」被悄悄扩大，超限即判红
+
+
+def _cell_value(text):
+    """`cell_str` 形态（`KIND/tname/text`）取第三段；已是纯值则原样返回。"""
+    s = str(text)
+    head, sep, rest = s.partition("/")
+    if sep and head in ("VALUE", "RAISE"):
+        return rest.partition("/")[2]
+    return s
+
+
+def _scalars(text):
+    """把值拆成「标量片段」表：先剥 `cell_str` 壳，再剥 list/tuple 壳，**取全部非空片段**。
+
+    只取标量会漏掉 `['<deploy-dir>']` 这类 list 形态的格（谓词会静默失效）；只取首个元素
+    又会漏掉 `['', '', '', '<deploy-dir>\\client-token']` 这类前导空元素的格。
+    标量输入返回单元素表。
+    """
+    s = _cell_value(text).strip()
+    if s[:1] in "[(" and s[-1:] in ")]":
+        parts = [p.strip() for p in s[1:-1].split(",")]
+    else:
+        parts = [s]
+    return [p for p in parts if p.strip().strip("'\"")]
+
+
+def plan_a_granted(old_v, new_v) -> bool:
+    """批⑦「方案 a」已授权变更的**谓词式**登记（不写死本机路径、不放宽其它格）。
+
+    占位符语义 = 未配置 ⇒ 退本地开发默认值（线上走真值分支、行为零变化）。因此改造前的
+    冻结侧给占位符（`'<deploy-dir>'`），改造后的新侧给 `tempfile.gettempdir()` 派生的绝对
+    路径 —— 两侧**同时**满足这两个形态才算「已授权」，其余一律照常判红。免判格**必须打印/计数**
+    并计入 `MAX_GRANTED`。
+    """
+    olds, news = _scalars(old_v), _scalars(new_v)
+    if not olds or len(olds) != len(news):
+        return False
+    tmp = re.sub(r"[\\/]+", "/", tempfile.gettempdir()).rstrip("/")
+    home = re.sub(r"[\\/]+", "/", os.path.expanduser("~"))
+    for o, n in zip(olds, news):
+        o, n = o.strip().strip("'\""), n.strip().strip("'\"")
+        if not _PLACEHOLDER_RE.match(o):
+            return False                       # 旧侧不是占位符 ⇒ 不适用本登记
+        cand = re.sub(r"[\\/]+", "/", n).replace("<HOME>", home)
+        if not (cand == tmp or cand.startswith(tmp + "/")):
+            return False                       # 新侧不是本机开发兜底 ⇒ 照常判红
+    return True
+
+
 def section_b(out, old_np, new_np, npf):
     lanes = [("旧 node_paths", old_np), ("新 node_paths", new_np), ("新 node_profile", npf)]
     total = len(B_SCENARIOS) * len(B_FLAVOURS) * len(B_FUNCS)
     out("B 段 · 本机面冻结矩阵（%d 格 × %d 路）　节点身份 / 运行与配置目录 / 执行器路径"
         % (total, len(lanes)))
     bad = 0
+    granted_cells = set()      # 按唯一 (函数, flavour) 计数，防「已授权面」扩张
     for name, env in B_SCENARIOS:
         out("  [%s]" % name)
         for fl in B_FLAVOURS:
@@ -252,12 +308,19 @@ def section_b(out, old_np, new_np, npf):
                 wipe(env)
                 cells = [(lab, cell_str(probe(getattr(m, fn), fl))) for lab, m in lanes]
                 base = cells[0][1]
-                diff = [lab for lab, c in cells if c != base]
+                raw = [c for lab, c in cells if c != base]
+                # 方案 a 已授权格：旧侧未配置态占位符 × 新侧本机开发兜底 ⇒ 免判，但**必须计数**、计入上限
+                waived = [c for c in raw if plan_a_granted(base, c)]
+                diff = [c for c in raw if not plan_a_granted(base, c)]
+                if waived:
+                    granted_cells.add((fn, fl))
                 if diff:
                     bad += 1
                     out("    ✗ %-16s flavour=%-7s %s" % (fn, fl, base))
                     for lab, c in cells:
                         out("        %-16s %s" % (lab, c))
+                elif waived:
+                    out("    ○ %-16s flavour=%-7s %s [方案 a 已授权 ×%d]" % (fn, fl, base, len(waived)))
                 elif fl is None:
                     out("    ✓ %-16s flavour=%-7s %s" % (fn, fl, base))
         # 节点身份 home()：node_profile 独有的档案面，与 os.path.expanduser("~") 同解
@@ -267,9 +330,10 @@ def section_b(out, old_np, new_np, npf):
         if not ok:
             bad += 1
     wipe()
-    out("  → 不一致 %d / %d 格（逐格都跑，只打 flavour=None 那一行与全部不一致行）"
-        % (bad, total))
-    return bad
+    out("  → 不一致 %d / %d 格（逐格都跑，只打 flavour=None 那一行与全部不一致行）" % (bad, total))
+    out("  → 方案 a 已授权 %d 格（唯一「函数 × flavour」计数 · 上限 %d，超限即判红）"
+        % (len(granted_cells), MAX_GRANTED))
+    return bad + (1 if len(granted_cells) > MAX_GRANTED else 0)
 
 
 # ============================================================ C 段 · 公共面与对象身份
@@ -314,8 +378,11 @@ def section_c(out, old_np, new_np, npf, old_au, new_au):
 
     checks.append(("node_paths 源码里不再有第二份档案表（`_TARGET_PROFILES = {`）",
                    "_TARGET_PROFILES = {" not in np_src))
-    checks.append(("node_paths 源码里不再有目标家目录字面量（Windows 家目录形态）",
-                   npf.NT_TARGET_HOME not in np_src))
+    # 批⑦ 方案 a 后：该字面量在未配置态退成空串/占位符 ⇒ `"" in src` 恒真、判据自陷。
+    # 因此仅在它仍是**真值**时检查；真值一旦在源码里出现就照常判红。
+    _nth = npf.NT_TARGET_HOME
+    checks.append(("node_paths 源码里不再有目标家目录字面量（Windows 家目录形态；未配置态不适用）",
+                   (not _nth) or _nth.startswith("<") or _nth not in np_src))
     checks.append(("node_paths 仍是本机字面量的去处（WIN_RUNTIME_DIR 还在）",
                    hasattr(new_np, "WIN_RUNTIME_DIR")))
 
