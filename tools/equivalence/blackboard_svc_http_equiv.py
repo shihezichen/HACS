@@ -484,7 +484,7 @@ def main():
 
     sys.path[:0] = [OLD, AG]
     import blackboard_svc_old                                  # noqa: E402
-    import blackboard_svc                                      # noqa: E402
+    from hub.l3_domain import blackboard_svc                                      # noqa: E402
 
     setup_runtime(blackboard_svc_old, db_up=True)
     setup_runtime(blackboard_svc, db_up=True)

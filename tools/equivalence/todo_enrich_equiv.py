@@ -412,8 +412,8 @@ def run_all(snippet):
 def check_wiring():
     """import **真实生产模块** chat_svc，确认「搬走实现、调用面不变」。"""
     sys.path.insert(0, AG)
-    import chat_svc as cs                                    # noqa: E402
-    import agent_model as am                                 # noqa: E402
+    from hub.l3_domain import chat_svc as cs                                    # noqa: E402
+    from hub.l2_adapter import agent_model as am                                 # noqa: E402
 
     checks = []
 

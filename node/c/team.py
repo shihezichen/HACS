@@ -97,7 +97,7 @@ from node.l1_transport.team_cli_core import (  # noqa: E402  L1 通信层：连�
     run_pool,
 )   # cmd_who/cmd_say/cmd_broadcast + say 辅助函数：L1 实现，C 侧只做 re-export（属性面不变）
 # 批⑤d 过渡：team_group 仍在 backend/（⑤f 搬入 hub/l3_domain/ 后再改一次，届时无需再改此处）。
-from backend.team_group import (  # noqa: E402  L3 协作域：群聊 + 会议（C 侧只做 re-export，属性面与搬迁前一致）
+from hub.l3_domain.team_group import (  # noqa: E402  L3 协作域：群聊 + 会议（C 侧只做 re-export，属性面与搬迁前一致）
     DEFAULT_CHAT_BASE,
     DEFAULT_MEETINGS_FILE,
     append_jsonl,

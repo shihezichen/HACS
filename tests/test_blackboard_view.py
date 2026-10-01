@@ -45,7 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-import blackboard_view as bv  # noqa: E402
+from hub.l3_domain import blackboard_view as bv  # noqa: E402
 
 TOKEN = "unit-test-token-DO-NOT-LEAK-6f3a1c"
 

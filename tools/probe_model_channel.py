@@ -76,7 +76,7 @@ def probe_local(timeout_s):
     if AGENT_TEAM not in sys.path:
         sys.path.insert(0, AGENT_TEAM)
     try:
-        import agent_model                                  # noqa: E402
+        from hub.l2_adapter import agent_model                                  # noqa: E402
     except Exception as exc:                                # 缺依赖也要给结构化结果
         return {"ok": False, "target": "", "argv": [], "elapsed_s": 0.0,
                 "why": "import_failed:%s" % exc, "parsed": None}

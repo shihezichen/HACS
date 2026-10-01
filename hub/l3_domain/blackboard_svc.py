@@ -104,13 +104,13 @@ from http.server import ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 # 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
-for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                 os.path.dirname(os.path.abspath(__file__))):
     sys.path.insert(0, _hacs_p)
 
 from node.l0_host import node_paths as _np  # noqa: E402  L0 平台层：宿主默认值唯一出处（env 优先）
 
-import embedder  # 同目录模块；导入只读环境变量，不会加载模型
+from hub.l3_domain import embedder  # 同目录模块；导入只读环境变量，不会加载模型
 from node.l1_transport import web_gateway  # L1 通信层：HTTP 应答出口与非 GET 方法的路由分发
 # L2 适配层：pgvector 文本字面量与时间归一的**单一出处**（刀16 从本件收口，实现未改一字）
 from hub.l2_adapter.pg_literals import to_utc, vector_literal

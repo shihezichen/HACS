@@ -47,7 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-import blackboard_view as bv  # noqa: E402
+from hub.l3_domain import blackboard_view as bv  # noqa: E402
 import view_auth  # noqa: E402
 
 # ---------------------------------------------------------------------------

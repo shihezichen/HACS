@@ -369,7 +369,7 @@ def main():
 
     sys.path[:0] = [OLD, AG]
     import chat_svc_old_k34 as mod_old                              # noqa: E402
-    import chat_svc as mod_new                                      # noqa: E402
+    from hub.l3_domain import chat_svc as mod_new                                      # noqa: E402
     import view_auth                                                # noqa: E402
 
     base.COOKIE_NAME = view_auth.SESSION_COOKIE

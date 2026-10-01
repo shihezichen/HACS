@@ -42,7 +42,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-import chat_svc as cs  # noqa: E402
+from hub.l3_domain import chat_svc as cs  # noqa: E402
 import view_auth  # noqa: E402
 
 # ---------------------------------------------------------------------------

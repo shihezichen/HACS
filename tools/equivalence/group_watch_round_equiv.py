@@ -224,7 +224,7 @@ def main() -> int:
 
     base = load_base()
     from node.l1_transport import group_watch_delivery as D
-    import group_watch_pending as P
+    from hub.l3_domain import group_watch_pending as P
     mod = {"pending": P, "delivery": D}
     if a.negative:
         P.HUMAN_IDS = ("nobody",)   # 注毒：域规则「谁是人的判定」改废 → 行为必偏

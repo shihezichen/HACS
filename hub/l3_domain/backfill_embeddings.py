@@ -58,11 +58,11 @@ import time
 from typing import Any, List, Optional, Sequence
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (os.path.dirname(HERE), HERE):   # 批⑤e：补上仓根，hub.l2_adapter 绝对包名需要
+for _p in (os.path.dirname(os.path.dirname(HERE)), HERE):   # 批⑤e：补上仓根，hub.l2_adapter 绝对包名需要
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import embedder  # noqa: E402
+from hub.l3_domain import embedder  # noqa: E402
 # L2 适配层：pgvector 文本字面量的**单一出处**（刀16）。本件原先那份实现与它逐字节相同，
 # 只是少了 None 分支（本件的 SQL 不会传 None）—— 换成它后行为一分不差。
 from hub.l2_adapter.pg_literals import vector_literal  # noqa: E402

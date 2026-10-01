@@ -39,7 +39,7 @@ for _hacs_p in (os.path.dirname(HERE), HERE):
         sys.path.insert(0, _hacs_p)
 
 from node.l1_transport import group_watch_delivery as _delivery  # noqa: E402  L1 投递侧：argv 默认值 / 口令探针 / 状态 / 日志
-from group_watch_pending import one_round  # noqa: E402  L3 待回应账域侧：单轮编排（C→L3→L1，方向合法）
+from hub.l3_domain.group_watch_pending import one_round  # noqa: E402  L3 待回应账域侧：单轮编排（C→L3→L1，方向合法）
 
 
 def main():

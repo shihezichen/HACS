@@ -21,7 +21,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # group_watch_delivery 已归位 node/l1_transport/，本件改绝对包名 import，故把仓根一并放进搜索路径。
-for _hacs_p in (os.path.dirname(HERE), HERE):
+for _hacs_p in (os.path.dirname(os.path.dirname(HERE)), HERE):
     if _hacs_p not in sys.path:
         sys.path.insert(0, _hacs_p)
 

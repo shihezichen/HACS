@@ -112,7 +112,7 @@ def _cell(host):
     from node.l0_host import node_paths
     importlib.reload(node_paths)
     os.environ["CHAT_ENRICH_SSH"] = host        # 空串时 ssh_argv 会退回 SSH_TARGET，见下
-    import agent_model
+    from hub.l2_adapter import agent_model
     importlib.reload(agent_model)
     known = node_paths.target_known(host)
     fl = node_paths.target_flavour(host)
@@ -137,7 +137,7 @@ def build():
 
 def check_ssh_argv():
     """契约第 6 条的两条硬断言：路径必须跟着**目标主机**的平台走。"""
-    import agent_model
+    from hub.l2_adapter import agent_model
     results = []
     for host, must, kind in [("<user>@<node>", "<home>/AppData/Local/hermes/scripts/claude_exec.py", "Windows 路径"),
                              ("root@lobster", "<home>/.local/share/hermes/scripts/claude_exec.py", "posix 路径")]:

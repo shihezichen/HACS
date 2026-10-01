@@ -69,12 +69,12 @@ import unicodedata
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
-for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                 os.path.dirname(os.path.abspath(__file__))):
     sys.path.insert(0, _hacs_p)
 
 from node.l0_host import node_paths as _np  # noqa: E402  L0 平台层：宿主默认值唯一出处（env 优先）
-import embedder  # 同目录模块；导入只读环境变量，不会加载模型
+from hub.l3_domain import embedder  # 同目录模块；导入只读环境变量，不会加载模型
 # L2 适配层：pgvector 文本字面量与时间归一的**单一出处**（刀16）。本件原本自带的两份
 # 同名实现与它逐字节相同，现在直接用它 —— 对外名 vector_literal / to_utc 一个字没改，
 # 本件 20+ 处调用点也一行没动。本件自己的 UTC / now_utc() 仍是本件的，不从这儿取。
