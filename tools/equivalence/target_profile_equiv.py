@@ -40,8 +40,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
-for _p in (REPO, AG):
+#: 两侧一律走绝对包名（`node.l0_host.node_paths` / `hub.l2_adapter.agent_model`），
+#: 仓根入 path 即可 —— 分层整改后已无「平铺目录」可注入。
+for _p in (REPO,):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 

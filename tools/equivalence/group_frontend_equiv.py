@@ -31,7 +31,7 @@
   与刀18 的 ``js_view_text_level()`` 同一套路、同强度。改基前的装置原件另存
   ``_old/group_frontend_equiv_old_k19.py``。
 * 计算样式 / CSSOM / 外链反向证据当时**一条没动**：两侧本来就同发
-  ``agent-team/ui/group.css`` 这一份，删的又是活 DOM 匹配不到的规则。
+  ``hub/l4_experience/group.css`` 这一份，删的又是活 DOM 匹配不到的规则。
   **刀20 更正**：正因为「两侧同发一份」，那两条判据对本刀这类失效模式其实**没有
   敏感度**（旧侧跟着新侧一起变了），刀19 的全绿当时只是旁证。刀20 已把旧侧换成
   冻结基线并补上负控 —— 见上面的刀20 改动概要。
@@ -59,7 +59,7 @@
 比什么
 ------
 旧侧 OLD = ``--old <path>``（当刀开工前快照），默认 ``_old/group_old_k13.html``
-新侧 NEW = ``agent-team/ui/group.html`` + 它引用的同目录兄弟件
+新侧 NEW = ``hub/l4_experience/group.html`` + 它引用的同目录兄弟件
            （``group_transport.js`` 刀11 抽出、``group.css`` 刀12 抽出、
             ``group_view.js`` 刀13 抽出）
 
@@ -69,7 +69,7 @@
 
 * **第 0b 类 · JS 文本级（业务视图）**：与下面第 0 类 CSS 文本级**同构** ——
   旧快照里那个**唯一的内联 ``<script>`` 块**的内容（``<script>\\n`` 之后 至
-  ``</script>`` 之前）**==** ``agent-team/ui/group_view.js`` 的全部字节；外加新
+  ``</script>`` 之前）**==** ``hub/l4_experience/group_view.js`` 的全部字节；外加新
   ``group.html`` 的字节账（内联 ``<script>`` 计 0 / 外链行计 1 / 总字节）与
   **重组互补证据**（把新件那 39 B 外链行换回原 74877 B 整块 → 与旧快照逐字节相等）。
   注意 ``</script>`` 计数**不减**（6 → 6）：外链 script **不是空元素**，
@@ -83,7 +83,7 @@
 刀12 追加了三类判据（只加不减，原有各类一条没动）：
 
 * **第 0 类 · CSS 文本级**：旧快照内联 ``<style>``…``</style>`` 之间的字节
-  **==** ``agent-team/ui/group.css`` 的字节（刀19 起换基为 **``CSS_DROPPED`` 之外的
+  **==** ``hub/l4_experience/group.css`` 的字节（刀19 起换基为 **``CSS_DROPPED`` 之外的
   保留块纯拼接 + 尾部残余 0 B**，另加 ``CSS_DROPPED`` 反向断言、字节账、交错重组与残留扫描，
   同强度，见 ``CSS_DROPPED`` 处的注释）；外加新 ``group.html`` 的字节账
   （``</style>`` 计 0 / ``<link`` 计 1 / 总字节）与**重组互补证据**
@@ -102,10 +102,10 @@
 ----
 同一个 Python 进程里起一台桩后端（`ThreadingHTTPServer`），两侧共用**同一份冻结夹具**：
 
-* ``/old/<f>`` → `_old/` 目录（只有那一个 html）；``/new/<f>`` → `agent-team/ui/`
+* ``/old/<f>`` → `_old/` 目录（只有那一个 html）；``/new/<f>`` → `hub/l4_experience/`
 * 两个页面里的 ``<script src="/md.js">`` 之类走的是**绝对路径**，所以根路径
   ``/md.js`` ``/tex.js`` ``/hl.js`` ``/codeblock.js`` ``/group_transport.js``
-  ``/group.css`` ``/group_view.js`` 一律从 `agent-team/ui/` 发（两侧同一份；
+  ``/group.css`` ``/group_view.js`` 一律从 `hub/l4_experience/` 发（两侧同一份；
   旧页面不引用 group_view.js，所以它在旧侧根本不会被请求 —— 这一点与线上形态一致）
 * ``/api/*`` 全部返回冻结 JSON；``/login`` 返 **204**（见下「已知偏差」）
 
@@ -156,7 +156,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-UI_DIR = os.path.join(ROOT, "agent-team", "ui")
+UI_DIR = os.path.join(ROOT, "hub", "l4_experience")
 OLD_DIR = os.path.join(ROOT, "tools", "equivalence", "_old")
 K11_HTML = os.path.join(OLD_DIR, "group_old_k11.html")   # 刀11 基线（JS 文本级判据的固定锚）
 K12_HTML = os.path.join(OLD_DIR, "group_old_k12.html")   # 刀12 基线（CSS 文本级判据的固定锚；供跨刀对照）
@@ -168,7 +168,7 @@ NEW_VIEW = os.path.join(UI_DIR, "group_view.js")
 
 # ---------------------------------------------------------------- 刀20 · CSS 冻结基线
 # 补的是刀19 暴露出来的**口径空档**：桩后端把 `/group.css` 放在 ROOT_STATIC 里，两侧
-# **同发**活件 `agent-team/ui/group.css`。于是「删本件里的规则」这一类刀，计算样式
+# **同发**活件 `hub/l4_experience/group.css`。于是「删本件里的规则」这一类刀，计算样式
 # 与 CSSOM 天然全绿 —— 旧侧跟着新侧一起变了，那两条判据对这个失效模式**零敏感度**。
 # 刀19 只用临时 `--old group_old_k12.html` 旁证补了一次，没有固化。
 # 本刀把旧侧钉死到一份**冻结基线**：刀19 开工前（HEAD 84d753f 的父提交 0828dac）
@@ -669,7 +669,7 @@ IDENT_PROBES = ["typeof api", "typeof pull", "typeof boot", "typeof tgid",
 #   (表达式, OLD 侧期望值, NEW 侧期望值)
 # OLD = k13 快照页面，NEW = 活件。两侧期望值为什么**不总是**一边有一边没有：
 #   · `tApi` / `TSVC` 定义在 **group_transport.js** —— 刀11 起它就是**两侧共用的同一份
-#     活件**（夹具把根路径 /group_transport.js 对两侧都从 agent-team/ui/ 发，见模块头
+#     活件**（夹具把根路径 /group_transport.js 对两侧都从 hub/l4_experience/ 发，见模块头
 #     「夹具」一节）。刀18 把这两段从活件删掉，两侧就一起没有了 → 两边都钉 undefined，
 #     等于**多钉了一条「TSVC 端点在前端已彻底不可达」**；
 #   · `TSTATUS`/`TPOLL`/`tLoad`/`tOpen` 等定义在 **内联脚本**里，k13 快照自带 → OLD 仍有、
@@ -1191,7 +1191,7 @@ def js_view_text_level(old_html):
     换成「内联 ``<script>`` → 外链 js」。三件事：
 
     1. 旧快照里那个**唯一的内联 script 块**的内容（``<script>\\n`` 之后 至
-       ``</script>`` 之前）与 ``agent-team/ui/group_view.js`` 逐字节同源 ——
+       ``</script>`` 之前）与 ``hub/l4_experience/group_view.js`` 逐字节同源 ——
        刀18 起换基为 **``VIEW_BLOCKS`` 保留块纯拼接 + 尾部残余 0 B**，另加
        ``VIEW_DROPPED`` 的反向断言、字节账与源码残留扫描（同强度，见常量处注释）；
     2. 新 ``group.html`` 的字节账：总字节 = 旧 − 整块 + 39、内联 ``<script>`` 计 0、

@@ -57,10 +57,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
 REPO = os.path.dirname(TOOLS)
 OLD_DIR = os.path.join(HERE, "_old")
-AGENT_TEAM = os.path.join(REPO, "agent-team")
+#: 保留注入：OLD_DIR / TOOLS 不是包目录 —— 冻结快照 `roster_derive_old_k27` 与正件
+#: `roster_derive_conf` 只能按裸名装入；快照内部还是裸名 `import member_roster`，
+#: 故把该件今天所在的 L0 目录一并注入**只供旧侧用**。REPO 供绝对包名解析。
+L0_HOST = os.path.join(REPO, "node", "l0_host")
 DERIVE_PY = os.path.join(TOOLS, "roster_derive_conf.py")
 
-for p in (REPO, TOOLS, OLD_DIR, AGENT_TEAM):
+for p in (REPO, TOOLS, OLD_DIR, L0_HOST):
     if p not in sys.path:
         sys.path.insert(0, p)
 

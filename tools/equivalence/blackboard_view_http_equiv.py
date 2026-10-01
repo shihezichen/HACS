@@ -7,7 +7,7 @@
 同一个进程里起**两个看板实例**：
 
   * 旧的 —— `tools/equivalence/_old/blackboard_view_old.py`（b288b64 的逐字节快照）
-  * 新的 —— `agent-team/blackboard_view.py`（HTTP 面收进 L1 web_gateway 之后）
+  * 新的 —— `hub/l3_domain/blackboard_view.py`（HTTP 面收进 L1 web_gateway 之后）
 
 两边挂同一个假上游、同一份认证（sqlite 账号库 + 同一把会话密钥），按同一张请求
 矩阵逐例打，然后**逐字节比**状态码 / 响应头（顺序与取值）/ 响应体 / 日志行。
@@ -45,10 +45,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-AGENT_TEAM = os.path.join(ROOT, "agent-team")
+#: 保留注入：`_old/` 冻结快照按裁定一字不动，它内部是**裸名** import（`node_paths` /
+#: `view_auth`）。分层整改后两件各自归位到包目录里，裸名再也解析不到，故把它们所在目录
+#: 一并注入**只供旧侧快照用**；新侧一律走绝对包名，不靠注入。
+FLAT_DIRS = [os.path.join(ROOT, "node", "l0_host"),        # node_paths
+             os.path.join(ROOT, "hub", "x")]               # view_auth
+NEW_FILE = os.path.join(ROOT, "hub", "l3_domain", "blackboard_view.py")
 OLD_SNAPSHOT = os.path.join(HERE, "_old", "blackboard_view_old.py")
 
-sys.path.insert(0, AGENT_TEAM)
+for _p in FLAT_DIRS + [ROOT]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from hub.x import view_auth  # noqa: E402  —— 两个实例共用同一份认证实现
 
@@ -64,7 +71,7 @@ def _load(name, path):
 
 
 OLD = _load("bv_old", OLD_SNAPSHOT)
-NEW = _load("bv_new", os.path.join(AGENT_TEAM, "blackboard_view.py"))
+NEW = _load("bv_new", NEW_FILE)
 
 # 对外仓两道扫描的**双口径**（刀6 收尾各踩一次，别退回旧写法）：
 #   ① 源仓 tools/scan_secrets.py 的 `LITERALISH` 判「整串都是引号字面量」—— 拼接 `"a"+"b"` 也算命中；

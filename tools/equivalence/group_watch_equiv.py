@@ -28,9 +28,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BASE_REV = "d445e6f"
 BASE_PATH = "backend/group_watch.py"
-NEW_FILES = ("backend/group_watch.py",
+NEW_FILES = ("node/c/group_watch.py",
              "node/l1_transport/group_watch_delivery.py",
-             "backend/group_watch_pending.py")
+             "hub/l3_domain/group_watch_pending.py")
 
 TOP_UNITS = ("default_pass_file", "log", "http", "build_prompt")
 CLASS_NAME = "State"

@@ -22,7 +22,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
+#: 保留注入：OLD 不是包目录 —— `--ref` 落盘的 `teamd_old.py` 只能按裸名装入；
+#: REPO 供新侧绝对包名（`node.l1_transport.teamd`）解析。
 OLD = os.path.join(HERE, "_old")
 
 
@@ -46,7 +47,7 @@ def main():
     ap.add_argument("--ref", default="HEAD", help="迁移前的 commit/ref")
     args = ap.parse_args()
     materialize_old(args.ref)
-    sys.path[:0] = [OLD, AG, REPO]
+    sys.path[:0] = [OLD, REPO]
 
     import teamd_old                                            # noqa: E402
     from node.l1_transport import teamd                                                # noqa: E402

@@ -13,7 +13,7 @@
 
 名册真源（契约，**刀29 立 · 刀31 修订**）
 ----------------------------------------
-  · **名册 = L0 档案 `agent-team/member_roster.py` 的 `ROSTER`**（顺序即规范序）。
+  · **名册 = L0 档案 `node/l0_host/member_roster.py` 的 `ROSTER`**（顺序即规范序）。
     刀25 曾把名册真源定义为「两台中枢 `nats.conf` 里 `authorization.users` 的规范形」——
     那让**期望侧就是被检对象自己**：谁登上两台中枢把 conf 一起手改（加人 / 删人），
     本件**完全看不见**。刀29 把期望侧切到档案，这个盲区才闭合（刀27 已真机证明
@@ -135,7 +135,7 @@ SCHEMA = "l5-membership-audit/1"
 HUBS_DEFAULT = ("lobster", "top001")
 
 #: v2 中枢的端口体系：9930 客户端 / 9931 集群路由 / 9932 监控（仅环回）。
-#: 监听端口落在集合外 = 不是 v2 形状（与 `agent-team/gen_nats_conf.py` 生成的那份对齐）。
+#: 监听端口落在集合外 = 不是 v2 形状（与 `hub/l1_relay/gen_nats_conf.py` 生成的那份对齐）。
 V2_PORTS = (9930, 9931, 9932)
 #: 监控口只绑 127.0.0.1 —— 所以 connz/routez 一律**经 ssh 在该机上打环回**，本件不需要任何地址字面量。
 MONITOR_PORT = 9932
@@ -992,7 +992,7 @@ def render(report):
            "中枢 %s ｜ 节点 %s ｜ 名册 %d 人"
            % ("、".join(report["hub_list"]) or "—",
               "、".join(report["node_list"]) or "—", len(report["roster"])),
-           "名册来源  L0 档案 agent-team/member_roster.py（顺序即规范序）",
+           "名册来源  L0 档案 node/l0_host/member_roster.py（顺序即规范序）",
            "=" * 78]
     for key, name in CHECKS:
         items = report["findings"][key]

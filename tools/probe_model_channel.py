@@ -35,7 +35,6 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
-AGENT_TEAM = os.path.join(PROJECT_ROOT, "agent-team")
 TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
 
 SSH_TIMEOUT_PAD = 60          # 远端跑 probe 时，ssh 本身比 probe 多给这么多秒
@@ -73,8 +72,9 @@ def load_targets():
 
 def probe_local(timeout_s):
     """本机直跑：直接 import L2 agent_model 调 probe()。"""
-    if AGENT_TEAM not in sys.path:
-        sys.path.insert(0, AGENT_TEAM)
+    # 被搬件按绝对包名 import（hub.l2_adapter.agent_model），故仓根入路径即可。
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
     try:
         from hub.l2_adapter import agent_model                                  # noqa: E402
     except Exception as exc:                                # 缺依赖也要给结构化结果

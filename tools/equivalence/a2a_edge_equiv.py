@@ -41,7 +41,11 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
+#: 保留注入：`_old/` 冻结快照按裁定一字不动，它内部是**裸名** `import agent_usage`。
+#: 分层整改后该件归 `node/l2_adapter/`，裸名再也解析不到 —— 但这里**不能**只靠目录注入：
+#: 本装置的判据前提是「两侧走的是同一个 agent_usage 模块对象」（见模块 docstring），
+#: 所以新侧按绝对包名装一次，再把它**钉进 `sys.modules["agent_usage"]`**，
+#: 让快照的裸名解析到同一对象；桩才能对新旧一视同仁。
 OLD = os.path.join(HERE, "_old")
 
 # 令牌在运行期拼装（不落字符串字面量）：对外仓扫描器把 `TOKEN = "<字面量>"` 判为口令字面量
@@ -259,11 +263,12 @@ def main():
     ap.add_argument("--ref", default="1264482", help="抽件前的 commit/ref")
     args = ap.parse_args()
     materialize_old(args.ref)
-    sys.path[:0] = [OLD, AG]
+    sys.path[:0] = [OLD, REPO]
 
     # 水位桩：必须在 import 两侧实现**之前**装好 —— 组合根 build_capabilities()
     # 会在 install() 时把 agent_usage.read_usage 绑进能力表。
-    import agent_usage                                          # noqa: E402
+    from node.l2_adapter import agent_usage                     # noqa: E402
+    sys.modules.setdefault("agent_usage", agent_usage)          # 供旧侧快照的裸名解析到同一对象
 
     def stub_read_usage(caller, session_id, agent=None):
         if caller == "nousage":
@@ -276,7 +281,7 @@ def main():
     time.time = lambda: FROZEN_TS                               # 冻结时钟（见模块 docstring）
 
     import a2a_svc_old                                          # noqa: E402
-    from comm.a2a import a2a_svc                                # noqa: E402
+    from node.c import a2a_svc                                  # noqa: E402
     from node.l1_transport.a2a import a2a_edge                  # noqa: E402
 
     a2a_svc.install()                                           # 组合根装配：L2 能力 → L1 端口

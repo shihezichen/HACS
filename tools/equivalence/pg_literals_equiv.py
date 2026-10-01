@@ -5,7 +5,7 @@ pg_literals_equiv.py —— 刀16 等价证据：三份重复实现收口到 L2 
 
 旧侧 = tools/equivalence/_old/pg_literals_old_k16.py（搬迁前三份实现的**逐字节**快照，
        由改前树 `git archive HEAD` 独立解包后切片生成，非工作区自比）
-新侧 = agent-team/pg_literals.py 的两个函数，以及三个 L3 调用件保留的**同名别名**
+新侧 = hub/l2_adapter/pg_literals.py 的两个函数，以及三个 L3 调用件保留的**同名别名**
        （blackboard_svc._vector_literal / _to_utc、shared_content.vector_literal / to_utc、
         backfill_embeddings._vector_literal）
 
@@ -41,12 +41,23 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AGENT_TEAM = os.path.join(REPO, "agent-team")
+L2_ADAPTER = os.path.join(REPO, "hub", "l2_adapter")
+L3_DOMAIN = os.path.join(REPO, "hub", "l3_domain")
 OLD_DIR = os.path.join(HERE, "_old")
 
-for p in (AGENT_TEAM, OLD_DIR):
+#: 保留注入：OLD_DIR 不是包目录，冻结快照 `pg_literals_old_k16` 只能按裸名装入；
+#: REPO 供新侧的绝对包名（`hub.l2_adapter.*` / `hub.l3_domain.*`）解析。
+for p in (REPO, OLD_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
+
+#: 新侧四件的**绝对包名**（分层整改后各自归位，不再平铺在一个目录里）
+NEW_MODULES = {
+    "pg_literals": "hub.l2_adapter.pg_literals",
+    "blackboard_svc": "hub.l3_domain.blackboard_svc",
+    "shared_content": "hub.l3_domain.shared_content",
+    "backfill_embeddings": "hub.l3_domain.backfill_embeddings",
+}
 
 
 # ============================================================ 取值 / 取异常的统一口径
@@ -150,8 +161,8 @@ def load_sides(old_tree):
     import pg_literals_old_k16 as old
 
     new = {}
-    for name in ("pg_literals", "blackboard_svc", "shared_content", "backfill_embeddings"):
-        new[name] = importlib.import_module(name)
+    for name, dotted in NEW_MODULES.items():
+        new[name] = importlib.import_module(dotted)
 
     old_tree_mods = None
     if old_tree:
@@ -226,7 +237,7 @@ def section_bf_none(out, old, new):
     out("A' 段 · backfill_embeddings 旧实现无 None 分支（登记差异，不是回归）")
     out("  旧：%s" % digest(old_cell))
     out("  新：%s" % digest(new_cell))
-    src = io.open(os.path.join(AGENT_TEAM, "backfill_embeddings.py"),
+    src = io.open(os.path.join(L3_DOMAIN, "backfill_embeddings.py"),
                   "r", encoding="utf-8").read()
     kw = src.count("_vector_literal(values=") + src.count("_vector_literal(embedding=")
     calls = src.count("_vector_literal(vec)")
@@ -310,7 +321,7 @@ def section_surface(out, new):
         ("pg_literals.UTC 就是 datetime.timezone.utc",
          pgl.UTC is datetime.timezone.utc),
         ("pg_literals 只 import 标准库（datetime / typing），不碰 psycopg2 与任何上层件",
-         _imported_modules(os.path.join(AGENT_TEAM, "pg_literals.py")) == {"datetime", "typing"}),
+         _imported_modules(os.path.join(L2_ADAPTER, "pg_literals.py")) == {"datetime", "typing"}),
     ]
     out("C 段 · 别名面与对象身份（%d 项）" % len(checks))
     bad = 0
@@ -422,7 +433,7 @@ def run_once(old_tree):
     out("刀16 等价装置 · pgvector 字面量 / 时间归一 收口到 L2 pg_literals")
     out("旧侧：tools/equivalence/_old/pg_literals_old_k16.py"
         + ("（外加 --old-tree 改前树原件）" if old_tree_mods else ""))
-    out("新侧：agent-team/pg_literals.py + 三个 L3 件的同名别名")
+    out("新侧：hub/l2_adapter/pg_literals.py + 三个 L3 件的同名别名")
     out("=" * 78)
     out("")
 

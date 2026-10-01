@@ -6,7 +6,7 @@
 ----------
 阶段5 的收口刀要让生成器**按档案自动写 NATS 配置**。在那之前必须先回答一个问题：
 
-    L0 名册档案 `agent-team/member_roster.py` 里那张表，加上各成员**自己那台机**上的
+    L0 名册档案 `node/l0_host/member_roster.py` 里那张表，加上各成员**自己那台机**上的
     凭据文件，**够不够**唯一决定现网中枢 `nats.conf` 的用户区？
 
 「够」不是靠读代码相信的，是靠**逐字节比**证出来的。本件就是那把尺子::
@@ -20,7 +20,7 @@
 
 本刀**不改生成器、不改对账器、不动 NATS**。把生成器切成档案驱动是下一刀的事，
 而且它还卡在一个**已量出的缺口**上：中枢机上的生成器拿不到全体成员的凭据 ——
-现有凭据是**分布在各成员自己那台机**上的。详见 `agent-team/docs/l5-roster-archive.md` §缺口。
+现有凭据是**分布在各成员自己那台机**上的。详见 `docs/l5-roster-archive.md` §缺口。
 
 「用户区」的定义（**冻结**）
 ----------------------------
@@ -185,7 +185,7 @@ def extract_users_block(text):
     return None, "authorization { 的花括号在文件末尾仍未配平"
 
 
-#: 用户区的固定首尾（与 `agent-team/gen_nats_conf.py:188-190,195-196` 逐字符同形）
+#: 用户区的固定首尾（与 `hub/l1_relay/gen_nats_conf.py:188-190,195-196` 逐字符同形）
 BLOCK_HEAD = ("authorization {", "  timeout: 3", "  users = [")
 BLOCK_TAIL = ("  ]", "}")
 

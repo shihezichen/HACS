@@ -12,7 +12,7 @@
           `os.path.isdir`、`datetime` 而非 `time.gmtime`、手写切分而非 `csv` 模块）。
           它等于「没有守护时，运维自己 ssh 上去手算这四问」。
 
-    新侧  agent-team/nodelet.py（工作区活件），**真调 `build_probe()`，D 段还真起 HTTP 服务**。
+    新侧  node/l0_host/nodelet.py（工作区活件），**真调 `build_probe()`，D 段还真起 HTTP 服务**。
 
 两侧唯一共享的是 L0 节点档案 `node_profile` —— 档案本来就是唯一真源，本装置要证的是
 **从档案到探针体的推导**没走样，不是档案自己对不对（那是刀21/22 的装置管的事）。
@@ -75,11 +75,13 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AGENT_TEAM = os.path.join(REPO, "agent-team")
+L0_HOST = os.path.join(REPO, "node", "l0_host")
 TOOLS = os.path.dirname(HERE)
 OLD_DIR = os.path.join(HERE, "_old")
 
-for _p in (REPO, os.path.join(REPO, "backend"), AGENT_TEAM, OLD_DIR, TOOLS):
+# 保留注入：OLD_DIR / TOOLS 不是包目录 —— 冻结快照 `nodelet_old_k23` 与 `nodelet_gen`
+# 只能按裸名装入；REPO 供两侧的绝对包名 import（`node.l0_host.*`）解析。
+for _p in (REPO, L0_HOST, OLD_DIR, TOOLS):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -89,7 +91,7 @@ SANDBOX = os.path.join(tempfile.gettempdir(), "k23_equiv_sandbox")
 #: 旧侧基线 —— 缺它就判 2（宁可判不清，也不给假绿灯）
 REQUIRED_OLD = ["nodelet_old_k23.py"]
 
-NODELET_PATH = os.path.join(AGENT_TEAM, "nodelet.py")
+NODELET_PATH = os.path.join(L0_HOST, "nodelet.py")
 
 #: 两侧都会读的 env，每格开跑前一律清干净（不清就串场）
 WIPE = [
@@ -561,7 +563,7 @@ def section_c(out, nodelet, old, npf):
         {"a2a_probe_token": {"present": True, "len": 3}}) is True))
 
     # —— 源码守卫
-    src = _src("agent-team/nodelet.py")
+    src = _src("node/l0_host/nodelet.py")
     old_src = _src("tools/equivalence/_old/nodelet_old_k23.py")
     imports = re.findall(r"^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)", src, re.M)
     checks.append(("L0 守护只 import 同层 node_profile（上层件一个没有）",
@@ -806,7 +808,7 @@ def run_once(neg=None):
     out("刀23 等价装置 · 轻量节点守护 = 档案驱动的探针口")
     out("旧侧：_old/nodelet_old_k23.py（%s）—— **独立第二实现**（新增件无改前字节可取，见模块文档串）"
         % _md5(os.path.join(OLD_DIR, "nodelet_old_k23.py")))
-    out("新侧：agent-team/nodelet.py（%s，工作区活件）" % _md5(NODELET_PATH))
+    out("新侧：node/l0_host/nodelet.py（%s，工作区活件）" % _md5(NODELET_PATH))
     out("归一化规则（契约 §2 显式声明）：")
     out("  ① %s  →  \"ts\": \"<TS>\"" % TS_RX.pattern)
     out("  ② %s  →  \"uptime_s\": <UPTIME>" % UPTIME_RX.pattern)

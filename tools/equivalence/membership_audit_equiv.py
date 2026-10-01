@@ -39,7 +39,7 @@ E 段在证明什么（这是刀29 的价值本身）
 ------------------------------------
 刀29 之前，对账器的**期望成员集 = 被检对象自己**（两台中枢 conf 的用户并集）——
 于是「**两台中枢一起被手改**」（加人 / 删人）它**彻底无感**。刀29 把期望侧切到
-L0 档案 `agent-team/member_roster.py`。E 段把**同一份 artifacts**（同一夹具 + 同一份
+L0 档案 `node/l0_host/member_roster.py`。E 段把**同一份 artifacts**（同一夹具 + 同一份
 `roster.json`）同时喂给「改前」`_old/membership_audit_old_k29.py`（正件在刀29 前的逐字节快照，
 **函数级直调** `analyze()` —— 它的 CLI 不吃档案）与「改后」正件，钉住两件事：
 ① 现网态（档案 ≡ conf）两侧输出**逐字节相同** —— 切换是**已知等价的替换**；
@@ -97,10 +97,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
 REPO = os.path.dirname(TOOLS)
 OLD_DIR = os.path.join(HERE, "_old")
-AGENT_TEAM = os.path.join(REPO, "agent-team")
+#: 保留注入：OLD_DIR / TOOLS 不是包目录 —— 冻结快照与正件 `nats_membership_audit`
+#: 只能按裸名装入；快照内部还是裸名 import（`node_profile` / `member_roster` /
+#: `gen_nats_conf`），故把这些件今天所在的目录一并注入**只供旧侧用**。REPO 供绝对包名解析。
+L0_HOST = os.path.join(REPO, "node", "l0_host")       # node_profile / member_roster
+L1_RELAY = os.path.join(REPO, "hub", "l1_relay")      # gen_nats_conf
 AUDIT_PY = os.path.join(TOOLS, "nats_membership_audit.py")
 
-for p in (REPO, TOOLS, OLD_DIR, AGENT_TEAM):
+for p in (REPO, TOOLS, OLD_DIR, L0_HOST, L1_RELAY):
     if p not in sys.path:
         sys.path.insert(0, p)
 

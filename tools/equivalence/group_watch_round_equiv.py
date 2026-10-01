@@ -24,7 +24,7 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-BACKEND = os.path.join(ROOT, "backend")
+NODE_C = os.path.join(ROOT, "node", "c")
 BASE_REV = "d445e6f"
 BASE_PATH = "backend/group_watch.py"
 TMP = os.environ.get("TMPDIR") or tempfile.gettempdir()
@@ -35,7 +35,7 @@ T0 = 1700000000.0
 # 归位 node/l1_transport/ —— 基线快照与活件都会裸名 import 这两处的件，故一并入搜索路径。
 L0_HOST = os.path.join(ROOT, "node", "l0_host")
 L1_TRANSPORT = os.path.join(ROOT, "node", "l1_transport")
-for _p in (BACKEND, L0_HOST, L1_TRANSPORT, ROOT):
+for _p in (NODE_C, L0_HOST, L1_TRANSPORT, ROOT):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 os.environ["AGENT_TEAM_HUMAN_IDS"] = HUMAN

@@ -19,7 +19,7 @@
                              那版在 `_old/chat_svc_old_8a.py`（blob `fbc0cb99` / 229016 B / 4498 行），
                              是 `--ref` 的覆盖目标，不是任何一相的对照侧；
   · `_old/chat_svc_old_8b.py`  —— 刀 8a 收尾（9841382），**刀 8b 追加那 156 例的旧侧**；
-  · 工作树 `agent-team/chat_svc.py` —— 新实现，两组都拿它当新侧。
+  · 工作树 `hub/l3_domain/chat_svc.py` —— 新实现，两组都拿它当新侧。
 两份基线**并存**：一刀一份、谁也不覆盖谁，旧刀的证据不会因为新刀换基线而静默失效。
 跑同一张请求矩阵，逐例比对：
 
@@ -30,7 +30,7 @@
 `getheaders()` 的原始顺序。
 
 **数据库一个字节都不真连**：走该件既有的注入缝 —— `Runtime.db` / `Runtime.roster` /
-`Runtime.auth` 是模块级可赋值的类属性（`agent-team/tests/test_chat_svc.py` 用的就是
+`Runtime.auth` 是模块级可赋值的类属性（`tests/test_chat_svc.py` 用的就是
 这条缝），这里塞一套**无状态、确定性**的假件。两侧各自一份实例，互不串状态。
 另外 `view_auth.in_tailnet` 用 monkeypatch 换掉（它是 L2 的网段判定，两侧共享同一个
 模块对象，所以一次替换对新旧同时生效 —— 这正是我们要的「同一条件」）。
@@ -69,7 +69,16 @@ os.environ["no_proxy"] = os.environ["NO_PROXY"] = "127.0.0.1,localhost,::1"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
+#: 保留注入：`_old/` 冻结快照按裁定一字不动，它内部是**裸名** import（`node_paths` /
+#: `view_auth` / `agent_model` / `web_gateway` / `ctx_watermark`）。分层整改后这五件各自
+#: 归位到包目录里，裸名再也解析不到，故把它们所在目录一并注入**只供旧侧快照用**；
+#: 新侧一律走绝对包名（`from hub.l3_domain import chat_svc`），不靠注入。
+FLAT_DIRS = [os.path.join(REPO, "node", "l0_host"),        # node_paths
+             os.path.join(REPO, "node", "l1_transport"),   # web_gateway
+             os.path.join(REPO, "node", "l2_adapter"),     # ctx_watermark
+             os.path.join(REPO, "hub", "l2_adapter"),      # agent_model
+             os.path.join(REPO, "hub", "x")]               # view_auth
+NEW_FILE = os.path.join(REPO, "hub", "l3_domain", "chat_svc.py")
 OLD = os.path.join(HERE, "_old")
 OLD_FILE = os.path.join(OLD, "chat_svc_old_8a.py")
 
@@ -148,7 +157,7 @@ class FakeDB(object):
     故意**无状态** —— 矩阵里前一例的写不会改变后一例的读，新旧两侧各跑一遍
     也不会因为「谁先跑」而分叉。
 
-    **形状一律照生产契约给**（下表就是 `agent-team/chat_svc.py` 里 `Database.*` 的返回形状）：
+    **形状一律照生产契约给**（下表就是 `hub/l3_domain/chat_svc.py` 里 `Database.*` 的返回形状）：
     形状给错的话，那一族用例两侧都只会落到同一个 5xx 兜底，比到的只是兜底正文，
     成功支等于**没覆盖**（刀8c 之前 `set_session_meta` 返 `True` 就是这样：`_patch_session`
     的 `updated.pop("changed", [])` 抛 AttributeError，PATCH session 那几例只见 500）。
@@ -1054,7 +1063,7 @@ def check_no_streaming():
     """
     print("\n== 硬约束 3 · 流式面存在性断言（只扫可执行代码，剥掉注释与文档串）==")
     bad = 0
-    for label, path in (("旧实现", OLD_FILE), ("新实现", os.path.join(AG, "chat_svc.py"))):
+    for label, path in (("旧实现", OLD_FILE), ("新实现", NEW_FILE)):
         raw = _code_only(io.open(path, "rb").read())
         hits = [m.decode("utf-8") for m in STREAM_MARKERS if m in raw]
         if hits:
@@ -1121,8 +1130,8 @@ def main():
         print("缺少旧实现快照 %s —— 用 --ref <迁移前提交> 生成" % OLD_FILE)
         return 2
 
-    sys.path[:0] = [OLD, AG]
-    import chat_svc_old                                        # noqa: E402
+    sys.path[:0] = [OLD] + FLAT_DIRS + [REPO]
+    import chat_svc_old                                      # noqa: E402
     from hub.l3_domain import chat_svc                                            # noqa: E402
     from hub.x import view_auth                                # noqa: E402
 
@@ -1163,7 +1172,7 @@ def main():
     s_8b = start(chat_svc_old_8b.ChatHandler, p_8b)
 
     print("旧实现 %s   :%d" % (OLD_FILE, p_old))
-    print("新实现 %s   :%d" % (os.path.join(AG, "chat_svc.py"), p_new))
+    print("新实现 %s   :%d" % (NEW_FILE, p_new))
     print("刀8b基线 %s   :%d" % (OLD_FILE_8B, p_8b))
     print("假计算器上游 :%d    ui/ = %s    cookie 名 = %s" % (calc_port, ui, COOKIE_NAME))
 

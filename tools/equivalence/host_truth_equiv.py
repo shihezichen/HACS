@@ -56,14 +56,15 @@ import textwrap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
+#: 保留注入：OLD_DIR 不是包目录，冻结快照 `host_truth_old_k22` 只能按裸名装入；
+#: REPO 供新侧绝对包名（`node.l0_host.node_profile`）解析。
 OLD_DIR = os.path.join(HERE, "_old")
 OLD_MOD = os.path.join(OLD_DIR, "host_truth_old_k22.py")
 
 #: 改前树（契约 §1 的行号都是这棵树上的）
 BASE_REV = "c529b32"
 
-for p in (REPO, AG, OLD_DIR):
+for p in (REPO, OLD_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -74,26 +75,31 @@ for p in (REPO, AG, OLD_DIR):
 # cmp:  value     —— 比「取到的值」（默认）
 #       help_shape—— A12 专用：default 相同 + help 只换示例地址（见模块文档串）
 ITEMS = [
-    dict(key="A1",  grp="A", file="agent-team/blackboard_view.py",           layer="L3", kind="assign",   anchor="AGENT_TEAM_BB_BASE",   old_line=116,  what="黑板基址兜底"),
-    dict(key="A2a", grp="A", file="agent-team/group_watch.py",               layer="L3", kind="assign",   anchor="AGENT_TEAM_CHAT_BASE", old_line=41,   what="对话台基址兜底"),
-    dict(key="A2b", grp="A", file="agent-team/group_watch.py",               layer="L3", kind="assign",   anchor="AGENT_TEAM_NATS_HOST", old_line=43,   what="NATS 集群串兜底（多值）"),
-    dict(key="A3",  grp="A", file="agent-team/team_cli_core.py",             layer="L1", kind="assign",   anchor="AGENT_TEAM_NATS_HOST", old_line=41,   what="NATS 集群串兜底（多值）"),
-    dict(key="A4a", grp="A", file="agent-team/roundtable.py",                layer="L3", kind="argparse", anchor="--blackboard",         old_line=2283, what="--blackboard 默认值"),
-    dict(key="A4b", grp="A", file="agent-team/roundtable.py",                layer="L3", kind="argparse", anchor="--nats-host",          old_line=2287, what="--nats-host 默认值"),
+    dict(key="A1",  grp="A", file="hub/l3_domain/blackboard_view.py",        layer="L3", kind="assign",   anchor="AGENT_TEAM_BB_BASE",   old_line=116,  what="黑板基址兜底"),
+    # 批④ 把 group_watch 原地拆三件，这两个锚点随「投递侧」落到了 L1 group_watch_delivery.py
+    dict(key="A2a", grp="A", file="node/l1_transport/group_watch_delivery.py", layer="L1", kind="assign", anchor="AGENT_TEAM_CHAT_BASE", old_line=41,  what="对话台基址兜底"),
+    dict(key="A2b", grp="A", file="node/l1_transport/group_watch_delivery.py", layer="L1", kind="assign", anchor="AGENT_TEAM_NATS_HOST", old_line=43,  what="NATS 集群串兜底（多值）"),
+    dict(key="A3",  grp="A", file="node/l1_transport/team_cli_core.py",      layer="L1", kind="assign",   anchor="AGENT_TEAM_NATS_HOST", old_line=41,   what="NATS 集群串兜底（多值）"),
+    dict(key="A4a", grp="A", file="hub/l3_domain/roundtable.py",             layer="L3", kind="argparse", anchor="--blackboard",         old_line=2283, what="--blackboard 默认值"),
+    dict(key="A4b", grp="A", file="hub/l3_domain/roundtable.py",             layer="L3", kind="argparse", anchor="--nats-host",          old_line=2287, what="--nats-host 默认值"),
     dict(key="A5",  grp="A", file="agent-team/session_ctx_archiver.py",      layer="L3", kind="assign",   anchor="CHAT_BASE_DEFAULT",    old_line=67,   what="对话台基址兜底"),
-    dict(key="A6",  grp="A", file="agent-team/team_group.py",                layer="L3", kind="assign",   anchor="DEFAULT_CHAT_BASE",    old_line=50,   what="对话台基址兜底（双 env 链）"),
-    dict(key="A7",  grp="A", file="agent-team/team_call.py",                 layer="L1", kind="assign",   anchor="DEFAULT_HOST",         old_line=29,   what="NATS 中枢兜底（单值）"),
-    dict(key="A8",  grp="A", file="agent-team/team_roster.py",               layer="L1", kind="assign",   anchor="DEFAULT_HOST",         old_line=27,   what="NATS 中枢兜底（单值）"),
+    dict(key="A6",  grp="A", file="hub/l3_domain/team_group.py",             layer="L3", kind="assign",   anchor="DEFAULT_CHAT_BASE",    old_line=50,   what="对话台基址兜底（双 env 链）"),
+    dict(key="A7",  grp="A", file="node/l1_transport/team_call.py",          layer="L1", kind="assign",   anchor="DEFAULT_HOST",         old_line=29,   what="NATS 中枢兜底（单值）"),
+    dict(key="A8",  grp="A", file="node/l1_transport/team_roster.py",        layer="L1", kind="assign",   anchor="DEFAULT_HOST",         old_line=27,   what="NATS 中枢兜底（单值）"),
     dict(key="A9",  grp="A", file="agent-team/task_svc.py",                  layer="L3", kind="assign",   anchor="CHAT_BASE_DEFAULT",    old_line=68,   what="对话台基址兜底（CHAT_BASE 链）"),
-    dict(key="A10", grp="A", file="agent-team/rt_remind.py",                 layer="L3", kind="argparse", anchor="--nats-host",          old_line=552,  what="--nats-host 默认值"),
+    dict(key="A10", grp="A", file="hub/l3_domain/rt_remind.py",              layer="L3", kind="argparse", anchor="--nats-host",          old_line=552,  what="--nats-host 默认值"),
     dict(key="A11", grp="A", file="agent-team/group_transcript_archiver.py", layer="L3", kind="assign",   anchor="CHAT_BASE_DEFAULT",    old_line=33,   what="对话台基址兜底"),
-    dict(key="A12", grp="A", file="agent-team/team_broadcast.py",            layer="L1", kind="argparse", anchor="--nats-host",          old_line=165,  what="help 里的示例地址形态", cmp="help_shape"),
-    dict(key="B1a", grp="B", file="agent-team/gen_nats_conf.py",             layer="L1", kind="assign",   anchor="AGENT_TEAM_NATS_DIR",  old_line=21,   what="NATS 配置目录兜底（posix）"),
-    dict(key="B1b", grp="B", file="agent-team/gen_nats_conf.py",             layer="L1", kind="assign",   anchor="ROUTE_PASS_FILE",      old_line=23,   what="路由凭据文件（posix 绝对路径）"),
+    dict(key="A12", grp="A", file="node/l1_transport/team_broadcast.py",     layer="L1", kind="argparse", anchor="--nats-host",          old_line=165,  what="help 里的示例地址形态", cmp="help_shape"),
+    dict(key="B1a", grp="B", file="hub/l1_relay/gen_nats_conf.py",           layer="L1", kind="assign",   anchor="AGENT_TEAM_NATS_DIR",  old_line=21,   what="NATS 配置目录兜底（posix）"),
+    dict(key="B1b", grp="B", file="hub/l1_relay/gen_nats_conf.py",           layer="L1", kind="assign",   anchor="ROUTE_PASS_FILE",      old_line=23,   what="路由凭据文件（posix 绝对路径）"),
     dict(key="B2a", grp="B", file="agent-team/task_sys/task_svc.py",         layer="L3", kind="assign",   anchor="DB_DEFAULT",           old_line=35,   what="task_svc 库文件（posix 绝对路径）"),
     dict(key="B2b", grp="B", file="agent-team/task_sys/task_svc.py",         layer="L3", kind="assign",   anchor="LOG_DEFAULT",          old_line=36,   what="task_svc 日志（posix 绝对路径）"),
-    dict(key="B3",  grp="B", file="agent-team/cli_backend.py",               layer="L2", kind="assign",   anchor="CODEX_WORKDIR",        old_line=102,  what="codex 工作目录（windows 绝对路径）"),
+    dict(key="B3",  grp="B", file="node/l2_adapter/cli_backend.py",          layer="L2", kind="assign",   anchor="CODEX_WORKDIR",        old_line=102,  what="codex 工作目录（windows 绝对路径）"),
 ]
+# ⚠️ 上表里 A5 / A9 / A11 / B2a / B2b 这 5 行仍写着 `agent-team/…` —— **不是漏改**：
+#    `session_ctx_archiver.py` · `task_svc.py` · `group_transcript_archiver.py` ·
+#    `task_sys/task_svc.py` 这四件**本仓（对外仓）里根本不存在**，从未随发布面出仓。
+#    本批不许为让装置变绿而伪造路径或放宽判据，故按「既有失效」原样留着、如实暴露。
 
 
 # ============================================================ env 场景（≥8 组，契约 §3）

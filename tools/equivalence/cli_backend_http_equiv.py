@@ -6,7 +6,7 @@
 
       --ref  给了就从**源码仓**（本仓，非对外仓）该提交重新取一份 agent-team/cli_backend.py
              覆盖到 _old/cli_backend_old.py；不给就用磁盘上已有的那份快照。
-             快照作「旧实现」，工作树 agent-team/cli_backend.py 作「新实现」。
+             快照作「旧实现」，工作树 node/l2_adapter/cli_backend.py 作「新实现」。
 
 做法：同一进程内起两份 ThreadingHTTPServer（各自绑一个空闲高端口），
 两侧都按名字取 `CLIBackendHandler`，三个成员都注入**同一份假 CLI**
@@ -38,7 +38,11 @@ import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
+#: 保留注入：`_old/` 冻结快照按裁定一字不动，它内部是**裸名** `import node_paths`。
+#: 分层整改后该件归 `node/l0_host/`，裸名再也解析不到，故把该目录注入**只供旧侧快照用**；
+#: 新侧一律走绝对包名（`from node.l2_adapter import cli_backend`），不靠注入。
+FLAT_DIRS = [os.path.join(REPO, "node", "l0_host")]        # node_paths
+NEW_FILE = os.path.join(REPO, "node", "l2_adapter", "cli_backend.py")
 OLD = os.path.join(HERE, "_old")
 OLD_FILE = os.path.join(OLD, "cli_backend_old.py")
 
@@ -235,9 +239,9 @@ def main():
         print("缺少旧实现快照 %s —— 用 --ref <迁移前提交> 生成" % OLD_FILE)
         return 2
 
-    sys.path[:0] = [OLD, AG]
+    sys.path[:0] = [OLD] + FLAT_DIRS + [REPO]
     import cli_backend_old                                    # noqa: E402
-    import cli_backend                                        # noqa: E402
+    from node.l2_adapter import cli_backend                   # noqa: E402
 
     tmp = tempfile.mkdtemp(prefix="cli_backend_equiv_")
     fake_cli = os.path.join(tmp, "fake_cli.py")
@@ -252,7 +256,7 @@ def main():
 
     bad = 0
     print("旧实现 %s :%d    新实现 %s :%d\n" % (OLD_FILE, p_old,
-                                              os.path.join(AG, "cli_backend.py"), p_new))
+                                              NEW_FILE, p_new))
     print("%-22s %-6s %-22s %-6s %s" % ("用例", "方法", "路径", "鉴权", "结论"))
     print("-" * 96)
     for name, method, path, auth, body, hold in CASES:

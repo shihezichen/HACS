@@ -52,7 +52,16 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
+#: 保留注入：`_old/` 冻结快照按裁定一字不动，它内部是**裸名** import（`node_paths` /
+#: `view_auth` / `agent_model` / `web_gateway` / `ctx_watermark`）。分层整改后这五件各自
+#: 归位到包目录里，裸名再也解析不到，故把它们所在目录一并注入**只供旧侧快照用**；
+#: 新侧一律走绝对包名（`from hub.l3_domain import chat_svc`），不靠注入。
+FLAT_DIRS = [os.path.join(REPO, "node", "l0_host"),        # node_paths
+             os.path.join(REPO, "node", "l1_transport"),   # web_gateway
+             os.path.join(REPO, "node", "l2_adapter"),     # ctx_watermark
+             os.path.join(REPO, "hub", "l2_adapter"),      # agent_model
+             os.path.join(REPO, "hub", "x")]               # view_auth
+NEW_FILE = os.path.join(REPO, "hub", "l3_domain", "chat_svc.py")
 OLD = os.path.join(HERE, "_old")
 OLD_FILE = os.path.join(OLD, "chat_svc_old_k34.py")
 
@@ -307,9 +316,9 @@ def check_frozen_baseline():
     print("\n== 冻结件方向断言（防止把「改后」当成「改前」冻进去）==")
     bad = 0
     old_raw = io.open(OLD_FILE, "rb").read()
-    new_raw = io.open(os.path.join(AG, "chat_svc.py"), "rb").read()
+    new_raw = io.open(NEW_FILE, "rb").read()
     for label, raw, want in (("冻结基线 _old/chat_svc_old_k34.py", old_raw, False),
-                             ("工作树 agent-team/chat_svc.py", new_raw, True)):
+                             ("工作树 hub/l3_domain/chat_svc.py", new_raw, True)):
         has = b"STATIC_BACKUP_RE" in raw
         ok = has is want
         bad += 0 if ok else 1
@@ -367,8 +376,8 @@ def main():
               % OLD_FILE)
         return 2
 
-    sys.path[:0] = [OLD, AG]
-    import chat_svc_old_k34 as mod_old                              # noqa: E402
+    sys.path[:0] = [OLD] + FLAT_DIRS + [REPO]
+    import chat_svc_old_k34 as mod_old                            # noqa: E402
     from hub.l3_domain import chat_svc as mod_new                                      # noqa: E402
     from hub.x import view_auth                                     # noqa: E402
 
@@ -389,7 +398,7 @@ def main():
     s_new = base.start(mod_new.ChatHandler, p_new)
 
     print("改前（冻结基线）%s   :%d" % (OLD_FILE, p_old))
-    print("改后（工作树）  %s   :%d" % (os.path.join(AG, "chat_svc.py"), p_new))
+    print("改后（工作树）  %s   :%d" % (NEW_FILE, p_new))
     print("静态根 ui/ = %s\n后台根 admin-ui/ = %s" % (ui, admin))
 
     bad = 0

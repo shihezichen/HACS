@@ -47,7 +47,14 @@ import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
+#: 保留注入：`_old/` 冻结快照按裁定一字不动，它内部是**裸名** import
+#: （`node_paths` / `embedder` / `web_gateway`）。分层整改后这三件各自归位到包目录里，
+#: 裸名再也解析不到，故把它们所在目录一并注入**只供旧侧快照用**；
+#: 新侧一律走绝对包名（`from hub.l3_domain import blackboard_svc`），不靠注入。
+FLAT_DIRS = [os.path.join(REPO, "node", "l0_host"),        # node_paths
+             os.path.join(REPO, "node", "l1_transport"),   # web_gateway
+             os.path.join(REPO, "hub", "l3_domain")]       # embedder
+NEW_FILE = os.path.join(REPO, "hub", "l3_domain", "blackboard_svc.py")
 OLD = os.path.join(HERE, "_old")
 OLD_FILE = os.path.join(OLD, "blackboard_svc_old.py")
 
@@ -482,8 +489,8 @@ def main():
         print("缺少旧实现快照 %s —— 用 --ref <迁移前提交> 生成" % OLD_FILE)
         return 2
 
-    sys.path[:0] = [OLD, AG]
-    import blackboard_svc_old                                  # noqa: E402
+    sys.path[:0] = [OLD] + FLAT_DIRS + [REPO]
+    import blackboard_svc_old                                # noqa: E402
     from hub.l3_domain import blackboard_svc                                      # noqa: E402
 
     setup_runtime(blackboard_svc_old, db_up=True)
@@ -498,7 +505,7 @@ def main():
 
     print("旧实现 %s   业务口 :%d  健康口 :%d" % (OLD_FILE, p_old, a_old))
     print("新实现 %s   业务口 :%d  健康口 :%d"
-          % (os.path.join(AG, "blackboard_svc.py"), p_new, a_new))
+          % (NEW_FILE, p_new, a_new))
 
     bad = 0
     total = 0

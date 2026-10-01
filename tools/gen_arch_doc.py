@@ -8,10 +8,10 @@
 干什么
 ------
 把 `tools/arch_doc_template.md`（正文唯一出处，人改文案只改它）里的占位符替换成
-**实时取到的数字**，写出 `agent-team/docs/architecture-final.md`（内部完整版）。
-对外版**不另写文件** —— `tools/hacs_manifest.json` 把本产物映射到 HACS 的
-`docs/architecture.md`，由既有脱敏器 `tools/sanitizers/generic_deploy.py` 生成，
-两份文档因此天然同源同数字。
+**实时取到的数字**，写出 `docs/architecture.md`（本仓的架构文档真位置）。
+源码仓里本件写的是内部完整版 `agent-team/docs/architecture-final.md`，再由
+`tools/hacs_manifest.json` + 脱敏器 `tools/sanitizers/generic_deploy.py` 映射成对外版；
+本仓（对外仓）没有那两件，产物就只有 `docs/architecture.md` 这一份。
 
 三条纪律
 --------
@@ -45,7 +45,7 @@ REPO = os.path.dirname(HERE)
 TEMPLATE = os.path.join(HERE, "arch_doc_template.md")
 LAYERS_JSON = os.path.join(HERE, "hacs_layers.json")
 CHECK_LAYERS = os.path.join(HERE, "check_layers.py")
-OUT = os.path.join(REPO, "agent-team", "docs", "architecture-final.md")
+OUT = os.path.join(REPO, "docs", "architecture.md")
 
 #: check_layers.py 的表头行形态：`分层门禁 · 台账（件数 82，层间 import 边 108）`
 HEADER_RX = re.compile(r"件数\s*(\d+)\s*[，,]\s*层间\s*import\s*边\s*(\d+)")
@@ -176,7 +176,7 @@ def main():
         die("输出目录不存在：%s" % out_dir)
     io.open(OUT, "w", encoding="utf-8", newline="\n").write(text)
 
-    print("✓ 已生成 agent-team/docs/architecture-final.md")
+    print("✓ 已生成 docs/architecture.md")
     print("  件数 %s · 层间 import 边 %s · 登记端口 %s 个 · HEAD %s（%s）"
           % (values["NK_FILES"], values["NK_EDGES"], values["NK_PORTS"], head, date))
     print("  字节 %d · 行 %d" % (len(text.encode("utf-8")), text.count("\n")))

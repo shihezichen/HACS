@@ -4,7 +4,7 @@
 
 比的是**两侧把同一份输入渲染成什么文本**：
   OLD = tools/equivalence/_old/gen_nats_conf_old_k30.py（冻结件 = 刀30 改前的逐字节快照）
-  NEW = agent-team/gen_nats_conf.py
+  NEW = hub/l1_relay/gen_nats_conf.py
 
 刀30 改了什么（**只有一条**）
 ----------------------------
@@ -51,7 +51,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 OLD = os.path.join(HERE, "_old", "gen_nats_conf_old_k30.py")
-NEW = os.path.join(ROOT, "agent-team", "gen_nats_conf.py")
+NEW = os.path.join(ROOT, "hub", "l1_relay", "gen_nats_conf.py")
 AGENT_TEAM_DIR = os.path.join(ROOT, "node", "l0_host")
 for _hacs_p in (ROOT, AGENT_TEAM_DIR):
     if _hacs_p not in sys.path:

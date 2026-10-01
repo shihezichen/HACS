@@ -5,7 +5,7 @@
     python tools/equivalence/todo_enrich_equiv.py [--ref <下沉前的提交>]
 
       --ref  **源码仓**（本仓，非对外仓）下沉前的提交；该版本 agent-team/chat_svc.py 里的
-             `todo_enrich_*` / `display_of` 作「旧实现」，工作树 agent-team/agent_model.py
+             `todo_enrich_*` / `display_of` 作「旧实现」，工作树 hub/l2_adapter/agent_model.py
              作「新实现」。默认 4de88cf = 阶段2 刀2 落地后、本刀动手前的那一版。
 
 为什么留着它：本刀把「执行器怎么调」和「展示名」整段搬出 L3，必须证明**零行为改变**。
@@ -42,7 +42,13 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
+#: 保留注入：`_old/` 冻结快照与 `_SNIPPET_HEADER` 抽出的老代码段按裁定一字不动，
+#: 其中是**裸名** import（`node_paths` / `view_auth` 等）。分层整改后各件归位到包目录，
+#: 裸名再也解析不到，故把它们所在目录一并注入**只供旧侧用**；新侧一律走绝对包名。
+FLAT_DIRS = [os.path.join(REPO, "node", "l0_host"),        # node_paths
+             os.path.join(REPO, "hub", "x")]               # view_auth
+NEW_CHAT_SVC = os.path.join(REPO, "hub", "l3_domain", "chat_svc.py")
+NEW_AGENT_MODEL = os.path.join(REPO, "hub", "l2_adapter", "agent_model.py")
 OLD = os.path.join(HERE, "_old")
 
 #: 老版里要抽的函数（原文照搬）
@@ -73,7 +79,7 @@ import re
 import subprocess
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
-import node_paths as _np
+from node.l0_host import node_paths as _np
 from hub.x import view_auth
 """
 
@@ -154,7 +160,7 @@ def load_old(snippet):
 def load_new():
     _COUNTER[0] += 1
     name = "agent_model_fresh_%d" % _COUNTER[0]
-    spec = importlib.util.spec_from_file_location(name, os.path.join(AG, "agent_model.py"))
+    spec = importlib.util.spec_from_file_location(name, NEW_AGENT_MODEL)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -411,8 +417,10 @@ def run_all(snippet):
 
 def check_wiring():
     """import **真实生产模块** chat_svc，确认「搬走实现、调用面不变」。"""
-    sys.path.insert(0, AG)
-    from hub.l3_domain import chat_svc as cs                                    # noqa: E402
+    for _p in FLAT_DIRS + [REPO]:
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+    from hub.l3_domain import chat_svc as cs                                # noqa: E402
     from hub.l2_adapter import agent_model as am                                 # noqa: E402
 
     checks = []
@@ -451,11 +459,11 @@ def check_wiring():
        all(hasattr(cs, x) for x in ("TodoEnricher", "todo_enrich_submit",
                                     "todo_enrich_seq_of", "todo_enrich_is_agent",
                                     "todo_enrich_job")))
-    src = io.open(os.path.join(AG, "chat_svc.py"), encoding="utf-8").read()
+    src = io.open(NEW_CHAT_SVC, encoding="utf-8").read()
     ck("L3 里已无 subprocess 调用（执行器机制确实搬走了）",
        "subprocess.run" not in src and "import subprocess" not in src)
     ck("L3 里已无反向 SSH 目标字面量", "<user>@<node>" not in src)
-    am_src = io.open(os.path.join(AG, "agent_model.py"), encoding="utf-8").read()
+    am_src = io.open(NEW_AGENT_MODEL, encoding="utf-8").read()
     ck("L2 不 import 任何上层件（chat_svc / a2a_* / *_svc）",
        not any(("import %s" % m) in am_src
                for m in ("chat_svc", "a2a_edge", "a2a_svc", "web_gateway",
@@ -468,7 +476,9 @@ def main():
     ap.add_argument("--ref", default="4de88cf", help="下沉前的 commit/ref")
     args = ap.parse_args()
 
-    sys.path[:0] = [AG]
+    for _p in FLAT_DIRS + [REPO]:
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
     path = materialize_old(args.ref)
     snippet = extract_old(path)
     io.open(os.path.join(OLD, "chat_svc_enrich_snippet.py"), "w",
@@ -477,7 +487,7 @@ def main():
     rows = run_all(snippet)
     bad = 0
     group = None
-    print("旧 = %s:agent-team/chat_svc.py（ast 抽原文）   新 = 工作树 agent-team/agent_model.py\n"
+    print("旧 = %s:agent-team/chat_svc.py（ast 抽原文）   新 = 工作树 hub/l2_adapter/agent_model.py\n"
           % args.ref)
     for g, label, a, b in rows:
         if g != group:

@@ -43,7 +43,6 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
-AGENT_TEAM = os.path.join(PROJECT_ROOT, "agent-team")
 TARGETS_PATH = os.path.join(HERE, "deploy_targets.json")
 
 # 批② 起被搬件按绝对包名 import（node.l0_host.nodelet / node.l0_host.node_profile），故仓根一并入路径。
@@ -356,7 +355,7 @@ def render_gen(rows, python_bin):
 
 def render_check(rows):
     lines = ["=" * 88,
-             "节点守护单元核对 · 规范名 posix=%s / nt=%s（唯一出处 agent-team/nodelet.py）"
+             "节点守护单元核对 · 规范名 posix=%s / nt=%s（唯一出处 node/l0_host/nodelet.py）"
              % (nodelet.UNIT_NAME_POSIX, nodelet.UNIT_NAME_NT),
              "=" * 88]
     bad = 0

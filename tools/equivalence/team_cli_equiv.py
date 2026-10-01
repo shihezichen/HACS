@@ -19,7 +19,7 @@
 
 两侧是谁：
     旧 = tools/equivalence/_old/team_old_k15.py（搬迁前 HEAD 的 team.py 原样副本）
-    新 = agent-team/team.py（+ 它 import 的 team_group.py / team_cli_core.py）
+    新 = node/c/team.py（+ 它 import 的 team_group.py / team_cli_core.py）
     开跑前硬校验两侧 md5 **不相等**（`--preflight` 除外），自证不是自比自。
 
 不碰机器现状：
@@ -53,10 +53,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AG = os.path.join(REPO, "agent-team")
+#: 保留注入（经子进程 PYTHONPATH）：旧侧冻结快照 `team_old_k15.py` 按裁定一字不动，
+#: 它内部是**裸名** import（`node_paths` / `from nats_client import ...`）。分层整改后
+#: 两件各自归位到包目录里，裸名再也解析不到，故把它们所在目录一并放进 PYTHONPATH；
+#: REPO 供新侧的绝对包名（`node.c.team` → `node.l1_transport.*` / `hub.l3_domain.*`）解析。
+FLAT_DIRS = [os.path.join(REPO, "node", "l0_host"),        # node_paths
+             os.path.join(REPO, "node", "l1_transport")]   # nats_client
 OLD_DIR = os.path.join(HERE, "_old")
 OLD_SCRIPT = os.path.join(OLD_DIR, "team_old_k15.py")
-NEW_SCRIPT = os.path.join(AG, "team.py")
+NEW_SCRIPT = os.path.join(REPO, "node", "c", "team.py")
 DEFAULT_REF = "049a418"          # 刀15 动手前的 HEAD
 MEMBER = "equivmember"
 
@@ -335,7 +340,8 @@ def base_env(natsdir):
     for k in list(env):
         if k.startswith("AGENT_TEAM_") or k in ("TEAM_CHAT_BASE",):
             del env[k]
-    env["PYTHONPATH"] = AG + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join([REPO] + FLAT_DIRS
+                                        + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONHASHSEED"] = "0"

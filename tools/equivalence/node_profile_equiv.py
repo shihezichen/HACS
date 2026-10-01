@@ -7,9 +7,9 @@
     tools/equivalence/_old/agent_usage_old_k21.py    改前的 L2 agent_usage（自带 sqlite3 句柄与宿主路径）
 
 新侧（工作区活件）
-    agent-team/node_profile.py   L0 节点档案（档案表与只读探针的唯一真值）
-    agent-team/node_paths.py     L0 本机默认值（target_* 已改委托/别名）
-    agent-team/agent_usage.py    L2 适配层（不再 import sqlite3 / os）
+    node/l0_host/node_profile.py   L0 节点档案（档案表与只读探针的唯一真值）
+    node/l0_host/node_paths.py     L0 本机默认值（target_* 已改委托/别名）
+    node/l2_adapter/agent_usage.py L2 适配层（不再 import sqlite3 / os）
 
 五段，全部**真 import 两侧模块、真调函数、真开临时 sqlite 库**，没有一处打桩：
 
@@ -62,10 +62,12 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-AGENT_TEAM = os.path.join(REPO, "agent-team")
+#: 保留注入：OLD_DIR 不是包目录（冻结快照按裸名装入），且 `agent_usage_old_k21` 内部是
+#: 裸名 `import node_paths` —— 快照按裁定一字不动，只能把 L0 目录一并注入供其解析。
+L0_HOST = os.path.join(REPO, "node", "l0_host")
 OLD_DIR = os.path.join(HERE, "_old")
 
-for _p in (REPO, AGENT_TEAM, OLD_DIR):
+for _p in (REPO, L0_HOST, OLD_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -150,7 +152,7 @@ def load_sides():
     import agent_usage_old_k21 as old_au
     from node.l0_host import node_paths as new_np
     from node.l0_host import node_profile as npf
-    import agent_usage as new_au
+    from node.l2_adapter import agent_usage as new_au
     return old_np, old_au, new_np, npf, new_au
 
 
@@ -299,8 +301,8 @@ def _src(rel):
 
 
 def section_c(out, old_np, new_np, npf, old_au, new_au):
-    np_src = _src("agent-team/node_paths.py")
-    au_src = _src("agent-team/agent_usage.py")
+    np_src = _src("node/l0_host/node_paths.py")
+    au_src = _src("node/l2_adapter/agent_usage.py")
     checks = []
 
     checks.append(("node_paths.__all__ 与改前逐项相同", new_np.__all__ == old_np.__all__))
@@ -697,7 +699,7 @@ def run_once(neg=None):
     out("旧侧：_old/node_paths_old_k21.py（%s） + _old/agent_usage_old_k21.py（%s）"
         % (_md5(os.path.join(OLD_DIR, "node_paths_old_k21.py")),
            _md5(os.path.join(OLD_DIR, "agent_usage_old_k21.py"))))
-    out("新侧：agent-team/node_profile.py + node_paths.py + agent_usage.py（工作区活件）")
+    out("新侧：node/l0_host/node_profile.py + node_paths.py + node/l2_adapter/agent_usage.py（工作区活件）")
     if neg:
         out("！！负控模式：%s" % apply_negative(neg, new_np, npf, new_au))
     out("=" * 100)
