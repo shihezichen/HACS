@@ -47,6 +47,7 @@
    | `AGENT_TEAM_CHAT_BASE` | `node_profile.chat_base_default()` | 群 / 对话台基址退成占位符 |
    | `AGENT_TEAM_TASK_BASE`（用到才需） | `node_profile.task_base_default()` | 任务服务基址退成占位符 |
    | `AGENT_TEAM_NODE_EXE` / `_PI_CLI_JS` / `_PI_WORKDIR` | `node_paths` 同名读口 | 执行器拿到未展开的 `<home>` 占位符 |
+   | `AGENT_TEAM_ETC_DIR` | `node_paths.etc_dir()` | 配置/凭据面（`pg.env` / `client-token` / `view-session.key`）错位。Windows 上 `etc_dir()` 与 `runtime_dir()` 同源（都取运行目录），**Linux 上两者分离**：未注入时退成部署默认目录（实测 `/tmp`），单元若带 `PrivateTmp=yes` 连 `/tmp` 都被隔离 ⇒ 读不到 `pg.env`，服务**拒绝启动**（看板 public 实例实测如此）。注入值应等于旧版 `node_paths.POSIX_ETC_DIR` 常量 |
 
 ## 切换与回滚
 
@@ -91,6 +92,7 @@
 | `Environment=PYTHONPATH=<runtime_dir>` | **包根** | 件里全是绝对包名 import（`from hub.l3_domain...`）⇒ 立即 `ModuleNotFoundError` |
 | `Environment=AGENT_TEAM_RUNTIME_DIR=<runtime_dir>` | 数据/凭据面 | 数据面静默落到 `%TEMP%` 之类默认位置 |
 | `Environment=CHAT_UI_DIR=<runtime_dir>/ui` | 仅 chat 类服务 | 静态根退成「本件同级 `ui/`」= `hub/l3_domain/ui/` ⇒ 前端 404（`ui/` 在运行目录顶层） |
+| `Environment=AGENT_TEAM_ETC_DIR=<etc_dir>` | 配置/凭据面 | 未注入即退成部署默认目录（实测 `/tmp`）；配 `PrivateTmp=yes` 时连 `/tmp` 都被隔离 ⇒ 依赖默认值读 `pg.env` 的实例直接拒绝启动。**逐单元注入**，值 = 旧版 `node_paths.POSIX_ETC_DIR` |
 
 步骤：**先传件（新旧并存，旧件一个不删）→ 再改单元 → `daemon-reload` → `restart`**。
 传件阶段即使触发 `restart` 也无害（单元还指着旧件）。改单元前先把原文件备份到
