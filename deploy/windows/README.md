@@ -71,11 +71,36 @@
 4. **不要用 `AGENT_TEAM_*` 注入实验来“验证”装置**：Hermes terminal 的环境变量跨调用持久，
    注入会污染其后所有前台命令，造成「同一台装置单独跑绿、后台跑红」的假串扰。
 5. 切换到分层件时，**先确认该件在本仓确实存在**；本仓没有的入口件保持原样。
+6. **部署壳必须进件清单**：`_boot.py` / `a2a_launch.pyw` 这类部署壳固定落在运行目录 `app/` 根，
+   不经过 `deploy_manifest.json` 的视图映射（它只映射 `hub/`→`hub/`、`node/`→`node/`、`l4_experience/`→`ui/`）。
+   若只把它们手工放上去、却不写进件清单，**运行面一重装就丢** —— 实测缺 `a2a_launch.pyw` 时
+   计划任务返回 `rc=2`（pythonw 打不开文件）、服务端口无监听，而任务状态仍显示在跑。
+7. **运行目录不等于分层仓根**：Windows 侧的 `RUN_DIR` 是**数据面 + 凭据面**（`*.env`、`*-token`、
+   `*.log`、`state/`），分层件镜像在 `RUN_DIR/app/`。部署表里的 `runtime_dir` 必须指
+   **`RUN_DIR/app`**（否则件会传回扁平时代的位置，跟已切任务的实参对不上）。`_boot.py`
+   自己从 `__file__` 派生出上一级作为 `AGENT_TEAM_RUNTIME_DIR`，所以数据面仍落在 `RUN_DIR` 上。
 
-## 部署面收录状态（批⑪ 后）
+## Linux 远端（systemd）切换定式
 
-- ✅ **A2A 启动壳已入仓**：`deploy/windows/a2a_launch.pyw`（与 `_boot.py` 同源同形）。
-  两者**本批并存、尚未合并**，因此 A2A 任务暂仍走原路径。
+远端节点是 **Linux + systemd**，没有 `_boot.py`（那是 Windows 启动壳），真值注入改由单元承担。
+分层后每个单元的 `ExecStart` 至少要有三样东西，缺一即起不来或行为变：
+
+| 项 | 值 | 缺了会怎样 |
+| --- | --- | --- |
+| `ExecStart` 路径 | `<runtime_dir>/<层>/<件>.py` | 仍跑扁平旧件，分层件形同没部署 |
+| `Environment=PYTHONPATH=<runtime_dir>` | **包根** | 件里全是绝对包名 import（`from hub.l3_domain...`）⇒ 立即 `ModuleNotFoundError` |
+| `Environment=AGENT_TEAM_RUNTIME_DIR=<runtime_dir>` | 数据/凭据面 | 数据面静默落到 `%TEMP%` 之类默认位置 |
+| `Environment=CHAT_UI_DIR=<runtime_dir>/ui` | 仅 chat 类服务 | 静态根退成「本件同级 `ui/`」= `hub/l3_domain/ui/` ⇒ 前端 404（`ui/` 在运行目录顶层） |
+
+步骤：**先传件（新旧并存，旧件一个不删）→ 再改单元 → `daemon-reload` → `restart`**。
+传件阶段即使触发 `restart` 也无害（单元还指着旧件）。改单元前先把原文件备份到
+`<runtime_dir>/_unitbak/<unit>.service.<时间戳>`；回滚 = `cp` 回去 + `daemon-reload` + `restart`。
+`*.service.d/` drop-in 只放 `Environment=` 时不受影响，但若它含 `ExecStart=` 就会覆盖主单元 —— 动手前先看。
+
+## 部署面收录状态（批⑫ 后）
+
+- ✅ **A2A 启动壳已入仓**：`deploy/windows/a2a_launch.pyw`（与 `_boot.py` 同源同形），
+  两者**并存、尚未合并**。批⑫ 已把两件一并纳入 Windows 侧件清单，任务动作统一走运行目录 `app/`。
 - ✅ **运行面专有入口件已全部归位**：`session_ctx_archiver.py` → `hub/l3_domain/`、
   `ledger_patrol.py` → `tools/`（依赖 `post_group.py` → `node/l1_transport/`）。
 - ⚠️ 仍只在运行面、且**不宜直接入仓**的件：外部系统的一次性脚本；以及运行期文案要求持
