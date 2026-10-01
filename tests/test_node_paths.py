@@ -146,7 +146,10 @@ def t_target_profile():
     """目标主机档案（刀 4）：user@host / 裸 host 同解；四台各归其平台；未登记不编造。"""
     saved = os.environ.pop(np.ENV_TARGET_PROFILE_JSON, None)
     try:
-        for host in ("<user>@<node>", "thinkbook", "THINKBOOK", " thinkbook "):
+        # 主机名必须是**档案表里登记的那个**（`thinkbook`）：`target_host()` 只取 `@` 右边查表，
+        # 用户名不参与 —— 所以左边留 `<user>` 占位无妨，右边写成 `<node>` 就会查表落空、
+        # 退 posix 兜底，这条 nt 用例便永远量不到自己要量的东西。（首版起就这么写着。）
+        for host in ("<user>@thinkbook", "thinkbook", "THINKBOOK", " thinkbook "):
             assert np.target_known(host) is True, host
             assert np.target_flavour(host) == "nt", host
             assert np.target_claude_exec(host) == \
@@ -155,13 +158,18 @@ def t_target_profile():
             assert np.target_known(host) is True, host
             assert np.target_flavour(host) == "posix", host
             assert np.target_home(host) == "/root", host
+            # posix 目标的执行器路径由**它自己的**家目录拼出，所以是 `/root/.local/...`。
+            # 这里原先写 `<home>/.local/...` —— 那是 nt 侧占位形态，与上一条
+            # `target_home == "/root"` 自相矛盾（同一循环、同一 host），恒不可满足。
             assert np.target_claude_exec(host) == \
-                "<home>/.local/share/hermes/scripts/claude_exec.py", host
+                "/root/.local/share/hermes/scripts/claude_exec.py", host
         # 未登记 / 空串：按 posix 兜底，但 target_known 必须说实话
         for host in ("nosuchhost", "user@nosuchhost", "", None, "   "):
             assert np.target_known(host) is False, host
             assert np.target_flavour(host) == "posix", host
-            assert np.target_claude_exec(host).startswith("<home>/"), host
+            # 未登记 → 按 posix 兜底，兜底家目录就是 `/root`（同上），所以是 `/root/` 起头。
+            # 原先写 `<home>/` —— 又一次把 nt 占位形态用在了 posix 分支上。
+            assert np.target_claude_exec(host).startswith("/root/"), host
     finally:
         if saved is not None:
             os.environ[np.ENV_TARGET_PROFILE_JSON] = saved
