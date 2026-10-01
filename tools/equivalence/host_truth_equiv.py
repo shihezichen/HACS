@@ -53,6 +53,7 @@ import re
 import subprocess
 import sys
 import textwrap
+from _frozen import write_frozen
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -260,8 +261,9 @@ def gen_old():
         "        return action.default, action.help\n"
         "    exec(code, ns)                                # noqa: S102\n"
         "    return ns[name], None\n")
-    with io.open(OLD_MOD, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(head + "\n".join(body) + "\n" + tail)
+    write_frozen(OLD_MOD,
+                 (head + "\n".join(body) + "\n" + tail).encode("utf-8"),
+                 "node_paths 偏移切片")
     print("已写 %s（%d 条切片，源 = %s）" % (os.path.relpath(OLD_MOD, REPO), len(body), BASE_REV))
     return 0
 

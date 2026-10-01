@@ -34,7 +34,13 @@
 自己拼 Hermes 主目录、自己解析 `sessions.json` 的行格式 —— 那是分层台账里**唯一一条
 已声明的存储句柄例外**。现在「宿主上长什么样」（路径 / 句柄 / 文件格式）整套下沉到
 L0 `node_profile.py`（节点档案），本件只留**适配口径**：后端怎么分派、token 怎么估、
-分母走哪条链、读不到怎么降级。本件因此不再 import sqlite3、不再 import os。
+分母走哪条链、读不到怎么降级。本件因此不再 import sqlite3。
+
+（2026-10-01 补注：刀 21 当时连 `import os` 一起去掉了，后来因 `CTX_A2A_TIMEOUT_S`
+需可配而把 `import os` 恢复 —— 只读 env，**不碰文件系统**；`sqlite3` 仍然不 import，
+存储读取一律走 L0 `node_profile` 的只读探针。等价装置里「本件不 import os」那两条
+断言是拿「有没有 import os」代理「不碰文件系统与存储」，此处恢复后代理失效，待重新
+表述为直接检查「不调用文件系统 / 存储 API」——判据原意不变、不放松。）
 """
 
 from __future__ import annotations

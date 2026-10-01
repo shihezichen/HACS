@@ -73,7 +73,7 @@ AGENT_TEAM_RUNTIME_DIR = os.environ.get("AGENT_TEAM_RUNTIME_DIR") or _np.runtime
 # 兜底默认值集中到 L0 node_paths（env 优先）
 AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
 # 兜底默认值集中到 L0 node_paths（env 优先）
-AGENT_TEAM_DOMAIN = os.environ.get("AGENT_TEAM_DOMAIN") or "top001.online"
+AGENT_TEAM_DOMAIN = os.environ.get("AGENT_TEAM_DOMAIN") or "example.com"
 #: 反向 SSH 目标与本机 claude_exec.py 路径已下沉 L2 agent_model（模型「怎么调」归适配层）。
 
 #: 门户登录页（本服务**不自己签发 cookie**，与「只有看板 POST /login」的既有口径一致）。
@@ -104,7 +104,7 @@ BODY_MAX = 1 << 20                       # 请求体上限 1MB
 #: tailnet 内免登录时把对端认作的人（与看板"内网免登录"同口径）。
 #: 有人用会话登录时以登录身份为准；要区分多人就实现 §H 的 /login（复用 view_auth）。
 # 兜底默认值集中到 L0 node_paths（env 优先）
-DEFAULT_HUMAN_ID = (os.environ.get("AGENT_TEAM_HUMAN_ID") or os.environ.get("CHAT_HUMAN_ID") or "chengang").strip() or "chengang"
+DEFAULT_HUMAN_ID = (os.environ.get("AGENT_TEAM_HUMAN_ID") or os.environ.get("CHAT_HUMAN_ID") or "<human-id>").strip() or "<human-id>"
 DB_CONNECT_TIMEOUT_S = 5
 DB_RETRY_S = 30.0                        # 连接坏了多久才重连
 PAGE_LIMIT_DEFAULT = 20

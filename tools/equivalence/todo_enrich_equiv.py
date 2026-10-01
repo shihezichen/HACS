@@ -87,6 +87,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from node.l0_host import node_paths as _np
 from hub.x import view_auth
+from _frozen import write_frozen
 """
 
 
@@ -105,8 +106,7 @@ def materialize_old(ref):
     if b"def todo_enrich_argv" not in raw or b"_DISPLAY_NAMES_FALLBACK" not in raw:
         print("警告：%s 的 chat_svc.py 里没有 todo_enrich_argv 或 _DISPLAY_NAMES_FALLBACK，"
               "那它就不是「旧实现」" % ref)
-    io.open(target, "wb").write(raw)
-    return target
+    return write_frozen(target, raw, "chat_svc.py")
 
 
 def extract_old(path):
@@ -487,8 +487,9 @@ def main():
             sys.path.insert(0, _p)
     path = materialize_old(args.ref)
     snippet = extract_old(path)
-    io.open(os.path.join(OLD, "chat_svc_enrich_snippet.py"), "w",
-            encoding="utf-8").write(snippet)     # 留档：比的到底是哪段老代码
+    # 留档：比的到底是哪段老代码
+    write_frozen(os.path.join(OLD, "chat_svc_enrich_snippet.py"),
+                 snippet.encode("utf-8"), "chat_svc_enrich_snippet.py")
 
     rows = run_all(snippet)
     bad = 0

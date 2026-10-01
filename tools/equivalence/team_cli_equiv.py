@@ -50,6 +50,7 @@ import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from _frozen import write_frozen
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -93,7 +94,7 @@ def materialize_old(ref):
                   % (OLD_SCRIPT, ref))
             return False
         return True
-    open(OLD_SCRIPT, "wb").write(raw)
+    write_frozen(OLD_SCRIPT, raw, "team.py")
     return True
 
 

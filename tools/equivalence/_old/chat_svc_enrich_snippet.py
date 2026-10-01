@@ -11,7 +11,7 @@ from hub.x import view_auth
 
 AGENT_TEAM_ETC_DIR = os.environ.get("AGENT_TEAM_ETC_DIR") or _np.etc_dir()
 
-AGENT_TEAM_SSH_TARGET = os.environ.get("AGENT_TEAM_SSH_TARGET") or "Arthur@thinkbook"
+AGENT_TEAM_SSH_TARGET = os.environ.get("AGENT_TEAM_SSH_TARGET") or ""
 
 AGENT_TEAM_CLAUDE_EXEC = _np.claude_exec()
 
@@ -25,7 +25,7 @@ _DISPLAY_NAMES_FALLBACK = {
     "codex": "Codex",
     "piagent": "Pi Agent",
     "hermes": "Hermes",
-    "chengang": "刚哥",
+    "<human-id>": "刚哥",
 }
 
 DISPLAY_NAMES = dict(_DISPLAY_NAMES_FALLBACK)
