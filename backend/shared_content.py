@@ -78,7 +78,7 @@ import embedder  # 同目录模块；导入只读环境变量，不会加载模�
 # L2 适配层：pgvector 文本字面量与时间归一的**单一出处**（刀16）。本件原本自带的两份
 # 同名实现与它逐字节相同，现在直接用它 —— 对外名 vector_literal / to_utc 一个字没改，
 # 本件 20+ 处调用点也一行没动。本件自己的 UTC / now_utc() 仍是本件的，不从这儿取。
-from pg_literals import to_utc, vector_literal
+from hub.l2_adapter.pg_literals import to_utc, vector_literal
 
 VERSION = "1.0"
 

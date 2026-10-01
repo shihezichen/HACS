@@ -49,7 +49,7 @@ from os.path import abspath, dirname
 from typing import Any, Dict, Optional, Tuple
 
 # 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
-for _hacs_p in (dirname(dirname(abspath(__file__))), dirname(abspath(__file__))):
+for _hacs_p in (dirname(dirname(dirname(abspath(__file__)))), dirname(abspath(__file__))):
     if _hacs_p not in sys.path:
         sys.path.insert(0, _hacs_p)
 

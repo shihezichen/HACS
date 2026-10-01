@@ -34,7 +34,7 @@ for _hacs_p in (os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from node.l1_transport.a2a import a2a_edge  # L1 通信层：A2A 边缘端点实现（传输，不含 Agent 差异）
 # 批⑤d 过渡：agent_usage 仍在 backend/（⑤e 搬走后此处再改一次）。
-from backend import agent_usage     # L2 适配层：水位/窗口/后端判定/会话头单一实现
+from node.l2_adapter import agent_usage     # L2 适配层：水位/窗口/后端判定/会话头单一实现
 
 # 对外可见的版本号仍由 L1 实现件持有（Server 头 / healthz / Agent Card 同一份）。
 VERSION = a2a_edge.VERSION

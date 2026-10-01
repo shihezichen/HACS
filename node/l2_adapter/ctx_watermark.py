@@ -21,9 +21,15 @@ from __future__ import annotations
 
 import logging
 import sys
+from os.path import abspath, dirname
 from typing import Any, Dict, Optional
 
-import agent_usage
+# 批⑤e：本件归位 node/l2_adapter/（仓根下 2 跳），按绝对包名 import，故把仓根与本目录一并放进搜索路径。
+for _hacs_p in (dirname(dirname(dirname(abspath(__file__)))), dirname(abspath(__file__))):
+    if _hacs_p not in sys.path:
+        sys.path.insert(0, _hacs_p)
+
+from node.l2_adapter import agent_usage  # noqa: E402
 
 # 旧内部名保留为别名（迁移期兼容，勿新增引用）——实现全部在 agent_usage。
 _fmt = agent_usage.fmt

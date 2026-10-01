@@ -83,15 +83,15 @@
       "port": 9930,
       "note": "服务端权限白名单生成 —— 入网动态化的现成「角色模板」来源；刀26 加成员退场通道（`--drop-user <名>` 可重复）+ `--dry-run`，位置参数老契约不变，不带开关时产物与旧版逐字节相同"
     },
-    "backend/ctx_watermark.py": {
+    "node/l2_adapter/ctx_watermark.py": {
       "layer": "L2",
       "port": null,
-      "note": "上下文水位薄壳（对外 read_watermark 不变；实现已下沉 agent_usage）"
+      "note": "上下文水位薄壳（对外 read_watermark 不变；实现已下沉 agent_usage）。批⑤e：本件已归位 node/l2_adapter/，引用方改绝对包名"
     },
-    "backend/agent_usage.py": {
+    "node/l2_adapter/agent_usage.py": {
       "layer": "L2",
       "port": null,
-      "note": "上下文水位真源（读取/窗口分母/后端判定/会话头，单一权威口径）——a2a_svc 与 ctx_watermark 共同依赖。刀21（阶段4）：**宿主会话真源的句柄与文件格式已下沉 L0 node_profile.py** —— 本件不再 import sqlite3、不再 import os、不再拼宿主路径；sessions_json_path / hermes_state_db / hermes_home / a2a_remote_base / a2a_remote_token 全改薄委托，口径A（state.db sessions 表）与口径B（active=1 messages 估算）改调 L0 只读探针（hermes_session_usage_row / hermes_active_messages），OpenClaw 档案改调 openclaw_session_entry。降级口径与 debug 文案留在本层一字未改（L0 只抛不吞，异常对象原样传到本层的 except）。本件是 storage_handle_exceptions 里唯一一条例外的当事件，该例外随本刀**撤销**"
+      "note": "上下文水位真源（读取/窗口分母/后端判定/会话头，单一权威口径）——a2a_svc 与 ctx_watermark 共同依赖。刀21（阶段4）：**宿主会话真源的句柄与文件格式已下沉 L0 node_profile.py** —— 本件不再 import sqlite3、不再 import os、不再拼宿主路径；sessions_json_path / hermes_state_db / hermes_home / a2a_remote_base / a2a_remote_token 全改薄委托，口径A（state.db sessions 表）与口径B（active=1 messages 估算）改调 L0 只读探针（hermes_session_usage_row / hermes_active_messages），OpenClaw 档案改调 openclaw_session_entry。降级口径与 debug 文案留在本层一字未改（L0 只抛不吞，异常对象原样传到本层的 except）。本件是 storage_handle_exceptions 里唯一一条例外的当事件，该例外随本刀**撤销**。批⑤e：本件已归位 node/l2_adapter/，引用方改绝对包名"
     },
     "backend/agent_model.py": {
       "layer": "L2",
@@ -99,16 +99,16 @@
       "duty": "适配层：模型执行器「怎么调」（ssh 二进制/反向目标/私钥与 known_hosts/远端命令行/编码口径/超时与限速默认值/subprocess 与输出解析）+ Agent 展示名（兜底表 + AGENT_TEAM_DISPLAY_NAMES 覆盖 + display_name 语义）",
       "note": "L2 适配层：模型富化执行器 + Agent 展示名（阶段1 刀3 从 chat_svc(L3) 下沉）。**不含**提示词模板/队列 worker/写库/台账 —— 那些是「调什么」，留在 L3；失败一律降级返回 (None, 原因)，绝不编造。唯一依赖者 chat_svc.py（运行节点 lobster）。刀 4：远端执行器路径改取 node_paths.target_claude_exec(目标)（本机真值不再冒充远端真值），新增 probe() 通道自检（不写库不改状态）。刀 14（阶段3）：增公开面 `DISPLAY_NAMES_FALLBACK`，与私有原名 `_DISPLAY_NAMES_FALLBACK` **同一个对象**（不是拷贝），私有原名保留不动；`__all__` 追加 —— 上层件引用兜底表一律走这个公开名"
     },
-    "backend/pg_literals.py": {
+    "hub/l2_adapter/pg_literals.py": {
       "layer": "L2",
       "port": null,
       "duty": "适配层：对外部存储（PostgreSQL / pgvector）的**类型口径适配** —— pgvector 文本字面量 vector_literal（含 None 分支与 repr(float(x)) 格式）+ timestamptz / ISO 字符串归一 to_utc（Z/z→+00:00、裸时间按 UTC 解释、认不出来返回 None）+ 常量 UTC",
-      "note": "L2 适配层：pgvector 字面量与时间归一的**单一出处**（刀16 阶段3 新增）。收口前同一份实现在 L3 抄了三遍 —— blackboard_svc._vector_literal/_to_utc、shared_content.vector_literal/to_utc、backfill_embeddings._vector_literal（三份函数体逐字节相同，backfill 那份只少 None 分支）。本件函数体逐字节照抄 blackboard_svc 的原实现，三个调用件各留同名别名 → 调用点与模块属性面一行没动。纯标准库（只 import datetime / typing），不 import psycopg2、不持任何连接、无状态无 I/O。被 L3 三件 import（L3→L2 正向）。等价证据 tools/equivalence/pg_literals_equiv.py"
+      "note": "L2 适配层：pgvector 字面量与时间归一的**单一出处**（刀16 阶段3 新增）。收口前同一份实现在 L3 抄了三遍 —— blackboard_svc._vector_literal/_to_utc、shared_content.vector_literal/to_utc、backfill_embeddings._vector_literal（三份函数体逐字节相同，backfill 那份只少 None 分支）。本件函数体逐字节照抄 blackboard_svc 的原实现，三个调用件各留同名别名 → 调用点与模块属性面一行没动。纯标准库（只 import datetime / typing），不 import psycopg2、不持任何连接、无状态无 I/O。被 L3 三件 import（L3→L2 正向）。等价证据 tools/equivalence/pg_literals_equiv.py。批⑤e：本件已归位 hub/l2_adapter/，引用方改绝对包名"
     },
-    "backend/cli_backend.py": {
+    "node/l2_adapter/cli_backend.py": {
       "layer": "L2",
       "port": 9970,
-      "note": "CLI 类 Agent 的统一后端"
+      "note": "CLI 类 Agent 的统一后端。批⑤e：本件已归位 node/l2_adapter/，引用方改绝对包名"
     },
     "backend/chat_svc.py": {
       "layer": "L3",
@@ -461,7 +461,7 @@
         "reason": "正则字符类 `^[0-9TZ:\\-+. ]+$`（ISO 时间串白名单）里的 `Z:` 后跟 `\\` 被 PATH_RX 当成盘符路径；是正则语法不是宿主事实。"
       },
       {
-        "file": "backend/cli_backend.py",
+        "file": "node/l2_adapter/cli_backend.py",
         "match": "d:\\s*([0-9a-fA-F]{8}-[0-9a-fA-F-]{27}",
         "reason": "`CODEX_SESSION_RE = re.compile(r\"session id:\\s*(...)\")` 里 `id:` 的 `d:` 后跟 `\\s` 被 PATH_RX 当成盘符路径；是正则语法不是宿主事实。"
       }

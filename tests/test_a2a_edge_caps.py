@@ -88,7 +88,7 @@ def case_not_installed(a2a_edge):
 
 # ---------------------------------------------------------------- ② 注入后
 def case_installed(a2a_edge):
-    from backend import agent_usage
+    from node.l2_adapter import agent_usage
     from node.c import a2a_svc
 
     used_want, window_want = 123_456, 200_000

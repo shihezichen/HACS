@@ -57,7 +57,7 @@ from node.l1_transport import web_gateway  # noqa: E402
 # 上下文水位（服务端渲染，2026-09-24）：让「上下文：约 Xk/Yk (Z%)」由服务端按
 # 真源（<MEMBER_ID_1> sessions.json / <MEMBER_ID_2> state.db）渲染，绝不采信 Agent 手打的数字。
 try:
-    import ctx_watermark as _ctx_wm  # noqa: E402
+    from node.l2_adapter import ctx_watermark as _ctx_wm  # noqa: E402  批⑤e：L2 已归位 node/l2_adapter/
 except Exception:  # noqa: BLE001 —— 缺这个模块只是不挂水位行，不影响主流程
     _ctx_wm = None
 

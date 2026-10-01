@@ -27,10 +27,10 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-SVC = os.path.join(ROOT, "cli_backend.py")
+SVC = os.path.join(ROOT, "node", "l2_adapter", "cli_backend.py")
 
 sys.path.insert(0, ROOT)
-import cli_backend  # noqa: E402  纯函数级断言（resolve_model 等）直接 in-process 跑
+from node.l2_adapter import cli_backend  # noqa: E402  纯函数级断言（resolve_model 等）直接 in-process 跑
 
 TOKEN = "unit-test-cli-backend-key-xyz789"
 RESULTS = []
