@@ -125,3 +125,30 @@ python -c "import sys;sys.path.insert(0,'.');import <可疑件>;print('OK')"
   `os.path.join(ROOT, "a2a_svc.py")` / `"a2a_call.py"` ⇒ 件搬家后**子进程启动即退且零输出**、测试报 `errors`（非 `failures`）。
   扫描模式：`os\.path\.join\((ROOT|HERE|REPO|_HACS_ROOT)[^)]*"[a-z_0-9]+\.py"`。
 - **`--help` 不等于只读**：生成器类脚本要显式加 `--dry-run`；收口时必须核 `git status --short docs/` 为空。
+
+## 八、装置面现状（批⑧ 后 · 全盘 22 台）
+
+**绿 13 台**：`a2a_edge_equiv` · `admin_port_equiv` · `blackboard_svc_http_equiv` ·
+`blackboard_view_http_equiv` · `chat_svc_static_filter_equiv` · `cli_backend_http_equiv` ·
+`gen_nats_conf_equiv` · `group_watch_equiv` · `group_watch_round_equiv` ·
+`membership_audit_equiv` · `pg_literals_equiv` · `roster_creds_mirror_equiv` · `roster_derive_equiv`
+
+**红 9 台（四类）**：
+
+| 类 | 台（括号 = 实测红量） | 根因 / 处置方向 |
+|---|---|---|
+| 方案 a 连带 | `host_truth_equiv`(45/190) · `l0_host_relocate_equiv`(13) · `node_profile_equiv` · `todo_enrich_equiv`(6 项配置覆盖) | 装置拿改造前源码树的**占位符默认值**比新侧的**开发兜底值** ⇒ 两侧应在**同一套部署面真值 env** 下比（装置本意是比行为，不是比占位符状态）。**不许改判据迁就** |
+| 待细查 | `chat_svc_http_equiv`(34/311) · `target_profile_equiv`(19/21) | `/login` 302 一类；`<user>@<node>` 占位符 + 目标档案口径 |
+| 两仓分叉 · 待拍板 | `group_frontend_equiv` · `team_cli_equiv` | 冻结快照在两仓字节不同（k13：`b4da609f…` vs `58497402…`；team_old_k15：`2c487e78…` vs `8d584d71…`）⇒ 装置**自保护停手**，以谁为准需拍板 |
+| 部署面缺件 | `nodelet_equiv`(1/258) | `tools/deploy_targets.json` 未入仓（部署件批） |
+
+**旧侧来源口径（批⑧ 起）**：装置的旧侧基线取自**源码仓**（`agent-team/` 时期的提交在
+`../多Agent相互协作`，本仓是整改后的新仓、不含那段历史）。`SRC_REPO` 解析顺序：
+env `HACS_SOURCE_REPO` → 同级目录兜底 → 退回本仓（不静默）。凡比 `agent-team/…` 旧侧、
+或比 `node/l0_host` 默认值的格，都必须走这条。
+
+**两条硬纪律（批⑧ 换来的）**：
+1. **从源码仓补冻结快照前必须先扫真值** —— 源码仓的件带真值 IP，而本仓**要对外发布**；
+   快照的契约是「一字不改」⇒ 不可能脱敏 ⇒ 带真值的**一律不收**。
+2. **装置有写副作用** —— `materialize_old()` 会**覆盖式写入** `_old/*.py`：跑一次装置就把
+   仓内冻结快照改了。**跑完装置必须 `git status` 核一遍**，被改的 `_old/` 一律还原。

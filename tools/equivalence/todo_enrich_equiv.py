@@ -42,6 +42,12 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+#: 旧侧基线的**来源仓**：`agent-team/` 时期的提交（改造前的源码）在**源码仓**里，
+#: 本仓是整改后的新仓、不含那段历史。env 可覆盖；同级目录兜底；找不到就退回本仓（不静默）。
+SRC_REPO = os.environ.get("HACS_SOURCE_REPO") or os.path.join(os.path.dirname(REPO), "多Agent相互协作")
+if not os.path.isdir(os.path.join(SRC_REPO, ".git")):
+    SRC_REPO = REPO
+
 #: 保留注入：`_old/` 冻结快照与 `_SNIPPET_HEADER` 抽出的老代码段按裁定一字不动，
 #: 其中是**裸名** import（`node_paths` / `view_auth` 等）。分层整改后各件归位到包目录，
 #: 裸名再也解析不到，故把它们所在目录一并注入**只供旧侧用**；新侧一律走绝对包名。
@@ -92,7 +98,7 @@ def materialize_old(ref):
         os.makedirs(OLD)
     target = os.path.join(OLD, "chat_svc_old.py")
     raw = subprocess.run(["git", "show", "%s:agent-team/chat_svc.py" % ref],
-                         cwd=REPO, capture_output=True).stdout
+                         cwd=SRC_REPO, capture_output=True).stdout
     if not raw:
         print("取不到 %s:agent-team/chat_svc.py —— ref 写错了？" % ref)
         sys.exit(2)

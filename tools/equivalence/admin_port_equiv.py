@@ -22,6 +22,12 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+#: 旧侧基线的**来源仓**：`agent-team/` 时期的提交（改造前的源码）在**源码仓**里，
+#: 本仓是整改后的新仓、不含那段历史。env 可覆盖；同级目录兜底；找不到就退回本仓（不静默）。
+SRC_REPO = os.environ.get("HACS_SOURCE_REPO") or os.path.join(os.path.dirname(REPO), "多Agent相互协作")
+if not os.path.isdir(os.path.join(SRC_REPO, ".git")):
+    SRC_REPO = REPO
+
 #: 保留注入：OLD 不是包目录 —— `--ref` 落盘的 `teamd_old.py` 只能按裸名装入；
 #: REPO 供新侧绝对包名（`node.l1_transport.teamd`）解析。
 OLD = os.path.join(HERE, "_old")
@@ -32,7 +38,7 @@ def materialize_old(ref):
         os.makedirs(OLD)
     target = os.path.join(OLD, "teamd_old.py")
     raw = subprocess.run(["git", "show", "%s:agent-team/teamd.py" % ref],
-                         cwd=REPO, capture_output=True).stdout
+                         cwd=SRC_REPO, capture_output=True).stdout
     if not raw:
         print("取不到 %s:agent-team/teamd.py —— ref 写错了？" % ref)
         sys.exit(2)
@@ -47,7 +53,12 @@ def main():
     ap.add_argument("--ref", default="HEAD", help="迁移前的 commit/ref")
     args = ap.parse_args()
     materialize_old(args.ref)
-    sys.path[:0] = [OLD, REPO]
+    # 旧侧快照是改造前的件，当年用的是**裸名** import（`import node_paths`）⇒ 得把 L0 目录也喂进 sys.path。
+    # 只补搜索路径，两侧代码一字不动。
+    # 旧侧当年的**裸名** import 依赖（`node_paths` / `web_gateway` …）⇒ 把 L0 目录与源码仓的
+    # agent-team/ 一并喂进 sys.path。只补搜索路径，两侧代码一字不动。
+    sys.path[:0] = [OLD, REPO, os.path.join(REPO, "node", "l0_host"),
+                    os.path.join(SRC_REPO, "agent-team")]
 
     import teamd_old                                            # noqa: E402
     from node.l1_transport import teamd                                                # noqa: E402

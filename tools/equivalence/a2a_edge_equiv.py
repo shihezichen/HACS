@@ -41,6 +41,12 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+#: 旧侧基线的**来源仓**：`agent-team/` 时期的提交（改造前的源码）在**源码仓**里，
+#: 本仓是整改后的新仓、不含那段历史。env 可覆盖；同级目录兜底；找不到就退回本仓（不静默）。
+SRC_REPO = os.environ.get("HACS_SOURCE_REPO") or os.path.join(os.path.dirname(REPO), "多Agent相互协作")
+if not os.path.isdir(os.path.join(SRC_REPO, ".git")):
+    SRC_REPO = REPO
+
 #: 保留注入：`_old/` 冻结快照按裁定一字不动，它内部是**裸名** `import agent_usage`。
 #: 分层整改后该件归 `node/l2_adapter/`，裸名再也解析不到 —— 但这里**不能**只靠目录注入：
 #: 本装置的判据前提是「两侧走的是同一个 agent_usage 模块对象」（见模块 docstring），
@@ -59,7 +65,7 @@ def materialize_old(ref):
         os.makedirs(OLD)
     target = os.path.join(OLD, "a2a_svc_old.py")
     raw = subprocess.run(["git", "show", "%s:agent-team/a2a_svc.py" % ref],
-                         cwd=REPO, capture_output=True).stdout
+                         cwd=SRC_REPO, capture_output=True).stdout
     if not raw:
         print("取不到 %s:agent-team/a2a_svc.py —— ref 写错了？" % ref)
         sys.exit(2)

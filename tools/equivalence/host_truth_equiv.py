@@ -56,6 +56,12 @@ import textwrap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+#: 旧侧基线的**来源仓**：`agent-team/` 时期的提交（改造前的源码）在**源码仓**里，
+#: 本仓是整改后的新仓、不含那段历史。env 可覆盖；同级目录兜底；找不到就退回本仓（不静默）。
+SRC_REPO = os.environ.get("HACS_SOURCE_REPO") or os.path.join(os.path.dirname(REPO), "多Agent相互协作")
+if not os.path.isdir(os.path.join(SRC_REPO, ".git")):
+    SRC_REPO = REPO
+
 #: 保留注入：OLD_DIR 不是包目录，冻结快照 `host_truth_old_k22` 只能按裸名装入；
 #: REPO 供新侧绝对包名（`node.l0_host.node_profile`）解析。
 OLD_DIR = os.path.join(HERE, "_old")
@@ -150,10 +156,19 @@ def _read(path):
         return fh.read()
 
 
+def _read_repo(rel):
+    """表里**新旧路径混用**：新路径（`hub/…` `node/…`）在本仓，`agent-team/…` 时期的在源码仓。
+    先本仓、后退源码仓 —— 不猜、按存在性解析。"""
+    p = os.path.join(REPO, rel)
+    if not os.path.exists(p):
+        p = os.path.join(SRC_REPO, rel)
+    return _read(p)
+
+
 def _git_show(rel):
     """改前树的件内容；git 不可用 / 对象不在时返回 None（只影响自检，不影响比对）。"""
     try:
-        out = subprocess.run(["git", "show", "%s:%s" % (BASE_REV, rel)], cwd=REPO,
+        out = subprocess.run(["git", "show", "%s:%s" % (BASE_REV, rel)], cwd=SRC_REPO,
                              capture_output=True, timeout=60)
     except Exception:                                   # noqa: BLE001 —— 没 git 就跳过自检
         return None
@@ -259,7 +274,7 @@ def new_slice(item):
     """活树里同一条语句的切片（按锚点定位，缓存一次）。"""
     key = item["key"]
     if key not in _NEW_SLICE_CACHE:
-        src = _read(os.path.join(REPO, item["file"]))
+        src = _read_repo(item["file"])
         _NEW_SLICE_CACHE[key] = slice_of(src, item, "活树 " + item["file"])
     return _NEW_SLICE_CACHE[key]
 

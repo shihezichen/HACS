@@ -53,6 +53,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+#: 旧侧基线的**来源仓**：`agent-team/` 时期的提交（改造前的源码）在**源码仓**里，
+#: 本仓是整改后的新仓、不含那段历史。env 可覆盖；同级目录兜底；找不到就退回本仓（不静默）。
+SRC_REPO = os.environ.get("HACS_SOURCE_REPO") or os.path.join(os.path.dirname(REPO), "多Agent相互协作")
+if not os.path.isdir(os.path.join(SRC_REPO, ".git")):
+    SRC_REPO = REPO
+
 #: 保留注入（经子进程 PYTHONPATH）：旧侧冻结快照 `team_old_k15.py` 按裁定一字不动，
 #: 它内部是**裸名** import（`node_paths` / `from nats_client import ...`）。分层整改后
 #: 两件各自归位到包目录里，裸名再也解析不到，故把它们所在目录一并放进 PYTHONPATH；
@@ -77,7 +83,7 @@ def materialize_old(ref):
     if not os.path.isdir(OLD_DIR):
         os.makedirs(OLD_DIR)
     raw = subprocess.run(["git", "show", "%s:agent-team/team.py" % ref],
-                         cwd=REPO, capture_output=True).stdout
+                         cwd=SRC_REPO, capture_output=True).stdout
     if not raw:
         print("取不到 %s:agent-team/team.py —— ref 写错了？" % ref)
         return False
