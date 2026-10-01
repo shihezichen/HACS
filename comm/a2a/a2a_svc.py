@@ -22,11 +22,17 @@ L2 能力的对外表述，放在装配侧而不是通信层，才不会把适�
 argv 原样透传给 a2a_edge.main()。
 """
 
+import os
 import sys
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
-import a2a_edge                     # L1 通信层：A2A 边缘端点实现（传输，不含 Agent 差异）
+# 批⑤c：a2a_edge 已归位 node/l1_transport/a2a/（L1 通信层子包），本件按绝对包名 import，故把仓根放进搜索路径。
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                os.path.dirname(os.path.abspath(__file__))):
+    sys.path.insert(0, _hacs_p)
+
+from node.l1_transport.a2a import a2a_edge  # L1 通信层：A2A 边缘端点实现（传输，不含 Agent 差异）
 import agent_usage                  # L2 适配层：水位/窗口/后端判定/会话头单一实现
 
 # 对外可见的版本号仍由 L1 实现件持有（Server 头 / healthz / Agent Card 同一份）。

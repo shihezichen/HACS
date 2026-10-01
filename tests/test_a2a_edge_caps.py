@@ -88,7 +88,7 @@ def case_not_installed(a2a_edge):
 # ---------------------------------------------------------------- ② 注入后
 def case_installed(a2a_edge):
     import agent_usage
-    import a2a_svc
+    from comm.a2a import a2a_svc
 
     used_want, window_want = 123_456, 200_000
     calls = []
@@ -145,7 +145,7 @@ def case_residue():
 
 
 def main():
-    import a2a_edge
+    from node.l1_transport.a2a import a2a_edge
     case_not_installed(a2a_edge)
     case_installed(a2a_edge)
     case_residue()

@@ -1,4 +1,4 @@
-# comm/a2a/ — A2A 桥（Agent → Agent 直投）
+# node/l1_transport/a2a/ — A2A 桥（Agent → Agent 直投）
 
 每个成员节点自己监听 **9920** 的 A2A 端点服务。调用方带 `Authorization: Bearer <token>`，
 服务端**只用 token 的 sha256 反查 `peers.json`** 得到真实成员 id —— 绝不采信请求体里的 `from` 字段。

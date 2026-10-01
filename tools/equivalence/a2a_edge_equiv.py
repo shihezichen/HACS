@@ -276,8 +276,8 @@ def main():
     time.time = lambda: FROZEN_TS                               # 冻结时钟（见模块 docstring）
 
     import a2a_svc_old                                          # noqa: E402
-    import a2a_svc                                              # noqa: E402
-    import a2a_edge                                             # noqa: E402
+    from comm.a2a import a2a_svc                                # noqa: E402
+    from node.l1_transport.a2a import a2a_edge                  # noqa: E402
 
     a2a_svc.install()                                           # 组合根装配：L2 能力 → L1 端口
     setup_runtime(a2a_svc_old.Runtime)
