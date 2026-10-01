@@ -15,6 +15,24 @@
   header h1{font-size:15px;margin:0;font-weight:600}
   #who{color:var(--dim);font-size:12px}
   #who b{color:var(--ok)}
+  /* #presence：顶部 Agent 在线态条（在线绿点 / 离线灰显 / 未知黄点） */
+  #agentbar{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:5px 14px;
+            min-height:30px;border-bottom:1px solid var(--line);background:#12151d;
+            overflow:hidden;font-size:12px}
+  #agentbar .abt{color:var(--dim);font-size:10px;letter-spacing:.8px;flex:0 0 auto}
+  #agentbar .ablist{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;flex:1 1 auto}
+  #agentbar .absum{color:var(--dim);font-size:10px;margin-left:2px;flex:0 0 auto}
+  .abchip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:99px;
+          border:1px solid var(--line);background:#1a1e28;white-space:nowrap}
+  .abchip .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:0 0 auto}
+  .abchip em{font-style:normal;font-size:10px;color:var(--dim)}
+  .abchip.on{border-color:#245a3c}
+  .abchip.on .dot{background:var(--ok);box-shadow:0 0 6px rgba(55,192,122,.75)}
+  .abchip.on em{color:var(--ok)}
+  .abchip.off{opacity:.6;border-color:#3a2b2b;background:#1b1a1e}
+  .abchip.off .dot{background:#5d6577}
+  .abchip.off em{color:#9a7474}
+  .abchip.unk .dot{background:var(--warn)}
   .spacer{flex:1}
   main{flex:1 1 auto;min-height:0;display:grid;
        grid-template-columns:var(--hx-aside-w) var(--hx-split-w) 1fr;

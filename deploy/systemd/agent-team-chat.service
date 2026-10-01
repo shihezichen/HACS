@@ -1,5 +1,5 @@
 [Unit]
-Description=Agent Team Chat (人机对话台后端, tailnet 9980)
+Description=Agent Team Chat (人机对话台后端, tailnet 9984)
 After=network-online.target
 Wants=network-online.target
 
@@ -10,7 +10,9 @@ User=root
 EnvironmentFile=<deploy-dir>/pg.env
 Environment=CHAT_SESSION_KEY_FILE=<deploy-dir>/view-session.key
 Environment=CHAT_AGENTS_JSON=<deploy-dir>/agents.json
-ExecStart=/usr/bin/python3 <deploy-dir>/chat_svc.py --host <host> --port 9980 --log-level INFO
+# 多节点名册：线上另加 drop-in <systemd-dir>/agent-team-chat-9984.service.d/20-roster.conf
+#   Environment=CHAT_AGENTS_JSON=<deploy-dir>/agents.json:<deploy-dir>/agents-<node>.json
+ExecStart=/usr/bin/python3 <deploy-dir>/chat_svc.py --host <host> --port 9984 --log-level INFO
 Restart=always
 RestartSec=3
 StandardOutput=journal

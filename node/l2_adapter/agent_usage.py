@@ -41,8 +41,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
 from os.path import abspath, dirname
@@ -380,29 +382,79 @@ def fmt(used: int, window: int) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------- 远端回退的护栏
+# 2026-09-29 事故：chat_svc 对**每条** agent 发言同步回调本节点 a2a 取水位，对端不可达时
+# timeout=5.0 **逐条累加**，读接口整体挂起 → 试用台卡在「身份读取中」。
+# 三层护栏（只作用于**远端**回退；本机直读不受任何影响）：
+#   ① 短超时：默认 1.5s（`CTX_A2A_TIMEOUT_S` 可覆盖，允许 0.2~30），最坏单次代价可控；
+#   ② 熔断器：一次网络失败后 20s 内直接返回 None —— 不对同一个死对端反复砸；
+#   ③ 结果缓存：命中 30s / 未命中 10s，同一会话的多次渲染不再重复打网络。
+# 熔断只由**异常**（连不上/超时/HTTP 错）触发：对端活着只是没数据（ok=false）不算故障。
+_REMOTE_TIMEOUT_S = 1.5
+_REMOTE_BREAKER_S = 20.0
+_REMOTE_TTL_HIT_S = 30.0
+_REMOTE_TTL_MISS_S = 10.0
+_REMOTE_CACHE_MAX = 512
+_REMOTE_CACHE = {}       # type: Dict[Tuple[str, str], Tuple[float, Optional[Dict[str, Any]]]]
+_REMOTE_BREAK_UNTIL = 0.0    # type: float  —— 熔断截止（time.time() 口径）
+
+
+def remote_timeout() -> float:
+    """远端回退的单次超时（秒）；配错值一律回落到默认，绝不放任长超时。"""
+    try:
+        value = float(os.environ.get("CTX_A2A_TIMEOUT_S") or _REMOTE_TIMEOUT_S)
+    except (TypeError, ValueError):
+        return _REMOTE_TIMEOUT_S
+    return value if 0.2 <= value <= 30.0 else _REMOTE_TIMEOUT_S
+
+
+def _cache_put(key, value):
+    if len(_REMOTE_CACHE) >= _REMOTE_CACHE_MAX:
+        # 超上限先丢最老的一半（无界增长会把长跑进程拖成内存洞）
+        for k in sorted(_REMOTE_CACHE, key=lambda k: _REMOTE_CACHE[k][0])[:_REMOTE_CACHE_MAX // 2]:
+            _REMOTE_CACHE.pop(k, None)
+    _REMOTE_CACHE[key] = (time.time(), value)
+
+
 def read_remote(caller: str, session_id: str) -> Optional[Dict[str, Any]]:
-    """调本节点 a2a 服务的 /ctx-usage（同机同源）拿真源水位。读不到返回 None。"""
+    """调本节点 a2a 服务的 /ctx-usage（同机同源）拿真源水位。读不到返回 None。
+
+    带护栏：短超时 + 失败熔断 + TTL 缓存（见上方常量）。任何异常一律降级为 None ——
+    读不到就不渲染，**绝不编造数字**，也绝不拖慢调用方。
+    """
+    global _REMOTE_BREAK_UNTIL
     base = a2a_remote_base()
     token = a2a_remote_token()
     if not base or not token:
         return None
+    key = (caller, session_id)
+    now = time.time()
+    cached = _REMOTE_CACHE.get(key)
+    if cached is not None:
+        age, val = cached
+        if age > 0 and now - age < (_REMOTE_TTL_HIT_S if val else _REMOTE_TTL_MISS_S):
+            return val
+    if now < _REMOTE_BREAK_UNTIL:
+        return None      # 熔断窗口内：不对死对端砸网络，直接降级
+    result = None
     try:
         url = "%s/ctx-usage/%s?session_id=%s" % (
             base.rstrip("/"), urllib.parse.quote(caller, safe=""),
             urllib.parse.quote(session_id, safe=""))
         req = urllib.request.Request(url)
         req.add_header("Authorization", "Bearer " + token)
-        with urllib.request.urlopen(req, timeout=5.0) as resp:
+        with urllib.request.urlopen(req, timeout=remote_timeout()) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
-        if not isinstance(data, dict) or not data.get("ok"):
-            return None
-        used, window = int(data.get("used") or 0), int(data.get("window") or 0)
-        if window <= 0 or used < 0:
-            return None
-        return fmt(used, window)
-    except Exception as exc:  # noqa: BLE001
+        if isinstance(data, dict) and data.get("ok"):
+            used, window = int(data.get("used") or 0), int(data.get("window") or 0)
+            if window > 0 and used >= 0:
+                result = fmt(used, window)
+    except Exception as exc:  # noqa: BLE001 —— 对端不可达：记熔断、降级
         LOG.debug("远端 ctx-usage 失败(%s)", exc)
-        return None
+        _REMOTE_BREAK_UNTIL = time.time() + _REMOTE_BREAKER_S
+        result = None
+    _cache_put(key, result)
+    return result
 
 
 def read_watermark(caller: str, session_id: str,

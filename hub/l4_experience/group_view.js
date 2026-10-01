@@ -430,6 +430,40 @@ function logReset() {
 // 调试句柄（无头断言用）
 window.__h460 = { topicResolve: topicResolve, topicReset: topicReset, topicUpdateCount: topicUpdateCount };
 
+// #presence：顶部 Agent 在线态条。
+//   口径：online===true 在线；false 离线（灰显）；null/undefined = 未知（还没探到，不谎报离线）。
+//   数据源 /api/agents，30s 自刷新一次（服务端按节点 a2a 探活，探测在它自己的后台线程里）。
+function renderAgentBar() {
+  const box = $("ablist"); if (!box) return;
+  if (!AGENTS.length) {
+    box.innerHTML = '<span class="note">没取到 Agent 名册（/api/agents）。</span>';
+    return;
+  }
+  const rank = a => (a.online === true ? 0 : (a.online === false ? 1 : 2));
+  const list = AGENTS.slice().sort((a, b) =>
+    rank(a) - rank(b) || String(mid(a)).localeCompare(String(mid(b))));
+  const onN = list.filter(a => a.online === true).length;
+  box.innerHTML = list.map(a => {
+    const on = a.online === true, off = a.online === false;
+    const cls = on ? "on" : (off ? "off" : "unk");
+    const tag = on ? "在线" : (off ? "离线" : "未知");
+    const m = a.meta || {};
+    const tip = [a.id || "", m.node_id ? "节点 " + m.node_id : "",
+                 m.host ? "(" + m.host + ")" : "", m.model ? "模型 " + m.model : "",
+                 a.last_hb_at ? "心跳 " + a.last_hb_at : "", tag].filter(Boolean).join(" · ");
+    return '<span class="abchip ' + cls + '" title="' + esc(tip) + '" data-a="' + esc(mid(a)) + '">' +
+           '<i class="dot"></i>' + esc(a.display || a.id || mid(a)) + '<em>' + tag + '</em></span>';
+  }).join("") + '<span class="absum">在线 ' + onN + ' / ' + list.length + '</span>';
+}
+
+async function refreshAgents() {
+  try {
+    const d = await api("GET", "/api/agents");
+    if (d && d.agents) AGENTS = d.agents;
+  } catch (e) { /* 取不到就沿用上一次名册（顶部不闪成空） */ }
+  renderAgentBar();
+}
+
 async function boot() {
   try {
     WHO = await api("GET", "/api/whoami");
@@ -438,7 +472,7 @@ async function boot() {
       ? '身份：<b>' + esc(u.role_cn || u.role) + '</b>（' + esc(u.source || "") + ' 免登录）'
       : '身份：<b>' + esc(u.display || u.name || "?") + '</b>';
   } catch (e) { $("who").textContent = "身份读取失败：" + e.message; }
-  try { AGENTS = (await api("GET", "/api/agents")).agents || []; } catch (e) { AGENTS = []; }
+  await refreshAgents();     // #presence：名册 + 在线态条一起到位
   await loadGroups();
   // 刷新后回到上次看的那个群（否则刷完一片空白，看着像"聊天记录丢了"）
   let last = null;
@@ -883,7 +917,7 @@ $("gok").onclick = createGroup;
 $("addagent").onclick = openAddDialog;
 $("addcancel").onclick = () => $("adddlg").close();
 $("addok").onclick = addAgentsToGroup;
-$("refresh").onclick = () => { loadGroups().then(() => { if (CUR) pull(); }).catch(e => alert(e.message)); };
+$("refresh").onclick = () => { refreshAgents(); loadGroups().then(() => { if (CUR) pull(); }).catch(e => alert(e.message)); };
 $("send").onclick = send;
 $("closebtn").onclick = closeGroup;
 $("text").addEventListener("input", () => { updHint(); acCheck(); });   // 手打 @ 出联想
@@ -1437,7 +1471,11 @@ if ($("tgall")) $("tgall").addEventListener("click", () => {
   topicsAll(closed < all);        // 还有展开的 → 全折；已全折 → 全开
 });
 
+// #presence：在线态每 30s 自刷新（页面挂着不动也一直新）
+setInterval(() => { refreshAgents().catch(() => {}); }, 30000);
+
 // 自测句柄（真机实测读内部状态用；不改变任何行为）
+window.__hP = { renderAgentBar, refreshAgents, agents: () => AGENTS };
 window.__h476 = { MSGCACHE, REFPOP, linkRefs, refOpen, refClose, refToggle,
                   refPinToggle, refPinApply, refPinsFor, refPopsRestore, refPopsReset,
                   src: () => REFSRC, fetchMsg: refFetchMsg };

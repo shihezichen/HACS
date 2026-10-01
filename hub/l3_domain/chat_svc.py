@@ -1084,6 +1084,8 @@ class Roster(object):
                     "display": str(spec.get("display") or display_of(member_id)),
                     "node_id": node_id,
                     "host": host,
+                    # 节点 a2a 端口（在线态探活用）；没写就交给调用方兜默认值
+                    "node_port": int(data.get("port") or 0),
                     "model": str(spec.get("model") or ""),
                     "description": str(spec.get("description") or ""),
                     "skills": spec.get("skills") or [],
@@ -1737,8 +1739,12 @@ class ChatDB(object):
         """加人 / 踢人（无人时返 changed=[]）。
 
         乐观并发：`WHERE members = <我读到的旧值>`，两个人同时改必有一个返 0 行。
-        踢人顺带把其名下待回应账作废（摘掉 needs_response 里的该成员），
-        否则人走了账还挂着，群里永久挂红。两件事在同一事务里。
+
+        踢人**不改写历史**：`chat_messages` 是 append-only（UPDATE/DELETE 被触发器一律拒），
+        所以"人走了账还挂着"由**成员资格**兜住，而不是去改那条消息的 meta：
+          · `_can_read_session` 要求具名访客在成员表里 → 被踢的人读不到群，也就看不到自己的待办；
+          · `group_watch` 只遍历当前 members → 被踢的人不会再被唤醒。
+        返回的 `voided` 是**只读统计**（其名下因此失效的账目条数），仅供 UI 提示。
         """
         rows = self.query(
             "SELECT %s FROM chat_sessions WHERE session_id = %%s" % SESSION_COLUMNS,
@@ -1754,44 +1760,58 @@ class ChatDB(object):
         changed = [m for m in new_ids if m not in old_ids]
         left = [m for m in old_ids if m not in new_ids]
         if not changed and not left:
-            return {"session": old, "added": [], "removed": [], "voided": 0}
+            return {"session": old, "added": [], "removed": [], "voided": 0,
+                    "cleared_todos": 0}
+
+        # 踢人前只读盘点其名下未结待办（事务内按 id 精确清；盘点放事务外只为拿条数上报）
+        left_todo_ids = []  # type: List[str]
+        if left:
+            left_todo_ids = [r[0] for r in self.query(
+                "SELECT todo_id FROM chat_session_todos"
+                " WHERE session_id = %s AND owner = ANY(%s::text[])"
+                " AND status IN ('open', 'doing')",
+                [session_id, list(left)])]
 
         statements = [
             ("SELECT pg_advisory_xact_lock(hashtext(%s))", [session_id]),
+        ]
+        if left_todo_ids:
+            # 踢人顺带结清其名下未结待办：人离群了，账不能永久挂红（todo 表状态可变，
+            # 与 chat_messages 的 append-only 无关；留痕由随后的系统消息承担）。
+            statements.append((
+                "UPDATE chat_session_todos SET status = 'done', cleared_at = now(),"
+                " cleared_by = %s, updated_at = now()"
+                " WHERE session_id = %s AND todo_id = ANY(%s::text[])"
+                " AND status IN ('open', 'doing')",
+                [actor, session_id, left_todo_ids]))
+        statements.append(
             ("UPDATE chat_sessions SET members = %s::jsonb, updated_at = now()"
              " WHERE session_id = %s AND members = %s::jsonb"
              " RETURNING " + SESSION_COLUMNS,
              [json.dumps(new_ids, ensure_ascii=False), session_id,
-              json.dumps(old_ids, ensure_ascii=False)]),
-        ]
+              json.dumps(old_ids, ensure_ascii=False)]))
+        result = self.execute_tx(statements)
+        # execute_tx 只回最后一条语句的行 = UPDATE 后的会话行。
+        updated_rows = result
         voided = 0
         if left:
-            statements.append((
-                "UPDATE chat_messages SET meta = jsonb_set("
-                " meta, '{needs_response}',"
-                " COALESCE((SELECT jsonb_agg(e) FROM"
-                "  jsonb_array_elements(meta->'needs_response') e"
-                "  WHERE NOT (e = ANY (SELECT to_jsonb(u) FROM unnest(%s::text[]) u))),"
-                " '[]'::jsonb))"
-                " WHERE session_id = %s"
-                " AND meta->'needs_response' ?| %s::text[]"
-                " RETURNING seq",
-                [list(left), session_id, list(left)]))
-        result = self.execute_tx(statements)
-        # execute_tx 只回最后一条语句的行：有踢人时是作废统计，否则是 UPDATE 后的会话行。
-        if left:
-            voided = len(result or [])
-            updated_rows = self.query(
-                "SELECT %s FROM chat_sessions WHERE session_id = %%s" % SESSION_COLUMNS,
-                [session_id])
-        else:
-            updated_rows = result
+            # 只读统计（不改写消息 —— chat_messages 是 append-only，UPDATE 会被触发器拒，
+            # 曾因此让整个踢人事务失败、接口回 503）：其名下"还没回、且此后没再发过言"的账目条数。
+            cnt = self.query(
+                "SELECT count(*)::int FROM chat_messages m"
+                " WHERE m.session_id = %s"
+                " AND m.meta->'needs_response' ?| %s::text[]"
+                " AND m.seq > COALESCE((SELECT max(t.seq) FROM chat_messages t"
+                "   WHERE t.session_id = %s AND t.author_id = ANY(%s::text[])), 0)",
+                [session_id, list(left), session_id, list(left)])
+            voided = int(cnt[0][0]) if cnt else 0
         if not updated_rows:
             raise RequestError(409, "members_conflict",
                                "成员表刚被其他人改过，请刷新后重试")
         return {
             "session": self._row_to_session(updated_rows[0]),
             "added": changed, "removed": left, "voided": voided,
+            "cleared_todos": len(left_todo_ids),
         }
 
     def add_message(self, session_id: str, author_type: str, author_id: str,
@@ -2363,6 +2383,134 @@ def todo_enrich_submit(item: Optional[Dict[str, Any]],
         return False
 
 
+# ------------------------------------------------------------------ 在线态（presence）
+# 契约 §B.1 的 online / last_hb_at 原先一律为 None（"本版不猜"）。2026-09-29 起改为
+# **按节点探活**：名册里每个节点各跑一个 a2a（默认 :9920），GET /healthz 通即该节点可达；
+# 节点不可达 = 该节点上的 Agent 叫不醒（群里 @ 不到它们）—— 这正是用户要的「在线 / 离线」。
+#
+# 三条硬纪律（2026-09-29「身份读取中」事故的教训，别重犯）：
+#   ① 探测只在**独立后台线程**里跑、带 TTL；请求路径只读它的内存快照，
+#      绝不在渲染路径上发同步网络调用（事故根因就是无缓存的同步回调逐条累加超时）；
+#   ② 单次探测超时 1.5s，且每个节点各自 try —— 一个节点死不透支别的节点；
+#   ③ 探不到就是 None（"还不知道"），前端按「未知」显示，绝不谎报在线。
+PRESENCE_INTERVAL_S = 25.0
+PRESENCE_TIMEOUT_S = 1.5
+PRESENCE_RETRY_S = 0.3        # 单节点失败后的重试间隔（见 probe）
+PRESENCE_FIRST_DELAY_S = 3.0  # 首轮延后：与节点同批重启时别抢在它监听之前探
+PRESENCE_PORT_DEFAULT = 9920
+
+
+class PresenceProbe(threading.Thread):
+    """按节点探活的在线态缓存：{node_id: {"up","at","agents","rtt_ms","err"}}。"""
+
+    def __init__(self, interval: float = PRESENCE_INTERVAL_S) -> None:
+        super(PresenceProbe, self).__init__(name="presence", daemon=True)
+        self.interval = max(5.0, float(interval))
+        self._lock = threading.Lock()
+        self._nodes = {}    # type: Dict[str, Dict[str, Any]]
+        self._round = 0
+
+    def node_targets(self) -> Dict[str, Tuple[str, int]]:
+        """名册里的节点 → (host, port)。缺 host 的跳过（探不动就不猜）。"""
+        out = {}    # type: Dict[str, Tuple[str, int]]
+        roster = getattr(Runtime, "roster", None)
+        for member in (roster.all() if roster else []):
+            node = str(member.get("node_id") or "").strip()
+            host = str(member.get("host") or "").strip()
+            if not node or not host:
+                continue
+            try:
+                port = int(member.get("node_port") or 0) or PRESENCE_PORT_DEFAULT
+            except (TypeError, ValueError):
+                port = PRESENCE_PORT_DEFAULT
+            out.setdefault(node, (host, port))
+        return out
+
+    def probe(self, host: str, port: int, attempts: int = 2) -> Dict[str, Any]:
+        """探一个节点；失败重试一次。
+
+        冷启动（本服务与对端节点同批重启）时首轮常糊一口：只探一次就会先亮一片
+        「离线」，25s 后才自愈，观感很差。重试只在**失败**时发生，最多多花 1.5s，
+        且都在后台线程里 —— 请求路径读的仍是缓存快照。
+        """
+        rec = {"up": False, "at": time.time(), "agents": [], "rtt_ms": None, "err": ""}
+        for i in range(max(1, int(attempts))):
+            rec = self._probe_once(host, port)
+            if rec.get("up"):
+                return rec
+            if i + 1 < max(1, int(attempts)):
+                time.sleep(PRESENCE_RETRY_S)
+        return rec
+
+    def _probe_once(self, host: str, port: int) -> Dict[str, Any]:
+        rec = {"up": False, "at": time.time(), "agents": [], "rtt_ms": None, "err": ""}
+        t0 = time.time()
+        try:
+            url = "http://%s:%d/healthz" % (host, int(port))
+            with urllib.request.urlopen(urllib.request.Request(url),
+                                        timeout=PRESENCE_TIMEOUT_S) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            rec["rtt_ms"] = int((time.time() - t0) * 1000)
+            if isinstance(data, dict) and data.get("ok"):
+                rec["up"] = True
+                ids = data.get("agents")
+                if isinstance(ids, list):
+                    rec["agents"] = [str(x) for x in ids]
+        except Exception as exc:    # noqa: BLE001 —— 探活失败只记不说，绝不影响主流程
+            rec["rtt_ms"] = int((time.time() - t0) * 1000)
+            rec["err"] = scrubbed(exc)[:120]
+        return rec
+
+    def round(self) -> None:
+        snap = {}    # type: Dict[str, Dict[str, Any]]
+        for node, (host, port) in self.node_targets().items():
+            snap[node] = self.probe(host, port)     # 每节点独立 try，互不拖累
+        with self._lock:
+            self._nodes = snap
+            self._round += 1
+
+    def run(self) -> None:
+        time.sleep(PRESENCE_FIRST_DELAY_S)   # 与节点同批重启时，先给它一点起监听的时间
+        while True:
+            try:
+                self.round()
+            except Exception as exc:    # noqa: BLE001
+                LOG.debug("在线态探测轮失败：%s", scrubbed(exc))
+            time.sleep(self.interval)
+
+    # --- 查询：请求路径只走这里（纯内存，绝不阻塞） ------------------------
+    def state_of(self, member: Dict[str, Any]) -> Tuple[Optional[bool], Optional[str]]:
+        """→ (online|None, last_hb_at|None)。None = 还没探到（前端显示「未知」）。"""
+        node = str(member.get("node_id") or "")
+        with self._lock:
+            rec = dict(self._nodes.get(node) or {})
+        if not rec:
+            return None, None
+        if not rec.get("up"):
+            return False, None
+        at = rec.get("at")
+        stamp = iso_bj(datetime.datetime.fromtimestamp(float(at), UTC)) if at else None
+        ids = rec.get("agents") or []
+        aid = str(member.get("id") or "")
+        if ids and aid and aid not in ids:
+            # 节点活着，但它 a2a 报的 agent 清单里没这个 id（名册漂移）——同样算不在线
+            return False, stamp
+        return True, stamp
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            nodes = {k: dict(v) for k, v in self._nodes.items()}
+            rnd = self._round
+        now = time.time()
+        return {"round": rnd, "interval_s": self.interval, "nodes": {
+            node: {"up": bool(rec.get("up")),
+                   "age_s": int(now - float(rec.get("at") or now)),
+                   "rtt_ms": rec.get("rtt_ms"),
+                   "agents": rec.get("agents") or [],
+                   "err": rec.get("err") or ""}
+            for node, rec in nodes.items()}}
+
+
 # ------------------------------------------------------------------ 运行时
 
 class Runtime(object):
@@ -2374,6 +2522,7 @@ class Runtime(object):
     session_key = None       # type: Optional[bytes]
     ui_dir = None            # type: Optional[str]        —— 同源托管的静态根
     enricher = None          # type: Optional[TodoEnricher] —— #541 模型富化 worker
+    presence = None          # type: Optional[PresenceProbe] —— 节点在线态探测（只读缓存）
     started_at = 0.0
     allow_login = False      #: 是否对外提供 /login（v1：只复用看板，不自己发）
 
@@ -2385,6 +2534,7 @@ class Runtime(object):
         cls.session_key = None
         cls.ui_dir = None
         cls.enricher = None
+        cls.presence = None
         cls.allow_login = False
 
 
@@ -3211,7 +3361,14 @@ class ChatHandler(_GatewayHandler):
             # 留痕：一条系统消息，不可恢复、删不掉（群协议：成员变更必须可追溯）
             detail = "、".join(moved)
             if method == "DELETE":
-                extra = "；其名下 %d 条待回应已作废（不可恢复）" % outcome["voided"]
+                # 消息账不改写（append-only）：被踢的人读不到群、也不会再被唤醒，其名下未回的
+                # 账自然失效；todo 账则**同事务结清**（否则台账永久挂红）。这里把两类都说清楚。
+                bits = []
+                if outcome["voided"]:
+                    bits.append("%d 条待回应已随其离群失效（无需再回）" % outcome["voided"])
+                if outcome.get("cleared_todos"):
+                    bits.append("%d 条未结待办已结清" % outcome["cleared_todos"])
+                extra = ("；" + "；".join(bits)) if bits else ""
             else:
                 extra = ""
             Runtime.db.add_message(
@@ -3225,6 +3382,7 @@ class ChatHandler(_GatewayHandler):
             "added": outcome["added"],
             "removed": outcome["removed"],
             "voided": outcome["voided"],
+            "cleared_todos": outcome.get("cleared_todos", 0),
             "server_time": iso_bj(datetime.datetime.now(UTC)),
         }
 
@@ -4152,6 +4310,9 @@ class ChatHandler(_GatewayHandler):
             **BUILD_STAMP,
             "db": db_ok,
             "members": len(roster.ids()) if roster else 0,
+            # 在线态快照（节点可达性；探活线程的最近一轮）
+            "presence": (Runtime.presence.snapshot()
+                         if getattr(Runtime, "presence", None) else {"nodes": {}}),
             # #541：模型富化 worker 的实况（running/queued/done/fallback/not_task）
             "enrich": (Runtime.enricher.stats_snapshot()
                        if getattr(Runtime, "enricher", None) else {"running": False}),
@@ -4175,15 +4336,22 @@ class ChatHandler(_GatewayHandler):
 
     def _agents(self, visitor: Visitor) -> Dict[str, Any]:
         roster = Runtime.roster
+        probe = getattr(Runtime, "presence", None)
         items = []
         for member in (roster.all() if roster else []):
+            online, last_hb = None, None
+            if probe is not None:
+                try:
+                    online, last_hb = probe.state_of(member)
+                except Exception as exc:    # noqa: BLE001 —— 在线态是增强能力，不拖垮名册
+                    LOG.debug("在线态读取失败：%s", scrubbed(exc))
             items.append({
                 "id": member["id"],
                 "display": member["display"],
-                # 在线态要订阅 NATS 心跳（v1.1 §B.1）—— 本版不猜，一律 None
-                "online": None,
+                # 在线态 = 所在节点 a2a 可达（见 PresenceProbe）；探不到为 None
+                "online": online,
                 "busy": None,
-                "last_hb_at": None,
+                "last_hb_at": last_hb,
                 "meta": {
                     "node_id": member.get("node_id") or "",
                     "host": member.get("host") or "",
@@ -4191,7 +4359,8 @@ class ChatHandler(_GatewayHandler):
                     "description": member.get("description") or "",
                 },
             })
-        items.sort(key=lambda it: it["id"])
+        # 在线的排前面（未知 / 离线靠后），同级按 id
+        items.sort(key=lambda it: (it["online"] is not True, it["id"]))
         return {"ok": True, "agents": items, "server_time": iso_bj(datetime.datetime.now(UTC))}
 
     def _sessions(self, visitor: Visitor, query: Dict[str, List[str]]) -> Dict[str, Any]:
@@ -4812,6 +4981,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # 条目一律保留规则名 —— 服务照常跑，模型不是命门。
     if getattr(Runtime, "enricher", None) is not None:
         Runtime.enricher.start()
+
+    # 在线态探测（独立后台线程；请求路径只读它的缓存，永不阻塞渲染）
+    if getattr(Runtime, "presence", None) is None:
+        Runtime.presence = PresenceProbe()
+    Runtime.presence.start()
 
     httpd = ThreadingHTTPServer((args.host, args.port), ChatHandler)
     httpd.daemon_threads = True
