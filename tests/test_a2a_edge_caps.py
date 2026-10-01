@@ -28,8 +28,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 AG = os.path.dirname(HERE)
 sys.path.insert(0, AG)
 
-EDGE_SRC = os.path.join(AG, "a2a_edge.py")
-ROOT_SRC = os.path.join(AG, "a2a_svc.py")
+# 批⑤c/⑤d 归位后按真实层级取路径（原写法假设两件与本文件同级的扁平目录）
+EDGE_SRC = os.path.join(AG, "node", "l1_transport", "a2a", "a2a_edge.py")
+ROOT_SRC = os.path.join(AG, "node", "c", "a2a_svc.py")
 
 TOKEN = "caps-test-token-abc123"
 TOKEN_SHA = hashlib.sha256(TOKEN.encode("utf-8")).hexdigest()
@@ -87,8 +88,8 @@ def case_not_installed(a2a_edge):
 
 # ---------------------------------------------------------------- ② 注入后
 def case_installed(a2a_edge):
-    import agent_usage
-    from comm.a2a import a2a_svc
+    from backend import agent_usage
+    from node.c import a2a_svc
 
     used_want, window_want = 123_456, 200_000
     calls = []

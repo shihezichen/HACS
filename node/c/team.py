@@ -57,7 +57,8 @@ import sys
 import time
 
 # 批① 起被搬件按绝对包名 import，故把仓根一并放进搜索路径（本目录仍在最前）。
-for _hacs_p in (os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+# 批⑤d：本件由 backend/（仓根下 1 跳）归位 node/c/（仓根下 2 跳），故仓根多拆一层 dirname。
+for _hacs_p in (os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                 os.path.dirname(os.path.abspath(__file__))):
     sys.path.insert(0, _hacs_p)
 
@@ -95,7 +96,8 @@ from node.l1_transport.team_cli_core import (  # noqa: E402  L1 通信层：连�
     rollback_dedup,
     run_pool,
 )   # cmd_who/cmd_say/cmd_broadcast + say 辅助函数：L1 实现，C 侧只做 re-export（属性面不变）
-from team_group import (  # noqa: E402  L3 协作域：群聊 + 会议（C 侧只做 re-export，属性面与搬迁前一致）
+# 批⑤d 过渡：team_group 仍在 backend/（⑤f 搬入 hub/l3_domain/ 后再改一次，届时无需再改此处）。
+from backend.team_group import (  # noqa: E402  L3 协作域：群聊 + 会议（C 侧只做 re-export，属性面与搬迁前一致）
     DEFAULT_CHAT_BASE,
     DEFAULT_MEETINGS_FILE,
     append_jsonl,
