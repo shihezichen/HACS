@@ -58,6 +58,11 @@
       "port": null,
       "note": "L3 协作域：成员侧 CLI 的群聊 + 会议业务（刀15 阶段3 从 L1 team.py 逐字节搬入，零行为改变）。临时会议 meet（make_session_id / build_meeting_body / append_jsonl / cmd_meet）＋会议回放 history（cmd_history）＋临时群 group（_chat_call / _chat_member / _chat_error / cmd_group_say / cmd_group_pull / cmd_group_show）＋域内默认值（DEFAULT_MEETINGS_FILE / DEFAULT_CHAT_BASE）。依赖方向 L3→L1 team_cli_core；**不得 import 组合根 team.py**。等价证据 tools/equivalence/team_cli_equiv.py（CLI 级 56 例冻结矩阵）；批⑤f：本件已归位 hub/l3_domain/，引用方改绝对包名"
     },
+    "hub/l3_domain/task_svc.py": {
+      "layer": "L3",
+      "port": 9981,
+      "note": "L3 协作域：群任务清单服务（批⑫-A 从旧仓扁平布局归位入仓；此前只在运行面与旧仓有副本，HACS 内缺席 —— 它是『部署源统一到本仓』清单上最后一件未入仓件）。按群（group_id）隔离的任务队列（优先级 special 优先 + 创建时间）＋ /tasks/next 取队首置 running（at-least-once，dispatch_count 计数）＋ /tasks/report 按 task_id 幂等汇报，并在同一事务里以该 Agent 身份把结果回帖到它领任务的那个群（task_replies 主键 = 幂等闸门，投递失败进后台重投队列，到上限标 dead，绝不静默丢）＋ ack/lease 租约（默认 120s，超时返队列，dispatch_count 到 3 仍超时 → failed 并冻结 chain_id）＋ /chains 冻结链与人工解冻 ＋ kind=reply 的最小派单（只派任务、绝不代写回答正文）。仅标准库 + sqlite3（WAL + 事务），层归属与 L3 同目录件一致（域语义：任务/群/回帖）。**本批只做归位**：改动仅限「裸名 `import node_paths` / `import node_profile` → 绝对包名 `from node.l0_host import …`」+ 仓根 sys.path 注入（照同目录 chat_svc.py / team_group.py 的写法），以及 docstring/文件头注释里 2 处真人昵称改占位符 `<USER>`（对外发布面口径，运行期文案不在本件、未动）；**业务逻辑一行未改**（md5 入仓前 1DF253B62FB14EA8A75248E9B1A6A5E1，与旧仓副本一致；入仓后与源件的差异 = 3 个 hunk，全在 import 形态与注释文案）。部署视图登记见 deploy/deploy_manifest.json（rel ≡ 仓内相对路径）。"
+    },
     "node/l1_transport/team_call.py": {
       "layer": "L1",
       "port": null,
